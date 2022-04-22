@@ -37,3 +37,31 @@ jobs:
         # Artifact name
         name: comic_downloader.exe
         path: dist
+    - name: Generate release tag
+      id: tag
+      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+      run: |
+        echo "::set-output name=release_tag::$(date +"%Y.%m.%d-%H%M")"
+        
+    - name: Upload firmware to release
+      uses: softprops/action-gh-release@v1
+      if: steps.tag.conclusion == 'success' && !cancelled()
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.tag.outputs.release_tag }}
+        files: comic_downloader.exe
+
+    - name: Delete workflow runs
+      uses: GitRML/delete-workflow-runs@main
+      with:
+        retain_days: 1
+        keep_minimum_runs: 3
+
+    - name: Remove old Releases
+      uses: dev-drprasad/delete-older-releases@v0.2.0
+      with:
+        keep_latest: 3
+        delete_tags: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
