@@ -31,16 +31,6 @@ jobs:
     - name: pyinstaller
       run: |
         pyinstaller downloader.spec
-    - name: Upload a Build Artifact
-      uses: actions/upload-artifact@v3.0.0
-      with:
-        # Artifact name
-        name: comic_downloader
-        path: dist
-    - name: release-please-action
-      uses: google-github-actions/release-please-action@v3.1.2
-      with:
-        release-type: python
 
     - name: Delete workflow runs
       uses: GitRML/delete-workflow-runs@main
