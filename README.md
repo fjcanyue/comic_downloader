@@ -7,17 +7,25 @@
 
 ## 安装
 
-1. 下载 [Firefox 驱动](https://github.com/mozilla/geckodriver/releases)，解压后放到可执行Path中
-2. 安装依赖（可选，用源码启动方式必须执行）
+### 安装依赖
+
+下载 [Firefox Gecko 驱动](https://github.com/mozilla/geckodriver/releases)，解压后放到可执行Path中。
+
+### 源代码编译
+1. 安装依赖（可选，用源码启动方式必须执行）。
    
    ```shell
    pip install -r requirements.txt
    ```
-3. 打包二进制文件（可选）
+2. 打包二进制文件（可选）。
 
    ```shell
    pyinstaller downloader.spec
    ```
+
+### 二进制文件
+
+如不想编译，可直接下载[执行文件](https://we.tl/t-rY8Ho1FFWo)。
 
 ## 运行
 
@@ -33,7 +41,7 @@ python main.py <下载路径>
 comic_downloader <下载路径>
 ```
 
-### 使用说明
+## 使用说明
 
 1. 先输入动漫下载网站源，目前支持的网站有：
    * **maofly**: 漫画猫
@@ -42,4 +50,4 @@ comic_downloader <下载路径>
    * **s**: 搜索动漫，输入s <搜索关键字>，例如：s 猎人
    * **d**: 下载动漫，输入s <搜索结果序号/动漫URL地址>，例如：d 12
 
-3. 按 **q** 键退出动漫下载器
+3. 按 **q** 键退出动漫下载器。
