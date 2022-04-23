@@ -35,22 +35,12 @@ jobs:
       uses: actions/upload-artifact@v3.0.0
       with:
         # Artifact name
-        name: comic_downloader.exe
+        name: comic_downloader
         path: dist
-    - name: Generate release tag
-      id: tag
-      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
-      run: |
-        echo "::set-output name=release_tag::$(date +"%Y.%m.%d-%H%M")"
-        
-    - name: Upload firmware to release
-      uses: softprops/action-gh-release@v1
-      if: steps.tag.conclusion == 'success' && !cancelled()
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: release-please-action
+      uses: google-github-actions/release-please-action@v3.1.2
       with:
-        tag_name: ${{ steps.tag.outputs.release_tag }}
-        files: comic_downloader.exe
+        release-type: python
 
     - name: Delete workflow runs
       uses: GitRML/delete-workflow-runs@main
