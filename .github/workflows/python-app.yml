@@ -4,9 +4,7 @@
 name: Python application
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
+  pull_request_target:
     branches: [ main ]
 
 permissions:
@@ -44,10 +42,14 @@ jobs:
         name: comic_downloader.exe
         path: dist
 
-    - name: Generate release tag
-      id: tag
-      run: |
-        echo "::set-output name=release_tag::$(date +"%Y.%m.%d-%H%M")"
+    - name: Draft Release
+      uses: release-drafter/release-drafter@v5
+      with:
+        name: '${{ env.FILE_DATE }} 🌈'
+        tag: '${{ env.FILE_DATE }}'
+        version: '${{ env.FILE_DATE }}'
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Upload artifact to release
       uses: softprops/action-gh-release@v1
@@ -55,7 +57,7 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: ${{ steps.tag.outputs.release_tag }}
+        tag_name: ${{ env.FILE_DATE }}
         files: dist/*
         
     - name: Delete workflow runs
