@@ -31,13 +31,12 @@ jobs:
         pip install pyinstaller
         pyinstaller downloader.spec
         echo "TAG_NAME=%date:~0,4%.%date:~5,2%.%date:~8,2%-%time:~0,2%%time:~3,2%" >> $GITHUB_ENV
-        echo ${{ env.TAG_NAME }}
-        echo "::set-output name=release_tag::$(date +"%Y.%m.%d-%H%M")"
+        echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
     - name: Test env
       run: |
         echo ${{ env.TAG_NAME }}
-        echo ${{ steps.build.outputs.release_tag }}
+        echo ${{ env.FILE_DATE }}
         
     - name: Upload a Build Artifact
       uses: actions/upload-artifact@v3.0.0
