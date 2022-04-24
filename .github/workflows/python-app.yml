@@ -36,12 +36,27 @@ jobs:
       run: |
         pip install pyinstaller
         pyinstaller downloader.spec
+        echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
         
     - name: Upload a Build Artifact
       uses: actions/upload-artifact@v3.0.0
       with:
         name: comic_downloader.exe
         path: dist
+
+    - name: Draft Release
+      uses: release-drafter/release-drafter@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Upload firmware to release
+      uses: softprops/action-gh-release@v1
+      if: steps.tag.conclusion == 'success' && !cancelled()
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ env.FILE_DATE }}
+        files: comic_downloader.exe/*     
         
     - name: Delete workflow runs
       uses: GitRML/delete-workflow-runs@main
