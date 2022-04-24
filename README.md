@@ -25,7 +25,7 @@
 
 ### 二进制文件
 
-如不想编译，可直接下载[执行文件](https://we.tl/t-rY8Ho1FFWo)。
+如不想编译，可访问 [Releases 页面](https://github.com/fjcanyue/comic_downloader/releases/latest)，直接下载 *comic_downloader.exe* 可执行文件。
 
 ## 运行
 
