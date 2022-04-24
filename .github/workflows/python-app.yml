@@ -41,9 +41,9 @@ jobs:
     - name: Draft Release
       uses: release-drafter/release-drafter@v5
       with:
-        name: '${{ env:TAG_NAME }} 🌈'
-        tag: '${{ env:TAG_NAME }}'
-        version: '${{ env:TAG_NAME }}'
+        name: '$env:TAG_NAME 🌈'
+        tag: '$env:TAG_NAME'
+        version: '$env:TAG_NAME'
         publish: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -53,7 +53,7 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: ${{ env:TAG_NAME }}
+        tag_name: $env:TAG_NAME
         files: dist/*
         
     - name: Delete workflow runs
