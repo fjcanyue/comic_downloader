@@ -4,9 +4,6 @@ on:
   repository_dispatch:
   workflow_dispatch:
 
-env:
-  TZ: Asia/Shanghai
-
 jobs:
   build:
     runs-on: windows-2022
@@ -32,6 +29,7 @@ jobs:
 
     - name: Generate tag name
       run: |
+        Set-TimeZone -Id "China Standard Time"
         echo ("TAG_NAME="+((Get-Date).tostring('yyyy.MM.dd-HHmm'))) >> $env:GITHUB_ENV
       shell: powershell
         
