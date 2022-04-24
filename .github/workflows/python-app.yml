@@ -26,11 +26,14 @@ jobs:
         pip install -r requirements.txt
 
     - name: Run pyinstaller
-      id: build
       run: |
         pip install pyinstaller
         pyinstaller downloader.spec
-        echo "TAG_NAME=%date:~0,4%.%date:~5,2%.%date:~8,2%-%time:~0,2%%time:~3,2%" >> $env:GITHUB_ENV
+
+    - name: Generate tag name
+      run: |
+        echo ("TAG_NAME="+((Get-Date).tostring('yyyy.MM.dd-HHmm'))) >> $env:GITHUB_ENV
+      shell: powershell
         
     - name: Upload a Build Artifact
       uses: actions/upload-artifact@v3.0.0
@@ -41,9 +44,9 @@ jobs:
     - name: Draft Release
       uses: release-drafter/release-drafter@v5
       with:
-        name: '$env:TAG_NAME 🌈'
-        tag: '$env:TAG_NAME'
-        version: '$env:TAG_NAME'
+        name: '${{ env.TAG_NAME }} 🌈'
+        tag: '${{ env.TAG_NAME }}'
+        version: '${{ env.TAG_NAME }}'
         publish: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -53,7 +56,7 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: $env:TAG_NAME
+        tag_name: ${{ env.TAG_NAME }}
         files: dist/*
         
     - name: Delete workflow runs
