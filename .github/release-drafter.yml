@@ -1,6 +1,3 @@
-name: '${{ env.FILE_DATE }} 🌈'
-tag: '${{ env.FILE_DATE }}'
-version: '${{ env.FILE_DATE }}'
 categories:
   - title: '🚀 Features'
     labels:

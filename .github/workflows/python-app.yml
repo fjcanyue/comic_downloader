@@ -46,6 +46,10 @@ jobs:
 
     - name: Draft Release
       uses: release-drafter/release-drafter@v5
+      with:
+        name: '${{ env.FILE_DATE }} 🌈'
+        tag: '${{ env.FILE_DATE }}'
+        version: '${{ env.FILE_DATE }}'
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -56,7 +60,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         tag_name: ${{ env.FILE_DATE }}
-        files: comic_downloader.exe/*     
+        files: comic_downloader.exe/*
         
     - name: Delete workflow runs
       uses: GitRML/delete-workflow-runs@main
