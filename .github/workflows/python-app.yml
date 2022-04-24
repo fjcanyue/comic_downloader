@@ -46,8 +46,8 @@ jobs:
 
     - name: Draft Release
       uses: release-drafter/release-drafter@v5
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Upload firmware to release
       uses: softprops/action-gh-release@v1
