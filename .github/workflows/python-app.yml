@@ -33,14 +33,17 @@ jobs:
         echo "TAG_NAME=%date:~0,4%.%date:~5,2%.%date:~8,2%-%time:~0,2%%time:~3,2%" >> $GITHUB_ENV
         echo ${{ env.TAG_NAME }}
         echo "::set-output name=release_tag::$(date +"%Y.%m.%d-%H%M")"
+
+    - name: Test env
+      run: |
+        echo ${{ env.TAG_NAME }}
+        echo ${{ steps.build.outputs.release_tag }}
         
     - name: Upload a Build Artifact
       uses: actions/upload-artifact@v3.0.0
       with:
         name: comic_downloader.exe
         path: dist
-      run: |
-        echo ${{ steps.build.outputs.release_tag }}
 
     - name: Draft Release
       uses: release-drafter/release-drafter@v5
