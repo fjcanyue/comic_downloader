@@ -41,6 +41,7 @@ jobs:
         name: '${{ env.FILE_DATE }} 🌈'
         tag: '${{ env.FILE_DATE }}'
         version: '${{ env.FILE_DATE }}'
+        publish: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
