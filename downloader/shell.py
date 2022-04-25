@@ -92,20 +92,17 @@ class Shell(cmd.Cmd):
             return
         args = arg.split()
         book_index = int(args[0])
+        book = self.context.comic.books[book_index]
         if len(args) == 1:
-            self.context.books[book_index].vols
+            vols = book.vols
         elif len(args) == 2:
             vol_to = int(args[1])
-            self.context.books[book_index].vols[0:vol_to + 1]
+            vols = book.vols[0:vol_to + 1]
         elif len(args) == 3:
-            book_index = int(args[0])
             vol_from = int(args[1])
             vol_to = int(args[2])
-            self.context.books[book_index].vols[vol_from:vol_to + 1]
-        vol_from = args
-        vol_to = args
-        self.context.source.download_vols(
-            self.context.comic.name, self.context.books[book_index], self.context.books[book_index].vols[vol_from:vol_to + 1])
+            vols = book.vols[vol_from:vol_to + 1]
+        self.context.source.download_vols(self.context.comic.name, book.name, vols)
 
     def do_d(self, arg):
         '下载动漫，输入d <搜索结果序号/动漫URL地址>，例如：d 12，或者d https://www.maofly.com/manga/38316.html'
