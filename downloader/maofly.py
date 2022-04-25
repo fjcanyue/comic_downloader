@@ -5,10 +5,11 @@ from time import sleep
 from requests_html import HTMLSession
 from tqdm import tqdm
 
-from downloader.comic import Comic
+from downloader.comic import Comic, ComicBook, ComicSource, ComicVolume
 
 
-class MaoflyComic(Comic):
+class MaoflyComic(ComicSource):
+    name = '漫画猫'
     base_url = 'https://www.maofly.com'
     base_img_url = 'https://mao.mhtupian.com/uploads'
     download_interval = 5
@@ -28,7 +29,6 @@ class MaoflyComic(Comic):
         self.session = HTMLSession()
 
     def search(self, keyword):
-        '搜索漫画'
         r = self.session.get('%s/search.html?q=%s' % (self.base_url, keyword))
         main = r.html.xpath('//div[contains(@class,"comic-main-section")]')
         if (len(main) == 0):
@@ -42,28 +42,46 @@ class MaoflyComic(Comic):
         arr = []
         for book in book_list:
             b = book.xpath('div/a')[0]
-            url = b.attrs.get('href')
-            name = b.attrs.get('title')
+            comic = Comic()
+            comic.url = b.attrs.get('href')
+            comic.name = b.attrs.get('title')
             author_xpath = book.xpath(
                 'div/div[contains(@class,"comic-author")]')
-            author = None
             if (len(author_xpath) > 0):
-                author = author_xpath[0].text
-            arr.append({'author': author, 'name': name, 'url': url})
+                comic.author = author_xpath[0].text
+            arr.append(comic)
         return arr
 
-    def download_comic(self, url):
-        '下载指定漫画'
+    def info(self, url):
+        r = self.session.get(url)
+        comic = Comic()
+        comic.url = url
+        comic.name = r.html.xpath('//td[@class="comic-titles"]')[0].text
+        meta_table = r.html.xpath(
+            '//table[contains(@class,"comic-meta-data-table")]/tbody/tr')
+        for meta in meta_table:
+            print('%s: %s' % (meta.xpath('tr/th')
+                  [0].text, meta.xpath('tr/td')[0].text))
+        book_list = r.html.xpath('//div[@id="comic-book-list"]/div')
+        for book in book_list:
+            book_xpath = book.xpath('div/div/div/h2')
+            if (len(book_xpath) == 0):
+                break
+            comic_book = ComicBook()
+            comic_book.name = book_xpath[0].text
+            vol_list = book.xpath('div/ol/li/a')
+            for vol in vol_list:
+                comic_book.vols.append(ComicVolume(vol.attrs.get(
+                    'title'), vol.attrs.get('href'), comic_book.name))
+            comic.books.append(comic_book)
+        return comic
+
+    def download_comic(self, url, reversed=False, end_url=None):
         r = self.session.get(url)
         name = r.html.xpath('//td[@class="comic-titles"]')[0].text
         path = os.path.join(self.output_dir, name)
         os.makedirs(path, exist_ok=True)
         book_list = r.html.xpath('//div[@id="comic-book-list"]/div')
-        db_file = os.path.join(path, 'db') + '.txt'
-        last = ''
-        if os.path.isfile(db_file):
-            with open(db_file, 'r') as db:
-                last = db.readline()
         for book in book_list:
             book_xpath = book.xpath('div/div/div/h2')
             if (len(book_xpath) == 0):
@@ -72,20 +90,23 @@ class MaoflyComic(Comic):
             book_path = os.path.join(path, book_name)
             vol_list = book.xpath('div/ol/li/a')
             arr = []
-            downloaded = last.strip()
-            if not downloaded:
+            if reversed:
                 vol_list.reverse()
             for vol in vol_list:
                 vol_name = vol.attrs.get('title')
                 vol_url = vol.attrs.get('href')
-                if downloaded and vol_url == downloaded:
+                if end_url and vol_url == end_url:
                     break
                 else:
                     arr.append({'name': vol_name, 'url': vol_url})
-            for vol in tqdm(arr, desc = book_name):
+            for vol in tqdm(arr, desc=book_name):
                 self.download_vol(book_path, vol['name'], vol['url'])
-                with open(db_file, 'w') as db:
-                    db.write(vol['url'])
+
+    def download_vols(self, comic_name, book_name, vols):
+        path = os.path.join(self.output_dir, comic_name, book_name)
+        os.makedirs(path, exist_ok=True)
+        for vol in tqdm(vols, desc=book_name):
+            self.download_vol(path, vol.name, vol.url)
 
     def download_vol(self, path, vol_name, url):
         '下载漫画卷'
@@ -113,7 +134,7 @@ class MaoflyComic(Comic):
     def __download_vol_images__(self, path, vol_name, imgs):
         '下载图片'
         os.makedirs(path, exist_ok=True)
-        for index, img in enumerate(tqdm(imgs, desc = vol_name)):
+        for index, img in enumerate(tqdm(imgs, desc=vol_name)):
             sleep(self.download_interval)
             f = '%s/%04d.jpg' % (path, (index + 1))
             # print('Downloading image: %s, to %s' % (img, f))
