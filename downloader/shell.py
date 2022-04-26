@@ -14,9 +14,13 @@ class Shell(cmd.Cmd):
     您可以输入下列命令来切换动漫下载网站源，目前支持的网站有：
     * maofly: 漫画猫（默认）
     输入动漫下载网站源后，支持的命令有：
-    * s: 搜索动漫，输入s <搜索关键字>，例如：s 猎人
-    * i: 查看动漫详情，输入i <搜索结果序号/动漫URL地址>，例如：d 12，或者d https://www.maofly.com/manga/38316.html
-    * d: 全量下载动漫，输入s <搜索结果序号/动漫URL地址>，例如：d 12，或者d https://www.maofly.com/manga/38316.html  
+    * s: 搜索动漫，输入s <搜索关键字>。例如：输入 s 猎人
+    * d: 全量下载动漫，输入d <搜索结果序号/动漫URL地址>。例如：输入 d 12，或者d https://www.maofly.com/manga/38316.html
+    * i: 查看动漫详情，输入i <搜索结果序号/动漫URL地址>。例如：输入 i 12，或者i https://www.maofly.com/manga/13954.html
+    * v: 按范围下载动漫，需要先执行查看动漫详情命令，根据详情的序号列表，指定下载范围。支持三种模式：
+      - 输入v <章节序号>，下载该章节下的所有动漫。例如：输入 v 0。
+      - 输入v <章节序号> <截止序号>，下载该章节下，从章节开始到截止序号的动漫。例如：输入 v 12
+      - 输入v <章节序号> <起始序号> <截止序号>，下载该章节下，从起始位置到截止位置的动漫。例如：输入 v 0 12 18
     通用命令有：
     * q: 退出动漫下载器
     '''
@@ -68,19 +72,19 @@ class Shell(cmd.Cmd):
         self.context.comic = self.context.source.info(url)
 
         for book_index, book in enumerate(self.context.comic.books):
-            print('{:=^80}'.format('%2d: %s' % (book_index, book.name)))
-            line = None
+            print('{:=^100}'.format('%2d: %s' % (book_index, book.name)))
+            line = ''
             for index, vol in enumerate(book.vols):
                 s = '%3d: %s' % (index, vol.name)
-                s = '{:-<40}'.format(s)
-                if index % 2 == 1:
+                s = '{:<{len}}'.format(s, len=40 - len(s.encode('GBK')) + len(s))
+                if index % 3 == 2 or index == len(book.vols) - 1:
                     print(line + s)
                     line = ''
                 else:
-                    line = s
+                    line += s
 
-    def do_dv(self, arg):
-        '下载动漫，输入dv <序号> <地址>，例如：d 0 11 12'
+    def do_v(self, arg):
+        '下载动漫，输入v <序号> <地址>，例如：d 0 11 12'
         if not self.context.source:
             print('请您先选择动漫下载网站源！')
             return
