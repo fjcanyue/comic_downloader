@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 from abc import ABC, abstractmethod
 from time import sleep
@@ -58,7 +59,7 @@ class ComicSource(ABC):
         Args:
             url (str): 动漫URL地址
         """
-        self.__download_vol__(self.info(url))
+        self.download_full(self.info(url))
 
     def download_full(self, comic):
         """全量下载指定动漫
@@ -66,10 +67,10 @@ class ComicSource(ABC):
         Args:
             comic (Comic): 动漫对象
         """
-        path = os.path.join(self.output_dir, comic.name)
+        path = os.path.join(self.output_dir, __filter_dir__(comic.name))
         os.makedirs(path, exist_ok=True)
         for book in comic.books:
-            book_path = os.path.join(path, book.name)
+            book_path = os.path.join(path, __filter_dir__(book.name))
             for vol in tqdm(book.vols, desc=book.name):
                 self.__download_vol__(book_path, vol.name, vol.url)
 
@@ -93,7 +94,7 @@ class ComicSource(ABC):
             book_name (str): 动漫章节名称
             vols (array): 待下载的动漫卷/话列表
         """
-        path = os.path.join(self.output_dir, comic_name, book_name)
+        path = os.path.join(self.output_dir, __filter_dir__(comic_name), __filter_dir__(book_name))
         os.makedirs(path, exist_ok=True)
         for vol in tqdm(vols, desc=book_name):
             self.__download_vol__(path, vol.name, vol.url)
@@ -107,7 +108,7 @@ class ComicSource(ABC):
             url (str): 动漫卷/话URL地址
         """
         imgs = self.__parse_imgs__(url)
-        path = os.path.join(path, vol_name)
+        path = os.path.join(path, __filter_dir__(vol_name))
         self.__download_vol_images__(path, vol_name, imgs)
         pass
 
@@ -145,3 +146,8 @@ class ComicVolume:
         self.name = name
         self.url = url
         self.book_name = book_name
+
+__filter_dir_re = re.compile('[\/:*?"<>|]')
+
+def __filter_dir__(name):
+    return re.sub(__filter_dir_re,'-', name)
