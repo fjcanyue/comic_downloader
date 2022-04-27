@@ -77,13 +77,19 @@ class Shell(cmd.Cmd):
         if not arg:
             print('请输入动漫URL地址或者搜索结果序号！')
             return
-        url = arg
+        
         if arg.isdigit():
-            if self.context.searched_results:
+            if self.context.searched_results and len(self.context.searched_results) > int(arg):
                 url = self.context.searched_results[int(arg)].url
             else:
-                print('请您先搜索动漫！')
+                print('请先搜索动漫，或输入正确的搜索结果序号！')
                 return
+        elif arg.startswith(self.context.source.base_url):
+            url = arg
+        else:
+            print('请输入完整的动漫地址！')
+            return
+
         self.context.comic = self.context.source.info(url)
 
         for book_index, book in enumerate(self.context.comic.books):
@@ -110,17 +116,32 @@ class Shell(cmd.Cmd):
         if self.context.comic is None:
             print('请先查看动漫详情！')
             return
+
         args = arg.split()
         book_index = int(args[0])
+        if len(self.context.comic.books) <= book_index:
+            print('请输入正确的动漫章节序号！')
+            return
+
         book = self.context.comic.books[book_index]
         if len(args) == 1:
             vols = book.vols
         elif len(args) == 2:
             vol_to = int(args[1])
+            if len(book.vols) <= vol_to:
+                print('请输入正确的截止序号！')
+                return
+
             vols = book.vols[0:vol_to + 1]
         elif len(args) == 3:
             vol_from = int(args[1])
+            if len(book.vols) <= vol_from or vol_from < 0:
+                print('请输入正确的起始序号！')
+                return
             vol_to = int(args[2])
+            if len(book.vols) <= vol_to or vol_from > vol_to:
+                print('请输入正确的截止序号！')
+                return
             vols = book.vols[vol_from:vol_to + 1]
         self.context.source.download_vols(
             self.context.comic.name, book.name, vols)
@@ -136,15 +157,15 @@ class Shell(cmd.Cmd):
                 return
             self.context.source.download_full(self.context.comic)
         elif arg.isdigit():
-            if self.context.searched_results:
-                self.context.source.download_full(self.context.searched_results[int(arg)])
+            if self.context.searched_results and len(self.context.searched_results) > int(arg):
+                self.context.source.download_full_by_url(self.context.searched_results[int(arg)].url)
             else:
-                print('请您先搜索动漫！')
+                print('请先搜索动漫，或输入正确的搜索结果序号！')
                 return
-        elif arg.startswith('http'):
+        elif arg.startswith(self.context.source.base_url):
             self.context.source.download_full_by_url(arg)
         else:
-            print('输入参数格式错误，请重试！')
+            print('请输入完整的动漫地址！')
             return
         self.context.searched_results.clear()
         print('下载完成')
