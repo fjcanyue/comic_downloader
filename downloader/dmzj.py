@@ -19,6 +19,8 @@ class DmzjComic(ComicSource):
         for book in results:
             comic = Comic()
             comic.url = 'http:' + book['comic_url_raw']
+            if not comic.url.startswith(self.base_url):
+                continue
             comic.name = book['comic_name']
             comic.author = book['comic_author']
             arr.append(comic)
