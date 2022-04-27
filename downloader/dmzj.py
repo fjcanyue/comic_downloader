@@ -1,3 +1,7 @@
+from io import StringIO
+
+from lxml import etree
+
 from downloader.comic import Comic, ComicBook, ComicSource, ComicVolume
 
 
@@ -27,18 +31,25 @@ class DmzjComic(ComicSource):
         return arr
 
     def info(self, url):
-        r = self.session.get(url)
+        html = self.http.get(url).text
+        parser = etree.HTMLParser()
+        root = etree.parse(StringIO(html), parser)
         comic = Comic()
         comic.url = url
-        comic.name = r.html.xpath(
+        comic.name = root.xpath(
             '//span[@class="anim_title_text"]/a/h1')[0].text
-        meta_table = r.html.xpath('//div[@class="anim-main_list"]/table/tr')
+        meta_table = root.xpath('//div[@class="anim-main_list"]/table/tr')
         for meta in meta_table:
-            print('%s %s' % (meta.xpath('tr/th')
-                  [0].text, meta.xpath('tr/td')[0].text))
-        book_list = r.html.xpath(
+            k = meta.xpath('th')[0].text
+            v_element = meta.xpath('td/a')
+            if len(v_element) > 0:
+                v = v_element[0].text
+            else:
+                v = ''
+            print('%s %s' % (k, v))
+        book_list = root.xpath(
             '//div[@class="middleright"]/div[@class="middleright_mr"]/div[@class="photo_part"]')
-        vol_divs = r.html.xpath(
+        vol_divs = root.xpath(
             '//div[@class="cartoon_online_border" or @class="cartoon_online_border_other"]')
         for index, book in enumerate(book_list):
             book_xpath = book.xpath('//h2')
@@ -46,10 +57,11 @@ class DmzjComic(ComicSource):
                 break
             comic_book = ComicBook()
             comic_book.name = book_xpath[0].text
-            vol_list = vol_divs[index].xpath('div/ul/li')
+            vol_list = vol_divs[index].xpath('ul/li')
             for vol in vol_list:
+                a = vol.xpath('a')[0]
                 comic_book.vols.append(ComicVolume(
-                    vol.text, self.base_url + '/' + vol.xpath('li/a/@href')[0], comic_book.name))
+                    a.text, self.base_url + '/' + a.xpath('@href')[0], comic_book.name))
             comic.books.append(comic_book)
         return comic
 
