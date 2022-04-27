@@ -31,7 +31,7 @@ class DmzjComic(ComicSource):
         comic = Comic()
         comic.url = url
         comic.name = r.html.xpath(
-            '//span[@class="anim_title_text"] //h1')[0].text
+            '//span[@class="anim_title_text"]/a/h1')[0].text
         meta_table = r.html.xpath('//div[@class="anim-main_list"]/table/tr')
         for meta in meta_table:
             print('%s %s' % (meta.xpath('tr/th')
