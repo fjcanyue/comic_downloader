@@ -2,9 +2,10 @@ import os
 import re
 import shutil
 from abc import ABC, abstractmethod
+from io import StringIO
 from time import sleep
 
-from requests_html import HTMLSession
+from lxml import etree
 from tqdm import tqdm
 
 
@@ -29,8 +30,7 @@ class ComicSource(ABC):
             'referer': self.base_url
         })
 
-        self.session = HTMLSession()
-        '''requests_html 会话对象'''
+        self.parser = etree.HTMLParser()
 
     @abstractmethod
     def search(self, keyword):
@@ -113,7 +113,7 @@ class ComicSource(ABC):
         pass
 
     def __download_vol_images__(self, path, vol_name, imgs):
-        '下载图片'
+        """下载图片"""
         os.makedirs(path, exist_ok=True)
         for index, img in enumerate(tqdm(imgs, desc=vol_name)):
             sleep(self.download_interval)
@@ -126,12 +126,26 @@ class ComicSource(ABC):
                 f.write(r.content)
         shutil.make_archive(path, 'zip', path)
 
+    def __parse_html__(self, url):
+        """解析HTML
+
+        Args:
+            url (str): 动漫卷/话URL地址
+
+        Returns:
+            array: 根元素
+        """
+        r = self.http.get(url)
+        r.encoding = 'utf-8'
+        return etree.parse(StringIO(r.text), self.parser)
+
 
 class Comic:
     def __init__(self):
         self.name = None
         self.author = None
         self.url = None
+        self.metadata = []
         self.books = []
 
 
@@ -147,7 +161,9 @@ class ComicVolume:
         self.url = url
         self.book_name = book_name
 
+
 __filter_dir_re = re.compile('[\/:*?"<>|]')
 
+
 def __filter_dir__(name):
-    return re.sub(__filter_dir_re,'-', name)
+    return re.sub(__filter_dir_re, '-', name)
