@@ -35,7 +35,7 @@ class Shell(cmd.Cmd):
         self.context.create(output_path)
         # sources = ComicSource.__subclasses__()
         # for source in sources:
-            # print(source)
+        # print(source)
         # self.do_maofly()
 
     def do_maofly(self, arg=None):
@@ -76,7 +76,7 @@ class Shell(cmd.Cmd):
         if not arg:
             print('请输入动漫URL地址或者搜索结果序号！')
             return
-        
+
         if arg.isdigit():
             if self.context.searched_results and len(self.context.searched_results) > int(arg):
                 url = self.context.searched_results[int(arg)].url
@@ -90,6 +90,12 @@ class Shell(cmd.Cmd):
             return
 
         self.context.comic = self.context.source.info(url)
+
+        print(__build_fixed_string__(' %s ' %
+              self.context.comic.name, 100, '{:=^{len}}'))
+
+        for meta in self.context.comic.metadata:
+            print('%s: %s' % (meta['k'], meta['v']))
 
         for book_index, book in enumerate(self.context.comic.books):
             print(__build_fixed_string__(' %d: %s ' %
@@ -157,7 +163,8 @@ class Shell(cmd.Cmd):
             self.context.source.download_full(self.context.comic)
         elif arg.isdigit():
             if self.context.searched_results and len(self.context.searched_results) > int(arg):
-                self.context.source.download_full_by_url(self.context.searched_results[int(arg)].url)
+                self.context.source.download_full_by_url(
+                    self.context.searched_results[int(arg)].url)
             else:
                 print('请先搜索动漫，或输入正确的搜索结果序号！')
                 return

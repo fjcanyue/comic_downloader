@@ -35,31 +35,28 @@ class DmzjComic(ComicSource):
         comic = Comic()
         comic.url = url
         comic.name = root.xpath(
-            '//span[@class="anim_title_text"]/a/h1')[0].text
+            '//span[@class="anim_title_text"]/a/h1')[0].text.strip()
         meta_table = root.xpath('//div[@class="anim-main_list"]/table/tr')
         for meta in meta_table:
-            k = meta.xpath('th')[0].text
             v_element = meta.xpath('td/a')
             if len(v_element) > 0:
-                v = v_element[0].text
-            else:
-                v = ''
-            print('%s %s' % (k, v))
+                comic.metadata.append({'k': meta.xpath('th')[0].text, 'v': v_element[0].text})
         book_list = root.xpath(
             '//div[@class="middleright"]/div[@class="middleright_mr"]/div[@class="photo_part"]')
-        vol_divs = root.xpath(
-            '//div[@class="cartoon_online_border" or @class="cartoon_online_border_other"]')
-        for index, book in enumerate(book_list):
+        # vol_divs = root.xpath('//div[@class="cartoon_online_border" or @class="cartoon_online_border_other"]')
+        # for index, book in enumerate(book_list):
+        for book in book_list:
             book_xpath = book.xpath('//h2')
             if len(book_xpath) == 0:
                 break
             comic_book = ComicBook()
             comic_book.name = book_xpath[0].text
-            vol_list = vol_divs[index].xpath('ul/li')
+            # vol_list = vol_divs[index].xpath('ul/li')
+            vol_list = book.xpath('following-sibling::div/ul/li')
             for vol in vol_list:
                 a = vol.xpath('a')[0]
                 comic_book.vols.append(ComicVolume(
-                    a.text, self.base_url + '/' + a.xpath('@href')[0], comic_book.name))
+                    a.text, self.base_url + '/' + a.attrib.get('href'), comic_book.name))
             comic.books.append(comic_book)
         return comic
 

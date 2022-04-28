@@ -145,6 +145,7 @@ class Comic:
         self.name = None
         self.author = None
         self.url = None
+        self.metadata = []
         self.books = []
 
 
