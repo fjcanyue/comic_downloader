@@ -2,7 +2,6 @@ import cmd
 
 import requests
 from requests.adapters import HTTPAdapter
-from downloader.comic import ComicSource
 from downloader.dmzj import DmzjComic
 from downloader.maofly import MaoflyComic
 from requests.packages.urllib3.util.retry import Retry
@@ -34,13 +33,13 @@ class Shell(cmd.Cmd):
         super(Shell, self).__init__()
         self.context = Context()
         self.context.create(output_path)
-        sources = ComicSource.__subclasses__()
+        # sources = ComicSource.__subclasses__()
         # for source in sources:
             # print(source)
         # self.do_maofly()
 
     def do_maofly(self, arg=None):
-        '选择漫画猫做为动漫下载网站源'
+        """选择漫画猫做为动漫下载网站源"""
         print('正在初始化漫画猫动漫下载网站源，请稍等...')
         self.context.reset()
         self.context.source = MaoflyComic(
@@ -48,7 +47,7 @@ class Shell(cmd.Cmd):
         self.prompt = self.prefix + self.context.source.name + '> '
 
     def do_dmzj(self, arg=None):
-        '选择动漫之家做为动漫下载网站源'
+        """选择动漫之家做为动漫下载网站源"""
         print('正在初始化动漫之家动漫下载网站源，请稍等...')
         self.context.reset()
         self.context.source = DmzjComic(
@@ -56,7 +55,7 @@ class Shell(cmd.Cmd):
         self.prompt = self.prefix + self.context.source.name + '> '
 
     def do_s(self, arg):
-        '搜索动漫，输入s <搜索关键字>，例如：s 猎人'
+        """搜索动漫，输入s <搜索关键字>，例如：s 猎人"""
         if not arg:
             print('请输入搜索关键字！')
             return
@@ -70,7 +69,7 @@ class Shell(cmd.Cmd):
             print('请您先选择动漫下载网站源！')
 
     def do_i(self, arg):
-        '查看动漫详情，输入i <搜索结果序号/动漫URL地址>，例如：d 12，或者d https://www.maofly.com/manga/38316.html'
+        """查看动漫详情，输入i <搜索结果序号/动漫URL地址>，例如：d 12，或者d https://www.maofly.com/manga/38316.html"""
         if not self.context.source:
             print('请您先选择动漫下载网站源！')
             return
@@ -106,7 +105,7 @@ class Shell(cmd.Cmd):
                     line += s
 
     def do_v(self, arg):
-        '下载动漫，输入v <章节序号> <起始序号> <截止序号>，例如：v 0 11 12'
+        """下载动漫，输入v <章节序号> <起始序号> <截止序号>，例如：v 0 11 12"""
         if not self.context.source:
             print('请您先选择动漫下载网站源！')
             return
@@ -147,7 +146,7 @@ class Shell(cmd.Cmd):
             self.context.comic.name, book.name, vols)
 
     def do_d(self, arg):
-        '全量下载动漫，输入d <搜索结果序号/动漫URL地址>，例如：d 12，或者d https://www.maofly.com/manga/38316.html'
+        """全量下载动漫，输入d <搜索结果序号/动漫URL地址>，例如：d 12，或者d https://www.maofly.com/manga/38316.html"""
         if not self.context.source:
             print('请您先选择动漫下载网站源！')
             return
@@ -171,18 +170,30 @@ class Shell(cmd.Cmd):
         print('下载完成')
 
     def do_q(self, arg):
-        '退出动漫下载器'
+        """退出动漫下载器"""
         self.context.destory()
         print('感谢使用，再会！')
         return True
 
 
 class Context:
-    '''
+    """
     命令行上下文类。
-    '''
+    """
 
     def __init__(self):
+        self.output_path = None
+        '本机存储路径'
+        self.http = None
+        '本机存储路径'
+        self.searched_results = None
+        '动漫搜索结果数组对象'
+        self.comic = None
+        '当前查看的动漫对象'
+        self.source = None
+        '动漫网站源'
+        self.driver = None
+        '网页驱动'
         self.reset()
 
     def create(self, output_path):
@@ -223,5 +234,5 @@ class Context:
         self.searched_results = []
 
 
-def __build_fixed_string__(str, length, formatter):
-    return formatter.format(str, len=length - len(str.encode('GBK')) + len(str))
+def __build_fixed_string__(string, length, formatter):
+    return formatter.format(string, len=length - len(string.encode('GBK')) + len(string))

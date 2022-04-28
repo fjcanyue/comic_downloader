@@ -16,7 +16,7 @@ class DmzjComic(ComicSource):
 
     def search(self, keyword):
         r = self.http.get(
-            'http://sacg.dmzj.com/comicsum/search.php?s=%s' % (keyword))
+            'http://sacg.dmzj.com/comicsum/search.php?s=%s' % keyword)
         js = r.text + 'return g_search_data;'
         results = self.driver.execute_script(js)
         arr = []
@@ -31,9 +31,7 @@ class DmzjComic(ComicSource):
         return arr
 
     def info(self, url):
-        html = self.http.get(url).text
-        parser = etree.HTMLParser()
-        root = etree.parse(StringIO(html), parser)
+        root = self.__parse_html__(url)
         comic = Comic()
         comic.url = url
         comic.name = root.xpath(
@@ -53,7 +51,7 @@ class DmzjComic(ComicSource):
             '//div[@class="cartoon_online_border" or @class="cartoon_online_border_other"]')
         for index, book in enumerate(book_list):
             book_xpath = book.xpath('//h2')
-            if (len(book_xpath) == 0):
+            if len(book_xpath) == 0:
                 break
             comic_book = ComicBook()
             comic_book.name = book_xpath[0].text

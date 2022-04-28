@@ -1,3 +1,7 @@
+from io import StringIO
+
+from lxml import etree
+
 from downloader.comic import Comic, ComicBook, ComicSource, ComicVolume
 
 
@@ -14,9 +18,9 @@ class MaoflyComic(ComicSource):
         self.jsstring = r.text
 
     def search(self, keyword):
-        r = self.session.get('%s/search.html?q=%s' % (self.base_url, keyword))
-        main = r.html.xpath('//div[contains(@class,"comic-main-section")]')
-        if (len(main) == 0):
+        root = self.__parse_html__('%s/search.html?q=%s' % (self.base_url, keyword))
+        main = root.xpath('//div[contains(@class,"comic-main-section")]')
+        if len(main) == 0:
             print('没有找到页面关键元素，搜索失败，请检查XPath是否正确。')
             return
         else:
@@ -26,38 +30,37 @@ class MaoflyComic(ComicSource):
         book_list = main.xpath('//div[contains(@class,"comicbook-index")]')
         arr = []
         for book in book_list:
-            b = book.xpath('div/a')[0]
+            b = book.xpath('a')[0]
             comic = Comic()
-            comic.url = b.attrs.get('href')
-            comic.name = b.attrs.get('title')
-            author_xpath = book.xpath(
-                'div/div[contains(@class,"comic-author")]')
-            if (len(author_xpath) > 0):
+            comic.url = b.attrib['href']
+            comic.name = b.attrib['title']
+            author_xpath = book.xpath('div/a')
+            if len(author_xpath) > 0:
                 comic.author = author_xpath[0].text
             arr.append(comic)
         return arr
 
     def info(self, url):
-        r = self.session.get(url)
+        root = self.__parse_html__(url)
         comic = Comic()
         comic.url = url
-        comic.name = r.html.xpath('//td[@class="comic-titles"]')[0].text
-        meta_table = r.html.xpath(
+        comic.name = root.xpath('//td[@class="comic-titles"]')[0].text
+        meta_table = root.xpath(
             '//table[contains(@class,"comic-meta-data-table")]/tbody/tr')
         for meta in meta_table:
-            print('%s: %s' % (meta.xpath('tr/th')
-                  [0].text, meta.xpath('tr/td')[0].text))
-        book_list = r.html.xpath('//div[@id="comic-book-list"]/div')
+            print('%s: %s' % (meta.xpath('th')
+                  [0].text, meta.xpath('td')[0].text))
+        book_list = root.xpath('//div[@id="comic-book-list"]/div')
         for book in book_list:
-            book_xpath = book.xpath('div/div/div/h2')
-            if (len(book_xpath) == 0):
+            book_xpath = book.xpath('div/div/h2')
+            if len(book_xpath) == 0:
                 break
             comic_book = ComicBook()
             comic_book.name = book_xpath[0].text
-            vol_list = book.xpath('div/ol/li/a')
+            vol_list = book.xpath('ol/li/a')
             for vol in vol_list:
-                comic_book.vols.append(ComicVolume(vol.attrs.get(
-                    'title'), vol.attrs.get('href'), comic_book.name))
+                comic_book.vols.append(ComicVolume(vol.attrib[
+                    'title'], vol.attrib['href'], comic_book.name))
             comic.books.append(comic_book)
         return comic
 
@@ -67,14 +70,14 @@ class MaoflyComic(ComicSource):
         return imgs
 
     def __find_img_data__(self, url):
-        '查找img_data变量值'
-        r = self.session.get(url)
-        img_data = r.html.search('let img_data = "{}"')
+        """查找img_data变量值"""
+        root = self.__parse_html__(url)
+        img_data = root.search('let img_data = "{}"')
         # print(img_data)
         return img_data[0]
 
     def __decode_img_data__(self, img_data):
-        '解码img_data变量值'
+        """解码img_data变量值"""
         js = '%sreturn LZString.decompressFromBase64("%s");' % (
             self.jsstring, img_data)
         imgs = self.driver.execute_script(js)
