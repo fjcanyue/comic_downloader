@@ -115,10 +115,14 @@ class ComicSource(ABC):
     def __download_vol_images__(self, path, vol_name, imgs):
         """下载图片"""
         os.makedirs(path, exist_ok=True)
+        use_uri = hasattr(self, 'base_img_url')
         for index, img in enumerate(tqdm(imgs, desc=vol_name)):
             sleep(self.download_interval)
             f = '%s/%04d.jpg' % (path, (index + 1))
-            url = self.base_img_url + '/' + img
+            if use_uri:
+                url = self.base_img_url + '/' + img
+            else:
+                url = img
             # print('Downloading image: %s, to %s' % (url, f))
             r = self.http.get(url)
             # print('Status code: %d' % r.status_code)
