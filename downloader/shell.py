@@ -4,7 +4,10 @@ import requests
 from requests.adapters import HTTPAdapter
 from downloader.dmzj import DmzjComic
 from downloader.maofly import MaoflyComic
+from downloader.Thmh import TmhComic
+
 from requests.packages.urllib3.util.retry import Retry
+
 from selenium import webdriver
 from selenium.webdriver.firefox.options import Options
 
@@ -13,6 +16,7 @@ class Shell(cmd.Cmd):
     intro = '''
     欢迎使用动漫下载器，输入 help 或者 ? 查看帮助。
     您可以输入下列命令来切换动漫下载网站源，目前支持的网站有：
+    * 31mh: 31漫画
     * maofly: 漫画猫
     * dmzj: 动漫之家
     输入动漫下载网站源后，支持的命令有：
@@ -21,7 +25,7 @@ class Shell(cmd.Cmd):
     * i: 查看动漫详情，输入i <搜索结果序号/动漫URL地址>。例如：输入 i 12，或者i https://www.maofly.com/manga/13954.html
     * v: 按范围下载动漫，需要先执行查看动漫详情命令，根据详情的序号列表，指定下载范围。支持三种模式：
       - 输入v <章节序号>，下载该章节下的所有动漫。例如：输入 v 0。
-      - 输入v <章节序号> <截止序号>，下载该章节下，从章节开始到截止序号的动漫。例如：输入 v 12
+      - 输入v <章节序号> <截止序号>，下载该章节下，从章节开始到截止序号的动漫。例如：输入 v 0 12
       - 输入v <章节序号> <起始序号> <截止序号>，下载该章节下，从起始位置到截止位置的动漫。例如：输入 v 0 12 18
     通用命令有：
     * q: 退出动漫下载器
@@ -51,6 +55,14 @@ class Shell(cmd.Cmd):
         print('正在初始化动漫之家动漫下载网站源，请稍等...')
         self.context.reset()
         self.context.source = DmzjComic(
+            self.context.output_path, self.context.http, self.context.driver)
+        self.prompt = self.prefix + self.context.source.name + '> '
+
+    def do_31mh(self, arg=None):
+        """选择31漫画做为动漫下载网站源"""
+        print('正在初始化31漫画动漫下载网站源，请稍等...')
+        self.context.reset()
+        self.context.source = TmhComic(
             self.context.output_path, self.context.http, self.context.driver)
         self.prompt = self.prefix + self.context.source.name + '> '
 
