@@ -9,30 +9,24 @@ from downloader.comic import Comic, ComicBook, ComicSource, ComicVolume
 class TmhComic(ComicSource):
     name = '31漫画'
     base_url = 'https://www.31mh.com'
-    #base_img_url = 'http://imgpc.31mh.com/images/comic'
     download_interval = 5
 
     def __init__(self, output_dir, http, driver):
         super().__init__(output_dir, http, driver)
 
-        r = self.http.get('%s/static/js/string.min.js' % self.base_url)
-        self.jsstring = r.text
-
-        self.pattern_img_data = re.compile('let img_data\s*=\s*"(.+)"')
-
     def search(self, keyword):
         root = self.__parse_html__(
             '%s/search/?keywords=%s' % (self.base_url, keyword))
         main = root.xpath('//ul[contains(@class,"list_con_li")]')
+        arr = []
         if len(main) == 0:
-            print('没有找到页面关键元素，搜索失败，请检查XPath是否正确。')
-            return
+            print('没有找到页面关键元素，搜索失败。')
+            return arr
         else:
             main = main[0]
         result = main.xpath('//em[@class="c_6"]')[0].text
         print('共 %s 条相关的结果' % result)
         book_list = main.xpath('//li[contains(@class,"list-comic")]')
-        arr = []
         for book in book_list:
             b = book.xpath('a')[0]
             comic = Comic()
