@@ -130,7 +130,7 @@ class ComicSource(ABC):
                 f.write(r.content)
         shutil.make_archive(path, 'zip', path)
 
-    def __parse_html__(self, url):
+    def __parse_html__(self, url, encoding='utf-8'):
         """解析HTML
 
         Args:
@@ -140,7 +140,7 @@ class ComicSource(ABC):
             array: 根元素
         """
         r = self.http.get(url)
-        r.encoding = 'utf-8'
+        r.encoding = encoding
         return etree.parse(StringIO(r.text), self.parser)
 
 

@@ -4,7 +4,8 @@ import requests
 from requests.adapters import HTTPAdapter
 from downloader.dmzj import DmzjComic
 from downloader.maofly import MaoflyComic
-from downloader.Thmh import TmhComic
+from downloader.thmh import TmhComic
+from downloader.boya import BoyaComic
 
 from requests.packages.urllib3.util.retry import Retry
 
@@ -17,6 +18,7 @@ class Shell(cmd.Cmd):
     欢迎使用动漫下载器，输入 help 或者 ? 查看帮助。
     您可以输入下列命令来切换动漫下载网站源，目前支持的网站有：
     * 31mh: 31漫画
+    * boya: 伯牙漫画人
     * maofly: 漫画猫
     * dmzj: 动漫之家
     输入动漫下载网站源后，支持的命令有：
@@ -63,6 +65,14 @@ class Shell(cmd.Cmd):
         print('正在初始化31漫画动漫下载网站源，请稍等...')
         self.context.reset()
         self.context.source = TmhComic(
+            self.context.output_path, self.context.http, self.context.driver)
+        self.prompt = self.prefix + self.context.source.name + '> '
+
+    def do_boya(self, arg=None):
+        """选择伯牙漫画人做为动漫下载网站源"""
+        print('正在初始化伯牙漫画人动漫下载网站源，请稍等...')
+        self.context.reset()
+        self.context.source = BoyaComic(
             self.context.output_path, self.context.http, self.context.driver)
         self.prompt = self.prefix + self.context.source.name + '> '
 
@@ -227,7 +237,8 @@ class Context:
         adapter = HTTPAdapter(max_retries=retry_strategy)
         self.http = requests.Session()
         self.http.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6"
         })
         self.http.mount("https://", adapter)
         self.http.mount("http://", adapter)
