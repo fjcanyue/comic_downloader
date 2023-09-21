@@ -3,8 +3,8 @@
 轻量级动漫下载器，CLI方式单线程下载。目前支持的网站有：
 - 31漫画
 - 伯牙漫画人
-- 漫画猫
-- 动漫之家
+- ~~漫画猫~~
+- ~~动漫之家~~
 
 [![asciicast](https://asciinema.org/a/H7hsCmPz1v9mqpxF4t40oLomM.svg)](https://asciinema.org/a/H7hsCmPz1v9mqpxF4t40oLomM)
 

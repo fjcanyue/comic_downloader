@@ -19,8 +19,6 @@ class Shell(cmd.Cmd):
     您可以输入下列命令来切换动漫下载网站源，目前支持的网站有：
     * 31mh: 31漫画
     * boya: 伯牙漫画人
-    * maofly: 漫画猫
-    * dmzj: 动漫之家
     输入动漫下载网站源后，支持的命令有：
     * s: 搜索动漫，输入s <搜索关键字>。例如：输入 s 猎人
     * d: 全量下载动漫，输入d <搜索结果序号/动漫URL地址>。例如：输入 d 12，或者d https://www.maofly.com/manga/38316.html
@@ -44,21 +42,21 @@ class Shell(cmd.Cmd):
         # print(source)
         # self.do_maofly()
 
-    def do_maofly(self, arg=None):
-        """选择漫画猫做为动漫下载网站源"""
-        print('正在初始化漫画猫动漫下载网站源，请稍等...')
-        self.context.reset()
-        self.context.source = MaoflyComic(
-            self.context.output_path, self.context.http, self.context.driver)
-        self.prompt = self.prefix + self.context.source.name + '> '
+    # def do_maofly(self, arg=None):
+    #     """选择漫画猫做为动漫下载网站源"""
+    #     print('正在初始化漫画猫动漫下载网站源，请稍等...')
+    #     self.context.reset()
+    #     self.context.source = MaoflyComic(
+    #         self.context.output_path, self.context.http, self.context.driver)
+    #     self.prompt = self.prefix + self.context.source.name + '> '
 
-    def do_dmzj(self, arg=None):
-        """选择动漫之家做为动漫下载网站源"""
-        print('正在初始化动漫之家动漫下载网站源，请稍等...')
-        self.context.reset()
-        self.context.source = DmzjComic(
-            self.context.output_path, self.context.http, self.context.driver)
-        self.prompt = self.prefix + self.context.source.name + '> '
+    # def do_dmzj(self, arg=None):
+    #     """选择动漫之家做为动漫下载网站源"""
+    #     print('正在初始化动漫之家动漫下载网站源，请稍等...')
+    #     self.context.reset()
+    #     self.context.source = DmzjComic(
+    #         self.context.output_path, self.context.http, self.context.driver)
+    #     self.prompt = self.prefix + self.context.source.name + '> '
 
     def do_31mh(self, arg=None):
         """选择31漫画做为动漫下载网站源"""
