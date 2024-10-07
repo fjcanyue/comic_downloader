@@ -3,6 +3,7 @@ import cmd
 import requests
 from requests.adapters import HTTPAdapter
 from downloader.dmzj import DmzjComic
+from downloader.manhuagui import ManhuaguiComic
 from downloader.maofly import MaoflyComic
 from downloader.thmh import TmhComic
 from downloader.boya import BoyaComic
@@ -19,6 +20,7 @@ class Shell(cmd.Cmd):
     您可以输入下列命令来切换动漫下载网站源，目前支持的网站有：
     * 31mh: 31漫画
     * boya: 伯牙漫画人
+    * manhuagui: 看漫画
     输入动漫下载网站源后，支持的命令有：
     * s: 搜索动漫，输入s <搜索关键字>。例如：输入 s 猎人
     * d: 全量下载动漫，输入d <搜索结果序号/动漫URL地址>。例如：输入 d 12，或者d https://www.maofly.com/manga/38316.html
@@ -71,6 +73,14 @@ class Shell(cmd.Cmd):
         print('正在初始化伯牙漫画人动漫下载网站源，请稍等...')
         self.context.reset()
         self.context.source = BoyaComic(
+            self.context.output_path, self.context.http, self.context.driver)
+        self.prompt = self.prefix + self.context.source.name + '> '
+
+    def do_manhuagui(self, arg=None):
+        """选择看漫画做为动漫下载网站源"""
+        print('正在初始化看漫画动漫下载网站源，请稍等...')
+        self.context.reset()
+        self.context.source = ManhuaguiComic(
             self.context.output_path, self.context.http, self.context.driver)
         self.prompt = self.prefix + self.context.source.name + '> '
 
