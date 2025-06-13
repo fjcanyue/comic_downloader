@@ -20,9 +20,6 @@ class Shell(cmd.Cmd):
     欢迎使用动漫下载器，输入 help 或者 ? 查看帮助。
     您可以输入下列命令来切换动漫下载网站源，目前支持的网站有：
     * dumanwu: 读漫屋
-    * 31mh: 31漫画
-    * boya: 伯牙漫画人
-    * manhuagui: 看漫画
     输入动漫下载网站源后，支持的命令有：
     * s: 搜索动漫，输入s <搜索关键字>。例如：输入 s 猎人
     * d: 全量下载动漫，输入d <搜索结果序号/动漫URL地址>。例如：输入 d 12，或者d https://www.maofly.com/manga/38316.html
@@ -44,9 +41,6 @@ class Shell(cmd.Cmd):
         # 定义支持的漫画源映射
         self.source_map = {
             'dumanwu': DumanwuComic,
-            '31mh': TmhComic,
-            'boya': BoyaComic,
-            'manhuagui': ManhuaguiComic,
         }
         self.source_options = list(self.source_map.keys()) # 存储源名称列表，方便按索引访问
         self.do_source(None)
