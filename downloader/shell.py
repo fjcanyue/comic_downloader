@@ -7,6 +7,7 @@ from downloader.manhuagui import ManhuaguiComic
 from downloader.maofly import MaoflyComic
 from downloader.thmh import TmhComic
 from downloader.boya import BoyaComic
+from downloader.dumanwu import DumanwuComic
 
 from requests.packages.urllib3.util.retry import Retry
 
@@ -18,6 +19,7 @@ class Shell(cmd.Cmd):
     intro = '''
     欢迎使用动漫下载器，输入 help 或者 ? 查看帮助。
     您可以输入下列命令来切换动漫下载网站源，目前支持的网站有：
+    * dumanwu: 读漫屋
     * 31mh: 31漫画
     * boya: 伯牙漫画人
     * manhuagui: 看漫画
@@ -39,50 +41,44 @@ class Shell(cmd.Cmd):
         super(Shell, self).__init__()
         self.context = Context()
         self.context.create(output_path)
-        # sources = ComicSource.__subclasses__()
-        # for source in sources:
-        # print(source)
-        # self.do_maofly()
+        # 定义支持的漫画源映射
+        self.source_map = {
+            'dumanwu': DumanwuComic,
+            '31mh': TmhComic,
+            'boya': BoyaComic,
+            'manhuagui': ManhuaguiComic,
+        }
+        self.source_options = list(self.source_map.keys()) # 存储源名称列表，方便按索引访问
+        self.do_source(None)
 
-    # def do_maofly(self, arg=None):
-    #     """选择漫画猫做为动漫下载网站源"""
-    #     print('正在初始化漫画猫动漫下载网站源，请稍等...')
-    #     self.context.reset()
-    #     self.context.source = MaoflyComic(
-    #         self.context.output_path, self.context.http, self.context.driver)
-    #     self.prompt = self.prefix + self.context.source.name + '> '
+    def do_source(self, arg):
+        """选择动漫下载网站源。输入 source  后，根据提示选择源序号。"""
+        print('请选择动漫下载网站源:')
+        for index, source_name in enumerate(self.source_options):
+            print(f'{index + 1}. {source_name}')
 
-    # def do_dmzj(self, arg=None):
-    #     """选择动漫之家做为动漫下载网站源"""
-    #     print('正在初始化动漫之家动漫下载网站源，请稍等...')
-    #     self.context.reset()
-    #     self.context.source = DmzjComic(
-    #         self.context.output_path, self.context.http, self.context.driver)
-    #     self.prompt = self.prefix + self.context.source.name + '> '
-
-    def do_31mh(self, arg=None):
-        """选择31漫画做为动漫下载网站源"""
-        print('正在初始化31漫画动漫下载网站源，请稍等...')
-        self.context.reset()
-        self.context.source = TmhComic(
-            self.context.output_path, self.context.http, self.context.driver)
-        self.prompt = self.prefix + self.context.source.name + '> '
-
-    def do_boya(self, arg=None):
-        """选择伯牙漫画人做为动漫下载网站源"""
-        print('正在初始化伯牙漫画人动漫下载网站源，请稍等...')
-        self.context.reset()
-        self.context.source = BoyaComic(
-            self.context.output_path, self.context.http, self.context.driver)
-        self.prompt = self.prefix + self.context.source.name + '> '
-
-    def do_manhuagui(self, arg=None):
-        """选择看漫画做为动漫下载网站源"""
-        print('正在初始化看漫画动漫下载网站源，请稍等...')
-        self.context.reset()
-        self.context.source = ManhuaguiComic(
-            self.context.output_path, self.context.http, self.context.driver)
-        self.prompt = self.prefix + self.context.source.name + '> '
+        while True:
+            try:
+                source_index_str = input('请输入网站源序号: ')
+                if not source_index_str: # 用户直接回车，重新显示列表
+                    print('请选择动漫下载网站源:')
+                    for index, source_name in enumerate(self.source_options):
+                        print(f'{index + 1}. {source_name}')
+                    continue # 继续下一次循环，等待用户输入
+                source_index = int(source_index_str) - 1 # 序号从1开始，索引从0开始
+                if 0 <= source_index < len(self.source_options):
+                    source_name = self.source_options[source_index]
+                    print(f'正在初始化{source_name}动漫下载网站源，请稍等...')
+                    self.context.reset()
+                    source_class = self.source_map[source_name]
+                    self.context.source = source_class(
+                        self.context.output_path, self.context.http, self.context.driver)
+                    self.prompt = self.prefix + self.context.source.name + '> '
+                    break # 选择成功，退出循环
+                else:
+                    print(f'无效的序号，请输入 1 到 {len(self.source_options)} 之间的序号。')
+            except ValueError:
+                print('请输入有效的数字序号。')
 
     def do_s(self, arg):
         """搜索动漫，输入s <搜索关键字>，例如：s 猎人"""
@@ -273,4 +269,7 @@ class Context:
 
 
 def __build_fixed_string__(string, length, formatter):
-    return formatter.format(string, len=length - len(string.encode('GBK')) + len(string))
+    format_len = length - len(string.encode('GBK')) + len(string)
+    if (0 > format_len):
+        format_len = 0
+    return formatter.format(string, len=format_len)
