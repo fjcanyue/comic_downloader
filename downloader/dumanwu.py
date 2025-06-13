@@ -1,11 +1,13 @@
 import json
 import re
+import requests
 from io import StringIO
 
 from lxml import etree
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from time import sleep
+from urllib.parse import urlparse
 
 from downloader.comic import Comic, ComicBook, ComicSource, ComicVolume, logger
 
@@ -51,8 +53,8 @@ class DumanwuComic(ComicSource):
                     self.logger.warning("解析到一个没有URL的漫画条目，已跳过。")
                     continue
                 comic.url = '%s%s' % (self.base_url, url_part)
-                # 作者信息似乎未在此处直接提供，设为未知
-                comic.author = '未知作者'
+                # 作者信息未在此处直接提供，设为空
+                comic.author = ''
                 comic.name = b.attrib.get('title', '未知漫画')
                 self.logger.debug(f"找到漫画: {comic.name}, 作者: {comic.author}, URL: {comic.url}")
                 arr.append(comic)
@@ -128,18 +130,17 @@ class DumanwuComic(ComicSource):
                     self.logger.debug(f"  找到卷 (初始列表): {vol_name} ({full_vol_url})")
                 except Exception as e:
                     self.logger.error(f"解析卷 '{vol_name if 'vol_name' in locals() else '未知卷'}' 时出错: {e}", exc_info=True)
-            # comic_book.vols.reverse() # 初始列表通常是正序，按需反转
-            comic.books.append(comic_book)
             book_index = book_index + 1
             # 加载更多章节的逻辑
             try:
-                # 从URL中提取ID，例如 https://www.dumanwu.com/12345/ -> 12345
-                # 或者 https://www.dumanwu.com/manhua/12345.html -> 12345
+                more_div = book.xpath('//div[contains(@class,"chaplist-more")]')
                 match = re.search(r'/(\d+)/?$', url) or re.search(r'/(\d+)\.html$', url)
-                if not match:
+                if not more_div:
                     self.logger.warning(f"无法从URL {url} 中提取漫画ID以加载更多章节.")
                 else:
-                    comic_id = match.group(1)
+                    parsed_url = urlparse(url)
+                    path = parsed_url.path
+                    comic_id = path.strip('/')
                     payload = {'id': comic_id} # POST请求通常用data参数
                     headers = {
                         'Referer': url,
@@ -151,22 +152,20 @@ class DumanwuComic(ComicSource):
                     r = self.http.post(more_chapters_url, data=payload, headers=headers, timeout=30)
                     r.raise_for_status()
                     json_response = r.json() # 直接使用 .json() 方法解析
-                    if json_response.get('code') == 200 and json_response.get('data'):
+                    if json_response.get('code') == '200' and json_response.get('data'):
                         self.logger.info(f"成功加载了 {len(json_response.get('data'))} 个额外章节.")
                         for chapter_data in json_response.get('data'):
                             chap_name = chapter_data.get('chaptername')
                             chap_id = chapter_data.get('chapterid')
                             if chap_name and chap_id:
                                 # 构造章节URL，需要确认是相对路径还是需要拼接
-                                # 假设 chapterid 是路径的一部分，例如 /12345/67890.html
-                                # 或者 chapterid 直接是完整的路径 /manga/chapter/xxxx.html
                                 # 根据网站实际情况调整
                                 chap_url = f"{self.base_url}/{comic_id}/{chap_id}.html" # 示例URL构造
                                 # 或者如果 chapterid 是完整路径的一部分
                                 # chap_url = self.base_url + chap_id if chap_id.startswith('/') else f"{self.base_url}/{chap_id}"
                                 comic_book.vols.append(ComicVolume(chap_name, chap_url, comic_book.name))
                                 self.logger.debug(f"  找到卷 (更多列表): {chap_name} ({chap_url})")
-                    elif json_response.get('code') != 200:
+                    elif json_response.get('code') != '200':
                         self.logger.warning(f"加载更多章节失败: 服务器返回代码 {json_response.get('code')}, 消息: {json_response.get('msg')}")
                     else:
                         self.logger.info("加载更多章节未返回额外数据.")
@@ -205,7 +204,7 @@ class DumanwuComic(ComicSource):
             self.logger.debug(f"初始页面高度: {last_height}")
             
             scroll_attempts = 0
-            max_attempts = 10  # 最大滚动尝试次数
+            max_attempts = 5  # 最大滚动尝试次数
             
             while scroll_attempts < max_attempts:
                 # 滚动到页面底部
