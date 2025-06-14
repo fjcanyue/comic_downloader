@@ -19,7 +19,7 @@ def main():
 
 def __handler__(signum, frame):
     print('感谢使用，再会！')
-    exit(1)
+    sys.exit(1)
 
 
 if __name__ == '__main__':
