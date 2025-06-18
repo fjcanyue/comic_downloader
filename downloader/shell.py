@@ -263,7 +263,8 @@ class Context:
 
 
 def __build_fixed_string__(string, length, formatter):
-    format_len = length - len(string.encode('GBK')) + len(string)
+    # 修复 GBK 编码无法处理特殊字符导致的 UnicodeEncodeError
+    format_len = length - len(string.encode('GBK', errors='ignore')) + len(string)
     if (0 > format_len):
         format_len = 0
     return formatter.format(string, len=format_len)
