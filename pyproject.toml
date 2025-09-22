@@ -1,0 +1,74 @@
+[project]
+name = "comic_downloader"
+version = "0.1.0"
+description = "Effortlessly download comics via this lightweight, single-threaded command-line tool."
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "fjcanyue"}
+]
+urls = {repository = "https://github.com/fjcanyue/comic_downloader"}
+keywords = [
+    "comics downloader",
+    "python"
+]
+requires-python = ">=3.12.0"
+dependencies = [
+    "lxml>=5.4.0",
+    "requests>=2.32.4",
+    "selenium>=4.33.0",
+    "tqdm>=4.67.1",
+    "prompt-toolkit>=3.0.51",
+    "loguru>=0.7.3",
+]
+
+dynamic = ["version"]
+
+# DEV SETTING
+[dependency-groups]
+dev = [
+    "pyright>=1.1.403",
+    "pytest>=8.4.2",
+    "pytest-cov>=7.0.0",
+    "ruff>=0.13.1",
+    "toml>=0.10.2",
+    "toml-sort>=0.24.3",
+    "uv>=0.8.19",
+]
+docs = [
+    "mkdocs>=1.6.1",
+    "mkdocs-include-markdown-plugin>=7.1.7",
+    "mkdocs-jupyter2>=0.25.2",
+    "mkdocs-material>=9.6.20",
+    "mkdocstrings-python>=1.18.2",
+    "pymdown-extensions>=10.16",
+]
+
+# DEV SETTING
+[tool.uv]
+default-groups = ["dev"]
+
+# DEV SETTING
+# ruff.toml file is used.
+[tool.ruff]
+
+# DEV SETTING
+# pytest.ini file is used.
+[tool.pytest]
+
+# DEV SETTING
+# .coveragerc file is used. A pytest fixture in .conftest.py is used to create coverage file/report directory.
+[tool.coverage]
+
+# DEV SETTING
+# pyrightconfig.json file is used. NOTE: Ensure to set the python version correctly.
+[tool.pyright]
+
+# DEV SETTING
+# NOTE: to sort, run: "uv run toml-sort pyproject.toml"
+[tool.tomlsort]
+in_place = true
+no_sort_tables = true
+sort_inline_arrays = true
+spaces_before_inline_comment = 4
+spaces_indent_inline_array = 4
