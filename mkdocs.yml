@@ -5,13 +5,12 @@ site_url: https://hatch.pypa.io
 repo_name: fjcanyue/comic_downloader
 repo_url: https://github.com/fjcanyue/comic_downloader
 edit_uri: blob/master/docs
-copyright: 'Copyright &copy; fjcanyue 2025-present'
+copyright: 'Copyright &copy; fjcanyue 2025 present'
 
 docs_dir: docs
 site_dir: site
 theme:
   name: material
-  custom_dir: docs/.overrides
   language: zh
   favicon: assets/images/logo.svg
   icon:
@@ -53,17 +52,14 @@ nav:
     - Walkthrough:
       - Installation: install.md
       - Introduction: intro.md
-      - Environments: environment.md
       - Builds: build.md
   - Tutorials:
-    - Python:
-      - Management: tutorials/python/manage.md
-    - Environments:
-      - Basic usage: tutorials/environment/basic-usage.md
+    - Basic usage: basic-usage.md
+    - Management: manage.md
     - Testing:
-      - Overview: tutorials/testing/overview.md
+      - Overview: overview.md
   - Meta:
-    - FAQ: meta/faq.md
+    - FAQ: faq.md
     - Authors: meta/authors.md
 
 plugins:
@@ -89,7 +85,7 @@ plugins:
     handlers:
       python:
         paths:
-          - src
+          - Downloader
         options:
           # Headings
           show_root_heading: true
@@ -113,7 +109,7 @@ markdown_extensions:
   - markdown.extensions.toc:
       permalink: true
   # Extra
-  - mkdocs-click:
+  #- mkdocs-click:
   - pymdownx.arithmatex:
   - pymdownx.betterem:
       smart_enable: all
@@ -148,9 +144,9 @@ markdown_extensions:
       check_paths: true
       base_path:
         - docs/.snippets
-      auto_append:
-        - links.txt
-        - abbrs.txt
+      #auto_append:
+        #- links.txt
+        #- abbrs.txt
   - pymdownx.superfences:
   - pymdownx.tabbed:
       alternate_style: true
@@ -166,13 +162,9 @@ extra:
     provider: mike
   social:
     - icon: fontawesome/brands/github-alt
-      link: https://github.com/ofek
+      link: https://github.com/fjcanyue
     - icon: fontawesome/solid/blog
-      link: https://ofek.dev/words/
-    - icon: fontawesome/brands/twitter
-      link: https://twitter.com/Ofekmeister
-    - icon: fontawesome/brands/linkedin
-      link: https://www.linkedin.com/in/ofeklev/
+      link: https://fjcanyue.github.io
 extra_css:
-  - assets/css/custom.css
+  # - assets/css/custom.css
   - https://cdn.jsdelivr.net/npm/firacode@6.2.0/distr/fira_code.css

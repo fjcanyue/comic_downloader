@@ -1,0 +1,24 @@
+{
+    "include": [
+        "downloader"
+    ],
+    "exclude": [
+        "**/__pycache__",
+        "downloader/experimental",
+        "downloader/typestubs"
+    ],
+    "ignore": [],
+    "defineConstant": {
+        "DEBUG": true
+    },
+    "stubPath": "downloader/stubs",
+    "reportMissingImports": "error",
+    "reportMissingTypeStubs": false,
+    "pythonVersion": "3.10",
+    "pythonPlatform": "Linux",
+    "executionEnvironments": [
+        {
+            "root": "downloader"
+        }
+    ]
+}
