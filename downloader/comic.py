@@ -1,13 +1,13 @@
+import concurrent.futures
 import os
 import re
 import shutil
-import requests
-from loguru import logger
 from abc import ABC, abstractmethod
 from io import StringIO
 from time import sleep
-import concurrent.futures
 
+import requests
+from loguru import logger
 from lxml import etree
 from tqdm import tqdm
 
@@ -18,8 +18,8 @@ from tqdm import tqdm
 # logger.remove() # 移除默认的 stderr 输出
 # logger.add(sys.stderr, format="{time} {level} {message}") # 添加自定义格式的 stderr 输出
 
-class ComicSource(ABC):
 
+class ComicSource(ABC):
     def __init__(self, output_dir, http, driver):
         """动漫源构造函数
 
@@ -29,15 +29,13 @@ class ComicSource(ABC):
             driver (WebDriver): Selenium 网页驱动对象
         """
         self.output_dir = output_dir
-        '''下载根目录'''
+        """下载根目录"""
         self.http = http
-        '''requests 会话对象'''
+        """requests 会话对象"""
         self.driver = driver
-        '''Selenium 网页驱动对象'''
+        """Selenium 网页驱动对象"""
 
-        self.http.headers.update({
-            'referer': self.base_url
-        })
+        self.http.headers.update({'referer': self.base_url})
 
         self.parser = etree.HTMLParser()
         self.logger = logger
@@ -52,7 +50,6 @@ class ComicSource(ABC):
         Returns:
             array: 搜索结果
         """
-        pass
 
     @abstractmethod
     def info(self, url):
@@ -61,7 +58,6 @@ class ComicSource(ABC):
         Args:
             url (str): 动漫URL地址
         """
-        pass
 
     def download_full_by_url(self, url):
         """全量下载指定动漫
@@ -69,16 +65,16 @@ class ComicSource(ABC):
         Args:
             url (str): 动漫URL地址
         """
-        self.logger.info(f"开始全量下载动漫: {url}")
+        self.logger.info(f'开始全量下载动漫: {url}')
         try:
             comic_info = self.info(url)
             if comic_info:
                 self.download_full(comic_info)
-                logger.info(f"动漫 {comic_info.name} 全量下载完成") # 直接使用全局 logger
+                logger.info(f'动漫 {comic_info.name} 全量下载完成')  # 直接使用全局 logger
             else:
-                logger.error(f"获取动漫信息失败: {url}")
+                logger.error(f'获取动漫信息失败: {url}')
         except Exception as e:
-            logger.error(f"全量下载动漫失败: {url}, 错误: {e}", exc_info=True)
+            logger.error(f'全量下载动漫失败: {url}, 错误: {e}', exc_info=True)
 
     def download_full(self, comic):
         """全量下载指定动漫
@@ -87,16 +83,16 @@ class ComicSource(ABC):
             comic (Comic): 动漫对象
         """
         path = os.path.join(self.output_dir, __filter_dir__(comic.name))
-        logger.info(f"创建动漫目录: {path}")
+        logger.info(f'创建动漫目录: {path}')
         os.makedirs(path, exist_ok=True)
         for book in comic.books:
             book_path = os.path.join(path, __filter_dir__(book.name))
-            logger.info(f"处理章节: {book.name}")
+            logger.info(f'处理章节: {book.name}')
             for vol in tqdm(book.vols, desc=book.name):
                 try:
                     self.__download_vol__(book_path, vol.name, vol.url)
                 except Exception as e:
-                    logger.error(f"下载卷/话失败: {vol.name} ({vol.url}), 错误: {e}", exc_info=True)
+                    logger.error(f'下载卷/话失败: {vol.name} ({vol.url}), 错误: {e}', exc_info=True)
 
     @abstractmethod
     def __parse_imgs__(self, url):
@@ -108,7 +104,6 @@ class ComicSource(ABC):
         Returns:
             array: 图片URL地址数组
         """
-        pass
 
     def download_vols(self, comic_name, book_name, vols):
         """按指定范围下载动漫
@@ -119,13 +114,13 @@ class ComicSource(ABC):
             vols (array): 待下载的动漫卷/话列表
         """
         path = os.path.join(self.output_dir, __filter_dir__(comic_name), __filter_dir__(book_name))
-        logger.info(f"创建章节目录: {path} 用于下载指定卷/话")
+        logger.info(f'创建章节目录: {path} 用于下载指定卷/话')
         os.makedirs(path, exist_ok=True)
         for vol in tqdm(vols, desc=book_name):
             try:
                 self.__download_vol__(path, vol.name, vol.url)
             except Exception as e:
-                logger.error(f"下载卷/话失败: {vol.name} ({vol.url}), 错误: {e}", exc_info=True)
+                logger.error(f'下载卷/话失败: {vol.name} ({vol.url}), 错误: {e}', exc_info=True)
 
     def __download_vol__(self, path, vol_name, url):
         """下载动漫卷/话
@@ -135,22 +130,22 @@ class ComicSource(ABC):
             vol_name (str): 动漫卷/话名称
             url (str): 动漫卷/话URL地址
         """
-        logger.info(f"开始下载卷/话: {vol_name} 从 {url}")
+        logger.info(f'开始下载卷/话: {vol_name} 从 {url}')
         try:
             imgs = self.__parse_imgs__(url)
             if not imgs:
-                logger.warning(f"未解析到任何图片: {vol_name} ({url})")
+                logger.warning(f'未解析到任何图片: {vol_name} ({url})')
                 return
             target_path = os.path.join(path, __filter_dir__(vol_name))
             self.__download_vol_images__(target_path, vol_name, imgs)
-            logger.info(f"卷/话 {vol_name} 下载完成.")
+            logger.info(f'卷/话 {vol_name} 下载完成.')
         except Exception as e:
-            logger.error(f"处理卷/话失败: {vol_name} ({url}), 错误: {e}", exc_info=True)
-            raise # 将异常继续向上抛出，以便上层调用者知道下载失败
+            logger.error(f'处理卷/话失败: {vol_name} ({url}), 错误: {e}', exc_info=True)
+            raise  # 将异常继续向上抛出，以便上层调用者知道下载失败
 
     def __download_vol_images__(self, path, vol_name, imgs):
         """下载图片"""
-        logger.info(f"开始下载图片到目录: {path} (共 {len(imgs)} 张)")
+        logger.info(f'开始下载图片到目录: {path} (共 {len(imgs)} 张)')
         os.makedirs(path, exist_ok=True)
         use_uri = hasattr(self, 'base_img_url')
 
@@ -163,8 +158,8 @@ class ComicSource(ABC):
                 full_img_url = self.base_img_url + '/' + img_url_part
             else:
                 full_img_url = img_url_part
-            
-            logger.debug(f"下载图片: {full_img_url} 到 {file_path}")
+
+            logger.debug(f'下载图片: {full_img_url} 到 {file_path}')
             try:
                 # 注意：requests.Session 不是线程安全的，如果 http 对象是 Session，并发下载时需要为每个线程创建独立的 Session
                 # 或者使用线程安全的 HTTP 客户端库。此处假设 self.http.get 是线程安全的，或者不是 Session 对象。
@@ -175,13 +170,13 @@ class ComicSource(ABC):
                 r.raise_for_status()
                 with open(file_path, 'wb') as f:
                     f.write(r.content)
-                logger.debug(f"图片 {file_path} 下载成功.")
+                logger.debug(f'图片 {file_path} 下载成功.')
                 return True, full_img_url
             except requests.exceptions.RequestException as e:
-                logger.error(f"下载图片失败: {full_img_url}, 错误: {e}")
+                logger.error(f'下载图片失败: {full_img_url}, 错误: {e}')
                 return False, full_img_url
-            except IOError as e:
-                logger.error(f"写入图片文件失败: {file_path}, 错误: {e}")
+            except OSError as e:
+                logger.error(f'写入图片文件失败: {file_path}, 错误: {e}')
                 return False, full_img_url
 
         # 使用 ThreadPoolExecutor 进行并发下载，可以根据需要调整 max_workers
@@ -193,25 +188,30 @@ class ComicSource(ABC):
         # 如果 download_interval 较大，则并发数意义不大
         # 如果 download_interval 较小或为0，则可以适当增加并发数
         # 这里暂时设置为5，可以根据实际情况调整
-        max_workers = getattr(self, 'max_download_workers', 5) 
+        max_workers = getattr(self, 'max_download_workers', 5)
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             # 使用 tqdm 显示进度
-            futures = [executor.submit(download_image, (index, img_url_part)) for index, img_url_part in enumerate(imgs)]
-            for future in tqdm(concurrent.futures.as_completed(futures), total=len(imgs), desc=vol_name):
+            futures = [
+                executor.submit(download_image, (index, img_url_part))
+                for index, img_url_part in enumerate(imgs)
+            ]
+            for future in tqdm(
+                concurrent.futures.as_completed(futures), total=len(imgs), desc=vol_name
+            ):
                 success, url = future.result()
                 # 可以在这里处理下载失败的情况，例如记录失败的URL列表
 
-        if os.path.exists(path) and os.listdir(path): # 仅当目录存在且非空时创建压缩文件
-            logger.info(f"开始压缩目录: {path}")
+        if os.path.exists(path) and os.listdir(path):  # 仅当目录存在且非空时创建压缩文件
+            logger.info(f'开始压缩目录: {path}')
             try:
                 shutil.make_archive(path, 'zip', path)
-                logger.info(f"目录 {path} 压缩完成.")
+                logger.info(f'目录 {path} 压缩完成.')
             except Exception as e:
-                logger.error(f"压缩目录失败: {path}, 错误: {e}", exc_info=True)
+                logger.error(f'压缩目录失败: {path}, 错误: {e}', exc_info=True)
         elif not os.path.exists(path):
-            logger.warning(f"目录 {path} 不存在, 跳过压缩.")
+            logger.warning(f'目录 {path} 不存在, 跳过压缩.')
         else:
-            logger.warning(f"目录 {path} 为空, 跳过压缩.")
+            logger.warning(f'目录 {path} 为空, 跳过压缩.')
 
     def __parse_html__(self, url, method='GET', data=None, encoding='utf-8'):
         """解析HTML
@@ -222,23 +222,23 @@ class ComicSource(ABC):
         Returns:
             array: 根元素
         """
-        self.logger.debug(f"开始解析HTML: {url}, 方法: {method}")
+        self.logger.debug(f'开始解析HTML: {url}, 方法: {method}')
         try:
             if method == 'GET':
-                r = self.http.get(url, timeout=30) # 增加超时
+                r = self.http.get(url, timeout=30)  # 增加超时
             elif method == 'POST':
-                r = self.http.post(url, data=data, timeout=30) # 增加超时
+                r = self.http.post(url, data=data, timeout=30)  # 增加超时
             else:
-                logger.error(f"不支持的HTTP方法: {method}")
+                logger.error(f'不支持的HTTP方法: {method}')
                 return None
-            r.raise_for_status() # 如果请求失败则抛出HTTPError异常
+            r.raise_for_status()  # 如果请求失败则抛出HTTPError异常
             r.encoding = encoding
             return etree.parse(StringIO(r.text), self.parser)
         except requests.exceptions.RequestException as e:
-            logger.error(f"请求HTML页面失败: {url}, 方法: {method}, 错误: {e}", exc_info=True)
+            logger.error(f'请求HTML页面失败: {url}, 方法: {method}, 错误: {e}', exc_info=True)
             return None
         except Exception as e:
-            logger.error(f"处理HTML页面时发生未知错误: {url}, 错误: {e}", exc_info=True)
+            logger.error(f'处理HTML页面时发生未知错误: {url}, 错误: {e}', exc_info=True)
             return None
 
 
@@ -264,7 +264,7 @@ class ComicVolume:
         self.book_name = book_name
 
 
-__filter_dir_re = re.compile('[\/:*?"<>|]')
+__filter_dir_re = re.compile(r'[\/:*?"<>|]')
 
 
 def __filter_dir__(name):
