@@ -1,9 +1,20 @@
-HELP.md
-.gradle
+# general things to ignore
 build/
 dist/
-!gradle/wrapper/gradle-wrapper.jar
-**/__pycache__/
+*.egg-info/
+*.egg
+*.py[cod]
+__pycache__/
+*.so
+*~
+venv/
+
+site/
+
+# due to using nox and pytest
+.nox
+.cache
+
 **/geckodriver.log
 
 ### VS Code ###

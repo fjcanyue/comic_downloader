@@ -1,0 +1,154 @@
+[project]
+name = "comic_downloader"
+dynamic = ["version"]
+description = "Effortlessly download comics via this lightweight, single-threaded command-line tool."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "fjcanyue" }]
+urls = { repository = "https://github.com/fjcanyue/comic_downloader" }
+keywords = ["comics downloader", "python"]
+requires-python = ">=3.10.0"
+dependencies = [
+  "lxml>=5.4.0",
+  "requests>=2.32.4",
+  "selenium>=4.33.0",
+  "tqdm>=4.67.1",
+  "prompt-toolkit>=3.0.51",
+  "loguru>=0.7.3",
+]
+
+[project.scripts]
+run-app = "main:main"
+
+# DEV SETTING
+[dependency-groups]
+dev = [
+  "pyright>=1.1.403",
+  "pytest>=8.4.2",
+  "pytest-cov>=7.0.0",
+  "ruff>=0.13.1",
+  "toml>=0.10.2",
+  "toml-sort>=0.24.3",
+  "uv>=0.8.20",
+  "bump-my-version>=1.2.3",
+]
+docs = [
+  "mkdocs>=1.6.1",
+  "mkdocs-include-markdown-plugin>=7.1.7",
+  "mkdocs-jupyter2>=0.25.2",
+  "mkdocs-material>=9.6.20",
+  "mkdocstrings-python>=1.18.2",
+  "mkdocs-minify-plugin>=0.8.0",
+  "mkdocs-glightbox>=0.5.1",
+  "mkdocs-git-revision-date-localized-plugin>=1.4.7",
+  "pymdown-extensions>=10.16",
+  "mike>=2.1.3",
+]
+
+# DEV SETTING
+[tool.uv]
+default-groups = ["dev"]
+
+# DEV SETTING
+# pyrightconfig.json file is used. NOTE: Ensure to set the python version correctly.
+[tool.pyright]
+
+# DEV SETTING
+# NOTE: to sort, run: "uv run toml-sort pyproject.toml"
+[tool.tomlsort]
+in_place = true
+no_sort_tables = true
+sort_inline_arrays = true
+spaces_before_inline_comment = 4
+spaces_indent_inline_array = 4
+
+[tool.bumpversion]
+current_version = "0.0.1"
+
+[[tool.bumpversion.files]]
+filename = "downloader/__init__.py"
+
+# ==============================================================================
+#                           Ruff 统一工具链配置
+# ==============================================================================
+# Ruff 的所有配置都在 [tool.ruff] 表下。
+[tool.ruff]
+# 指定 Ruff 应该处理的 Python 版本。
+target-version = "py310"
+
+# 定义源码目录，帮助 Ruff 正确解析导入。
+src = ["src"]
+
+indent-width = 4
+# 行长度限制为 100 个字符
+line-length = 100
+
+[tool.ruff.lint]
+# 启用所有稳定规则
+select = [
+  "E",     # pycodestyle errors
+  "W",     # pycodestyle warnings
+  "F",     # pyflakes
+  "UP",    # pyupgrade
+  "B",     # flake8-bugbear
+  "S",     # bandit (security issues)
+  "N",     # pep8-naming (naming conventions)
+  "SIM",   # flake8-simplify
+  "I",     # isort
+  "PERF",  # performance issues
+  "PIE",   # flake8-pie (unnecessary code)
+  "ASYNC", # async/await best practices
+  "RET",   # flake8-return (return improvements)
+  "LOG",   #flake8-logging
+  "G",     #flake8-logging-format
+]
+
+# 忽略特定规则
+ignore = [
+  "SIM105", # contextlib.suppress is roughly 3x slower than try/except
+  "SIM108", # This is an opinionated style rule that may not always be to everyone's taste, especially for code that makes use of complex conditions
+  "E501",   # line too long, handled by formatter
+  "B008",   # do not perform function calls in argument defaults
+]
+
+# 导入排序配置
+isort = { combine-as-imports = true, known-first-party = ["agents"] }
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+  "S101",
+  "RET504",
+] # Allow assert statements and unnecessary assignments before return in tests
+
+# 代码格式化配置
+[tool.ruff.format]
+# 使用 4 个空格缩进
+indent-style = "space"
+
+line-ending = "auto"
+quote-style = "single"
+
+# ==============================================================================
+#                           Pytest 配置
+# ==============================================================================
+[tool.pytest.ini_options]
+addopts = "-ra -q -s --strict-markers --cov=my_package --cov-report=term-missing --cov-report html:htmlcov"
+markers = [
+  "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+  "integration: marks tests as integration tests",
+  "unit: marks tests as unit tests",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+  "pragma: no cover",
+  "def __repr__",
+  "if self.debug:",
+  "if settings.DEBUG",
+  "raise AssertionError",
+  "raise NotImplementedError",
+  "if 0:",
+  "if __name__ == .__main__.:",
+  "class .*\\bProtocol\\):",
+  "@(abc\\.)?abstractmethod",
+]
