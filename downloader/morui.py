@@ -214,15 +214,6 @@ class MoruiComic(ComicSource):
                 if not img_url or not isinstance(img_url, str):
                     logger.warning(f'无效的图片URL: {img_url}')
                     continue
-                # 检查URL是否完整，如果不是，则拼接
-                if not img_url.startswith('http'):
-                    # 假设图片URL是相对路径，需要根据实际情况拼接
-                    # 通常网站会将图片放在特定域名或路径下
-                    # 这里假设是相对于 base_url，但这可能不正确，需要根据实际网站结构调整
-                    # 示例：img_url = self.base_img_url.rstrip('/') + '/' + img_url.lstrip('/')
-                    # 对于thmh.com, chapterImages通常是完整URL
-                    img_url = self.base_img_url + img_url
-                    logger.debug(f"图片URL '{img_url}' 不是完整URL，将直接使用，请确认是否正确.")
                 processed_imgs.append(img_url)
                 logger.debug(f'解析到图片URL: {img_url}')
 

@@ -154,8 +154,11 @@ class ComicSource(ABC):
             sleep(self.download_interval)  # 保持下载间隔，避免对服务器造成过大压力
             file_path = '%s/%04d.jpg' % (path, (index + 1))
             full_img_url = ''
-            if use_uri:
-                full_img_url = self.base_img_url + '/' + img_url_part
+            if use_uri and not img_url_part.startswith('http'):
+                if img_url_part.startswith('/'):
+                    full_img_url = self.base_img_url + img_url_part
+                else:
+                    full_img_url = self.base_img_url + '/' + img_url_part
             else:
                 full_img_url = img_url_part
 
