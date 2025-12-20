@@ -6,6 +6,7 @@ from downloader.comic import Comic, ComicBook, ComicSource, ComicVolume, logger
 class MoruiComic(ComicSource):
     name = '摩锐漫画'
     base_url = 'https://www.morui.com'
+    base_img_url = 'http://lao.haotu90.top'
     download_interval = 5
 
     def __init__(self, output_dir, http, driver):
@@ -220,6 +221,7 @@ class MoruiComic(ComicSource):
                     # 这里假设是相对于 base_url，但这可能不正确，需要根据实际网站结构调整
                     # 示例：img_url = self.base_img_url.rstrip('/') + '/' + img_url.lstrip('/')
                     # 对于thmh.com, chapterImages通常是完整URL
+                    img_url = self.base_img_url + img_url
                     logger.debug(f"图片URL '{img_url}' 不是完整URL，将直接使用，请确认是否正确.")
                 processed_imgs.append(img_url)
                 logger.debug(f'解析到图片URL: {img_url}')
