@@ -8,12 +8,14 @@ from selenium.webdriver.firefox.options import Options
 
 from downloader.dumanwu import DumanwuComic
 from downloader.manhuazhan import ManhuazhanComic
+from downloader.morui import MoruiComic
 
 
 class Shell(cmd.Cmd):
     intro = """
     欢迎使用动漫下载器，输入 help 或者 ? 查看帮助。
     您可以输入下列命令来切换动漫下载网站源，目前支持的网站有：
+    * morui: 摩锐漫画
     * dumanwu: 读漫屋
     * manhuazhan: 漫画站
     输入动漫下载网站源后，支持的命令有：
@@ -36,6 +38,7 @@ class Shell(cmd.Cmd):
         self.context.create(output_path)
         # 定义支持的漫画源映射
         self.source_map = {
+            'morui': MoruiComic,
             'dumanwu': DumanwuComic,
             'manhuazhan': ManhuazhanComic,
         }
@@ -80,7 +83,7 @@ class Shell(cmd.Cmd):
             self.context.reset_comic()
             self.context.searched_results = self.context.source.search(arg)
             for index, comic in enumerate(self.context.searched_results):
-                print(f'{index}: {comic.author} {comic.name} %{comic.url}')
+                print(f'{index}: {comic.author} {comic.name} {comic.url}')
         else:
             print('请您先选择动漫下载网站源！')
 
