@@ -216,6 +216,70 @@ class ComicSource(ABC):
         else:
             logger.warning(f'目录 {path} 为空, 跳过压缩.')
 
+    def parse_xpath_list(self, root, xpath, extract_map):
+        """通用XPath列表解析方法
+
+        Args:
+            root: etree根元素
+            xpath (str): XPath表达式
+            extract_map (dict): 提取映射，如 {'name': './@title', 'url': './@href'}
+
+        Returns:
+            list: 提取的数据字典列表
+        """
+        results = []
+        try:
+            nodes = root.xpath(xpath)
+            for node in nodes:
+                item = {}
+                for key, expr in extract_map.items():
+                    try:
+                        if expr.startswith('./@'):
+                            vals = node.xpath(expr)
+                            item[key] = vals[0] if vals else None
+                        elif expr == './text()':
+                            item[key] = node.text.strip() if node.text else None
+                        else:
+                            vals = node.xpath(expr)
+                            if vals:
+                                text_node = vals[0]
+                                item[key] = (
+                                    text_node.text.strip()
+                                    if hasattr(text_node, 'text') and text_node.text
+                                    else text_node
+                                )
+                            else:
+                                item[key] = None
+                    except Exception as e:
+                        self.logger.debug(f'提取 {key} 时出错: {e}')
+                        item[key] = None
+                results.append(item)
+        except Exception as e:
+            self.logger.error(f'XPath解析失败: {xpath}, 错误: {e}')
+        return results
+
+    def execute_js_safely(self, driver, js_code, fallback=None):
+        """安全执行JavaScript代码
+
+        Args:
+            driver: Selenium WebDriver
+            js_code (str): JS代码
+            fallback: 默认返回值
+
+        Returns:
+            执行结果或fallback
+        """
+        try:
+            # 简单验证JS代码，避免明显注入
+            if not js_code or 'eval(' in js_code:
+                self.logger.warning(f'潜在不安全JS代码: {js_code}')
+                return fallback
+            result = driver.execute_script(js_code)
+            return result
+        except Exception as e:
+            self.logger.error(f'JS执行失败: {js_code}, 错误: {e}')
+            return fallback
+
     def __parse_html__(self, url, method='GET', data=None, encoding='utf-8'):
         """解析HTML
 

@@ -9,6 +9,20 @@ class DmzjComic(ComicSource):
     base_img_url = 'http://images.dmzj.com'
     download_interval = 5
 
+    config = {
+        'search_js': 'if(typeof g_search_data !== "undefined") { return g_search_data; } else { return []; }',
+        'info_name_xpath': '//span[@class="anim_title_text"]/a/h1',
+        'info_backup_name_xpath': '//div[@class="comic_deCon_new"]/div[@class="comic_deCon_left"]/h1/a',
+        'info_meta_xpath': '//div[@class="anim-main_list"]/table/tr',
+        'info_books_xpaths': [
+            '//div[contains(@class,"cartoon_online_border")]//div[contains(@class,"tab-content")]//ul[contains(@class,"list_con_li")]',
+            '//div[@class="middleright"]/div[@class="middleright_mr"]/div[@class="photo_part"]',
+            '//div[contains(@class, "chapter_con")]/ul/li',
+        ],
+        'info_vol_extract': {'name': './a', 'url': './a/@href'},
+        'imgs_js': 'eval("var __a__=" + pages);return __a__;',
+    }
+
     def __init__(self, output_dir, http, driver):
         super().__init__(output_dir, http, driver)
 
@@ -19,20 +33,15 @@ class DmzjComic(ComicSource):
         try:
             r = self.http.get(search_url, timeout=30)
             r.raise_for_status()
-            # DMZJ的搜索接口直接返回一段JS代码，需要执行它来获取数据
-            # 确保返回 g_search_data
-            js_code = (
-                r.text
-                + '; if(typeof g_search_data !== "undefined") { return g_search_data; } else { return []; }'
-            )
-            results = self.driver.execute_script(js_code)
+            js_code = r.text + '; ' + self.config['search_js']
+            results = self.execute_js_safely(self.driver, js_code, [])
             if not results:
                 logger.info(f"动漫之家 搜索 '{keyword}' 无结果或解析JS失败.")
                 return arr
         except requests.exceptions.RequestException as e:
             logger.error(f'请求动漫之家搜索接口失败: {search_url}, 错误: {e}')
             return arr
-        except Exception as e:  # 捕获Selenium执行JS可能出现的错误
+        except Exception as e:
             logger.error(f'执行动漫之家搜索脚本失败: {search_url}, 错误: {e}', exc_info=True)
             return arr
 
@@ -202,17 +211,12 @@ class DmzjComic(ComicSource):
         try:
             self.driver.get(url)
             self.driver.implicitly_wait(10)
-
-            script_to_execute = 'eval("var __a__=" + pages);return __a__;'
-            imgs = self.driver.execute_script(script_to_execute)
-
-            if imgs and isinstance(imgs, list) and len(imgs) > 0:
+            imgs = self.execute_js_safely(self.driver, self.config['imgs_js'], [])
+            if imgs and isinstance(imgs, list):
                 logger.info(f'成功解析到 {len(imgs)} 张图片来自 {url}')
             else:
-                logger.warning(
-                    f'未解析到图片链接 (JS变量 pages/arr_pages/chapterImages 未定义、为空或格式不正确): {url}. 尝试的脚本输出: {imgs}'
-                )
-            return imgs if isinstance(imgs, list) else []  # 确保返回列表
+                logger.warning(f'未解析到图片链接: {url}')
+            return imgs if isinstance(imgs, list) else []
         except Exception as e:
             logger.error(f'使用 Selenium 解析图片列表失败: {url}, 错误: {e}', exc_info=True)
             return []

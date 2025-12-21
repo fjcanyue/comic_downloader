@@ -12,6 +12,10 @@ class MaoflyComic(ComicSource):
     base_img_url = 'https://mao.mhtupian.com/uploads'
     download_interval = 5
 
+    config = {
+        'imgs_js': None  # 使用自定义JS解码逻辑
+    }
+
     def __init__(self, output_dir, http, driver):
         super().__init__(output_dir, http, driver)
         try:

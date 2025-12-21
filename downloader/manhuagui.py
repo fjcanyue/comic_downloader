@@ -7,6 +7,10 @@ class ManhuaguiComic(ComicSource):
     # base_img_url = 'http://imgpc.31mh.com/images/comic'
     download_interval = 5
 
+    config = {
+        'imgs_js': 'var _page = 1;var images = [];while(true) {SMH.utils.goPage(_page);if (pVars.page != _page) {break;}images.push(pVars.curFile);_page++;}return images;'
+    }
+
     def __init__(self, output_dir, http, driver):
         super().__init__(output_dir, http, driver)
 
@@ -125,16 +129,13 @@ class ManhuaguiComic(ComicSource):
         logger.info(f'开始从 看漫画 解析图片列表: {url}')
         try:
             self.driver.get(url)
-            # 增加一些等待，确保JS执行环境准备好
-            self.driver.implicitly_wait(5)  # 隐式等待
-            imgs = self.driver.execute_script(
-                'var _page = 1;var images = [];while(true) {SMH.utils.goPage(_page);if (pVars.page != _page) {break;}images.push(pVars.curFile);_page++;}return images;'
-            )
+            self.driver.implicitly_wait(5)
+            imgs = self.execute_js_safely(self.driver, self.config['imgs_js'], [])
             if imgs:
                 logger.info(f'成功解析到 {len(imgs)} 张图片来自 {url}')
             else:
-                logger.warning(f'未解析到任何图片链接来自 {url}, 可能是页面结构变化或JS执行问题.')
+                logger.warning(f'未解析到任何图片链接来自 {url}')
             return imgs
         except Exception as e:
             logger.error(f'使用 Selenium 解析图片列表失败: {url}, 错误: {e}', exc_info=True)
-            return []  # 返回空列表表示失败
+            return []
