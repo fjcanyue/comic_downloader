@@ -4,10 +4,20 @@ from downloader.comic import Comic, ComicBook, ComicSource, ComicVolume, logger
 
 
 class BoyaComic(ComicSource):
-    def __init__(self, output_dir, http, driver):
-        super().__init__(output_dir, http, driver)
-        self.name = '博雅漫画'
-        self.base_url = 'http://www.boyamh.com'
+    name = '博雅漫画'
+    base_url = 'http://www.boyamh.com'
+
+    config = {
+        'search_xpath': '//ul[contains(@class,"cartoon-block-box")]/li',
+        'info_name_xpath': '//div[contains(@class,"article-info-item")]/h1',
+        'info_meta_xpath': '//div[contains(@class,"info-item-bottom")]/p',
+        'info_books_xpath': '//div[contains(@class,"article-chapter-list")]',
+        'info_book_name_xpath': 'div/div[contains(@class,"cart-tag")]',
+        'info_vols_xpath': 'ul[contains(@class,"chapter-list")]/li',
+        'info_vol_extract': {'name': './a', 'url': './a/@href'},
+        'imgs_xpath': '//div[contains(@class,"chapter-content")]/img',
+        'imgs_attr': 'data-original',
+    }
 
     def search(self, keyword):
         logger.info(f'开始在 {self.name} 搜索: {keyword}')
@@ -169,19 +179,16 @@ class BoyaComic(ComicSource):
             if root is None:
                 logger.error(f'解析图片列表失败，无法获取或解析页面内容: {url}')
                 return arr
-            img_nodes = root.xpath('//div[contains(@class,"chapter-content")]/img')
+            img_nodes = root.xpath(self.config['imgs_xpath'])
             if not img_nodes:
-                logger.warning(
-                    f'未找到图片元素 (chapter-content/img): {url}, 页面结构可能已更改或无图片.'
-                )
+                logger.warning(f'未找到图片元素: {url}')
                 return arr
             for img_node in img_nodes:
-                img_url = img_node.attrib.get('data-original') or img_node.attrib.get(
+                img_url = img_node.attrib.get(self.config['imgs_attr']) or img_node.attrib.get(
                     'src'
-                )  # 尝试 data-original 和 src
+                )
                 if img_url:
                     if not img_url.startswith('http'):
-                        # 根据实际情况拼接基础URL，这里假设相对路径是相对于域名根目录
                         img_url = (
                             self.base_url + img_url
                             if img_url.startswith('/')
@@ -191,9 +198,9 @@ class BoyaComic(ComicSource):
                     logger.debug(f'找到图片URL: {img_url}')
                 else:
                     logger.warning(
-                        f"找到一个没有 'data-original' 或 'src' 属性的图片标签: {etree.tostring(img_node, encoding='unicode')}"
+                        f'图片标签缺少属性: {etree.tostring(img_node, encoding="unicode")}'
                     )
             logger.info(f'成功从 {url} 解析到 {len(arr)} 张图片.')
         except Exception as e:
-            logger.error(f'使用 lxml 解析图片列表失败: {url}, 错误: {e}', exc_info=True)
+            logger.error(f'解析图片列表失败: {url}, 错误: {e}', exc_info=True)
         return arr

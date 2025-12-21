@@ -9,6 +9,18 @@ class MoruiComic(ComicSource):
     base_img_url = 'http://lao.haotu90.top'
     download_interval = 5
 
+    config = {
+        'search_xpath': '//li[contains(@class,"item-lg")]',
+        'search_extract': {'name': './a/@title', 'url': './a/@href'},
+        'info_name_xpath': '//div[contains(@class,"book-title")]/h1/span',
+        'info_meta_xpath': '//ul[contains(@class,"detail-list")]/li',
+        'info_books_xpath': '//div[contains(@class,"comic-chapters")]',
+        'info_book_name_xpath': 'div[contains(@class,"chapter-category")]/div[contains(@class,"caption")]/span',
+        'info_vols_xpath': 'div[contains(@class,"chapter-body")]/ul/li',
+        'info_vol_extract': {'name': './a/span', 'url': './a/@href'},
+        'imgs_js': 'return typeof chapterImages !== "undefined" ? chapterImages : [];',
+    }
+
     def __init__(self, output_dir, http, driver):
         super().__init__(output_dir, http, driver)
 
@@ -30,42 +42,40 @@ class MoruiComic(ComicSource):
                 return arr
             main = main_nodes[0]
 
-            result_count_nodes = main.xpath('.//h4[@class="fl"]')  # 使用 .// 从当前节点开始搜索
+            result_count_nodes = main.xpath('.//h4[@class="fl"]')
             if result_count_nodes:
                 result_text = result_count_nodes[0].text.strip()
                 logger.info(f'共 {result_text} 条相关的结果')
             else:
                 logger.info('未找到结果数量信息.')
+
+            # 使用通用方法解析搜索结果
+            items = self.parse_xpath_list(
+                main, self.config['search_xpath'], self.config['search_extract']
+            )
+            for item in items:
+                comic = Comic()
+                try:
+                    comic.url = item['url']
+                    if not comic.url:
+                        logger.warning('解析到一个没有URL的漫画条目，已跳过。')
+                        continue
+                    if not comic.url.startswith('http'):
+                        comic.url = (
+                            self.base_url + comic.url
+                            if comic.url.startswith('/')
+                            else self.base_url + '/' + comic.url
+                        )
+                    comic.name = item['name'] or '未知漫画'
+                    comic.author = ''
+                    logger.debug(f'找到漫画: {comic.name}, 作者: {comic.author}, URL: {comic.url}')
+                    arr.append(comic)
+                except Exception as e:
+                    logger.error(f'解析漫画条目时出错: {item}, 错误: {e}', exc_info=True)
+                    continue
         except Exception as e:
             logger.error(f"在 {self.name} 搜索 '{keyword}' 过程中发生错误: {e}", exc_info=True)
             return arr
-        book_list = main.xpath('//li[contains(@class,"item-lg")]')
-        for book in book_list:
-            b = book.xpath('a')[0]
-            comic = Comic()
-            try:
-                comic.url = b.attrib.get('href')
-                if not comic.url:
-                    logger.warning('解析到一个没有URL的漫画条目，已跳过。')
-                    continue
-                if not comic.url.startswith('http'):
-                    comic.url = (
-                        self.base_url + comic.url
-                        if comic.url.startswith('/')
-                        else self.base_url + '/' + comic.url
-                    )
-
-                comic.name = b.attrib.get('title', '未知漫画').strip()
-                # 作者信息未在此处直接提供，设为空
-                comic.author = ''
-                logger.debug(f'找到漫画: {comic.name}, 作者: {comic.author}, URL: {comic.url}')
-                arr.append(comic)
-            except Exception as e:
-                logger.error(
-                    f'解析漫画条目时出错: {etree.tostring(book, encoding="unicode")}, 错误: {e}',
-                    exc_info=True,
-                )
-                continue
         logger.info(f"{self.name} 搜索 '{keyword}' 完成, 共找到 {len(arr)} 条结果.")
         return arr
 
@@ -98,16 +108,16 @@ class MoruiComic(ComicSource):
                 for span in spans:
                     key = ''
                     value = ''
-                    
+
                     # 从strong标签获取键
                     strong_node = span.find('strong')
                     if strong_node is not None and strong_node.text:
                         key = strong_node.text.strip().rstrip('：')
-                    
+
                     # 如果没有找到key，跳过此span
                     if not key:
                         continue
-                    
+
                     # 从span下的所有a标签获取值
                     link_nodes = span.xpath('.//a')
                     if link_nodes:
@@ -115,10 +125,10 @@ class MoruiComic(ComicSource):
                         for link in link_nodes:
                             if link.text and link.text.strip():
                                 values.append(link.text.strip())
-                        
+
                         if values:
                             value = ' | '.join(values)
-                    
+
                     # 如果找到了有效的键值对
                     if key and value:
                         logger.debug(f'元数据: {key} - {value}')
@@ -126,7 +136,9 @@ class MoruiComic(ComicSource):
                     elif key:
                         logger.debug(f"元数据项 '{key}' 的值为空或未找到.")
                     else:
-                        logger.warning(f'无法解析元数据项: {etree.tostring(span, encoding="unicode")}')
+                        logger.warning(
+                            f'无法解析元数据项: {etree.tostring(span, encoding="unicode")}'
+                        )
             except Exception as e:
                 logger.warning(
                     f'解析元数据时出错: {etree.tostring(meta, encoding="unicode")}, 错误: {e}',
@@ -135,7 +147,9 @@ class MoruiComic(ComicSource):
                 continue
         book_list = root.xpath('//div[contains(@class,"comic-chapters")]')
         for book in book_list:
-            book_name_nodes = book.xpath('div[contains(@class,"chapter-category")]/div[contains(@class,"caption")]/span')
+            book_name_nodes = book.xpath(
+                'div[contains(@class,"chapter-category")]/div[contains(@class,"caption")]/span'
+            )
             if not book_name_nodes or not book_name_nodes[0].text:
                 logger.warning(f'未找到章节分组标题，跳过此分组: {url}')
                 continue
@@ -190,33 +204,12 @@ class MoruiComic(ComicSource):
         logger.info(f'开始从 {self.name} 解析图片列表: {url}')
         try:
             self.driver.get(url)
-            # 等待页面加载完成，特别是JS变量chapterImages
-            # 可以考虑添加显式等待 WebDriverWait if needed
-            # self.driver.implicitly_wait(5) # 隐式等待，如果需要
-            img_urls = self.driver.execute_script(
-                'return typeof chapterImages !== "undefined" ? chapterImages : [];'
-            )
+            img_urls = self.execute_js_safely(self.driver, self.config['imgs_js'], [])
             if not img_urls:
-                logger.warning(f'未能从页面 {url} 获取 chapterImages 变量，或变量为空.')
-                # 尝试查找其他可能的图片源或结构
-                # 例如，直接从img标签解析
-                # img_elements = self.driver.find_elements(By.XPATH, "//div[@id='comicContain']//img")
-                # if img_elements:
-                #    self.logger.info(f"尝试从img标签解析图片, 找到 {len(img_elements)} 个元素")
-                #    img_urls = [img.get_attribute('src') for img in img_elements if img.get_attribute('src')]
-                # else:
-                #    self.logger.error(f"无法从 {url} 解析图片列表，chapterImages未定义且未找到img标签.")
-                #    return []
-                return []  # 如果chapterImages为空，则返回空列表
+                logger.warning(f'未能从页面 {url} 获取图片变量.')
+                return []
 
-            processed_imgs = []
-            for img_url in img_urls:
-                if not img_url or not isinstance(img_url, str):
-                    logger.warning(f'无效的图片URL: {img_url}')
-                    continue
-                processed_imgs.append(img_url)
-                logger.debug(f'解析到图片URL: {img_url}')
-
+            processed_imgs = [img for img in img_urls if img and isinstance(img, str)]
             logger.info(f'成功从 {url} 解析并处理了 {len(processed_imgs)} 张图片.')
             return processed_imgs
         except Exception as e:

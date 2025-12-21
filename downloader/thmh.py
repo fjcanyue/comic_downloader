@@ -8,6 +8,8 @@ class TmhComic(ComicSource):
     base_url = 'https://www.31mh.com'
     download_interval = 5
 
+    config = {'imgs_js': 'return typeof chapterImages !== "undefined" ? chapterImages : [];'}
+
     def __init__(self, output_dir, http, driver):
         super().__init__(output_dir, http, driver)
 
@@ -191,41 +193,12 @@ class TmhComic(ComicSource):
         logger.info(f'开始从 {self.name} 解析图片列表: {url}')
         try:
             self.driver.get(url)
-            # 等待页面加载完成，特别是JS变量chapterImages
-            # 可以考虑添加显式等待 WebDriverWait if needed
-            # self.driver.implicitly_wait(5) # 隐式等待，如果需要
-            img_urls = self.driver.execute_script(
-                'return typeof chapterImages !== "undefined" ? chapterImages : [];'
-            )
+            img_urls = self.execute_js_safely(self.driver, self.config['imgs_js'], [])
             if not img_urls:
-                logger.warning(f'未能从页面 {url} 获取 chapterImages 变量，或变量为空.')
-                # 尝试查找其他可能的图片源或结构
-                # 例如，直接从img标签解析
-                # img_elements = self.driver.find_elements(By.XPATH, "//div[@id='comicContain']//img")
-                # if img_elements:
-                #    self.logger.info(f"尝试从img标签解析图片, 找到 {len(img_elements)} 个元素")
-                #    img_urls = [img.get_attribute('src') for img in img_elements if img.get_attribute('src')]
-                # else:
-                #    self.logger.error(f"无法从 {url} 解析图片列表，chapterImages未定义且未找到img标签.")
-                #    return []
-                return []  # 如果chapterImages为空，则返回空列表
+                logger.warning(f'未能从页面 {url} 获取图片变量.')
+                return []
 
-            processed_imgs = []
-            for img_url in img_urls:
-                if not img_url or not isinstance(img_url, str):
-                    logger.warning(f'无效的图片URL: {img_url}')
-                    continue
-                # 检查URL是否完整，如果不是，则拼接
-                if not img_url.startswith('http'):
-                    # 假设图片URL是相对路径，需要根据实际情况拼接
-                    # 通常网站会将图片放在特定域名或路径下
-                    # 这里假设是相对于 base_url，但这可能不正确，需要根据实际网站结构调整
-                    # 示例：img_url = self.base_img_url.rstrip('/') + '/' + img_url.lstrip('/')
-                    # 对于thmh.com, chapterImages通常是完整URL
-                    logger.debug(f"图片URL '{img_url}' 不是完整URL，将直接使用，请确认是否正确.")
-                processed_imgs.append(img_url)
-                logger.debug(f'解析到图片URL: {img_url}')
-
+            processed_imgs = [img for img in img_urls if img and isinstance(img, str)]
             logger.info(f'成功从 {url} 解析并处理了 {len(processed_imgs)} 张图片.')
             return processed_imgs
         except Exception as e:
