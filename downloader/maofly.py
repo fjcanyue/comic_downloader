@@ -7,6 +7,9 @@ from downloader.comic import Comic, ComicBook, ComicSource, ComicVolume, logger
 
 
 class MaoflyComic(ComicSource):
+    """
+    This class is deprecated and will be removed in future versions.
+    """
     name = '漫画猫'
     base_url = 'https://www.maofly.com'
     base_img_url = 'https://mao.mhtupian.com/uploads'

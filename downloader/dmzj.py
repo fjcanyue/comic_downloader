@@ -4,6 +4,9 @@ from downloader.comic import Comic, ComicBook, ComicSource, ComicVolume, logger
 
 
 class DmzjComic(ComicSource):
+    """
+    This class is deprecated and will be removed in future versions.
+    """
     name = '动漫之家'
     base_url = 'http://manhua.dmzj.com'
     base_img_url = 'http://images.dmzj.com'

@@ -4,6 +4,9 @@ from downloader.comic import Comic, ComicBook, ComicSource, ComicVolume, logger
 
 
 class BoyaComic(ComicSource):
+    """
+    This class is deprecated and will be removed in future versions.
+    """
     name = '博雅漫画'
     base_url = 'http://www.boyamh.com'
 

@@ -2,6 +2,9 @@ from downloader.comic import Comic, ComicBook, ComicSource, ComicVolume, logger
 
 
 class ManhuaguiComic(ComicSource):
+    """
+    This class is deprecated and will be removed in future versions.
+    """
     name = '看漫画'
     base_url = 'https://www.manhuagui.com/'
     # base_img_url = 'http://imgpc.31mh.com/images/comic'

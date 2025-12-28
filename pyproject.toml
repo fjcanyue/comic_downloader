@@ -85,23 +85,26 @@ line-length = 100
 
 [tool.ruff.lint]
 # 启用所有稳定规则
-select = [
-  "E",     # pycodestyle errors
-  "W",     # pycodestyle warnings
-  "F",     # pyflakes
-  "UP",    # pyupgrade
-  "B",     # flake8-bugbear
-  "S",     # bandit (security issues)
-  "N",     # pep8-naming (naming conventions)
-  "SIM",   # flake8-simplify
-  "I",     # isort
-  "PERF",  # performance issues
-  "PIE",   # flake8-pie (unnecessary code)
-  "ASYNC", # async/await best practices
-  "RET",   # flake8-return (return improvements)
-  "LOG",   #flake8-logging
-  "G",     #flake8-logging-format
-]
+ select = [
+   "E",     # pycodestyle errors
+   "W",     # pycodestyle warnings
+   "F",     # pyflakes
+   "UP",    # pyupgrade
+   "B",     # flake8-bugbear
+   "S",     # bandit (security issues)
+   "N",     # pep8-naming (naming conventions)
+   "SIM",   # flake8-simplify
+   "I",     # isort
+   "PERF",  # performance issues
+   "PIE",   # flake8-pie (unnecessary code)
+   "ASYNC", # async/await best practices
+   "RET",   # flake8-return (return improvements)
+   "LOG",   #flake8-logging
+   "G",     #flake8-logging-format
+   "FA",    # flake8-future-annotations
+   "PL",    # pylint
+   "RUF",   # ruff-specific rules
+ ]
 
 # 忽略特定规则
 ignore = [
