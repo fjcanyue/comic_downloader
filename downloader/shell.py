@@ -7,8 +7,8 @@ from selenium import webdriver
 from selenium.webdriver.firefox.options import Options
 
 from downloader.dumanwu import DumanwuComic
-from downloader.manhuazhan import ManhuazhanComic
 from downloader.morui import MoruiComic
+from downloader.thmh import TmhComic
 
 
 class Shell(cmd.Cmd):
@@ -36,7 +36,7 @@ class Shell(cmd.Cmd):
         self.source_map = {
             'morui': MoruiComic,
             'dumanwu': DumanwuComic,
-            'manhuazhan': ManhuazhanComic,
+            'thmh': TmhComic,
         }
         self.source_options = list(self.source_map.keys())  # 存储源名称列表，方便按索引访问
         self.sources = {}
