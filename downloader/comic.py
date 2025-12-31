@@ -39,6 +39,7 @@ class Comic:
         self.name: Optional[str] = None
         self.author: Optional[str] = None
         self.url: Optional[str] = None
+        self.source: Optional[str] = None
         self.metadata: List[Dict[str, str]] = []
         self.books: List[ComicBook] = []
 
