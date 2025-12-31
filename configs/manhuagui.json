@@ -1,0 +1,3 @@
+{
+    "imgs_js": "var _page = 1;var images = [];while(true) {SMH.utils.goPage(_page);if (pVars.page != _page) {break;}images.push(pVars.curFile);_page++;}return images;"
+}

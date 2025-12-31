@@ -16,10 +16,7 @@ class DumanwuComic(ComicSource):
     base_url = 'https://www.dumanwu.com'
     # base_img_url = 'http://imgpc.31mh.com/images/comic'
     download_interval = 5
-
-    config = {
-        'imgs_js': None  # 使用自定义Selenium滚动逻辑
-    }
+    config_file = 'dumanwu.json'
 
     def __init__(self, output_dir, http, driver):
         super().__init__(output_dir, http, driver)

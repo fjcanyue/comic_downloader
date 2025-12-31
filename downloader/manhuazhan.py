@@ -10,8 +10,7 @@ class ManhuazhanComic(ComicSource):
     name = '漫画站'
     base_url = 'https://www.manhuazhan.com'
     download_interval = 5
-
-    config = {'imgs_js': 'return typeof newImgs !== "undefined" ? newImgs : [];'}
+    config_file = 'manhuazhan.json'
 
     def __init__(self, output_dir, http, driver):
         super().__init__(output_dir, http, driver)

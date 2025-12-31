@@ -1,0 +1,16 @@
+{
+    "search_js": "if(typeof g_search_data !== \"undefined\") { return g_search_data; } else { return []; }",
+    "info_name_xpath": "//span[@class=\"anim_title_text\"]/a/h1",
+    "info_backup_name_xpath": "//div[@class=\"comic_deCon_new\"]/div[@class=\"comic_deCon_left\"]/h1/a",
+    "info_meta_xpath": "//div[@class=\"anim-main_list\"]/table/tr",
+    "info_books_xpaths": [
+        "//div[contains(@class,\"cartoon_online_border\")]//div[contains(@class,\"tab-content\")]//ul[contains(@class,\"list_con_li\")]",
+        "//div[@class=\"middleright\"]/div[@class=\"middleright_mr\"]/div[@class=\"photo_part\"]",
+        "//div[contains(@class, \"chapter_con\")]/ul/li"
+    ],
+    "info_vol_extract": {
+        "name": "./a",
+        "url": "./a/@href"
+    },
+    "imgs_js": "eval(\"var __a__=\" + pages);return __a__;"
+}
