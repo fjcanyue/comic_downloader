@@ -14,19 +14,15 @@ from downloader.morui import MoruiComic
 class Shell(cmd.Cmd):
     intro = """
     欢迎使用动漫下载器，输入 help 或者 ? 查看帮助。
-    您可以输入下列命令来切换动漫下载网站源，目前支持的网站有：
-    * morui: 摩锐漫画
-    * dumanwu: 读漫屋
-    * manhuazhan: 漫画站
-    输入动漫下载网站源后，支持的命令有：
-    * s: 搜索动漫，输入s <搜索关键字>。例如：输入 s 猎人
+    支持的命令有：
+    * s: 搜索动漫，从所有支持的源中搜索。输入s <搜索关键字>。例如：输入 s 猎人
     * d: 全量下载动漫，输入d <搜索结果序号/动漫URL地址>。例如：输入 d 12，或者d https://www.maofly.com/manga/38316.html
     * i: 查看动漫详情，输入i <搜索结果序号/动漫URL地址>。例如：输入 i 12，或者i https://www.maofly.com/manga/13954.html
     * v: 按范围下载动漫，需要先执行查看动漫详情命令，根据详情的序号列表，指定下载范围。支持三种模式：
       - 输入v <章节序号>，下载该章节下的所有动漫。例如：输入 v 0。
       - 输入v <章节序号> <截止序号>，下载该章节下，从章节开始到截止序号的动漫。例如：输入 v 0 12
       - 输入v <章节序号> <起始序号> <截止序号>，下载该章节下，从起始位置到截止位置的动漫。例如：输入 v 0 12 18
-    通用命令有：
+    * source: 手动切换动漫下载网站源 (可选)。
     * q: 退出动漫下载器
     """
     prefix = '动漫下载器> '
@@ -43,7 +39,7 @@ class Shell(cmd.Cmd):
             'manhuazhan': ManhuazhanComic,
         }
         self.source_options = list(self.source_map.keys())  # 存储源名称列表，方便按索引访问
-        self.do_source(None)
+        self.sources = {}
 
     def do_source(self, arg):
         """选择动漫下载网站源。输入 source  后，根据提示选择源序号。"""
@@ -62,51 +58,105 @@ class Shell(cmd.Cmd):
                 source_index = int(source_index_str) - 1  # 序号从1开始，索引从0开始
                 if 0 <= source_index < len(self.source_options):
                     source_name = self.source_options[source_index]
-                    print(f'正在初始化{source_name}动漫下载网站源，请稍等...')
-                    self.context.reset()
-                    source_class = self.source_map[source_name]
-                    self.context.source = source_class(
-                        self.context.output_path, self.context.http, self.context.driver
-                    )
-                    self.prompt = self.prefix + self.context.source.name + '> '
+                    self.__switch_source(source_name)
                     break  # 选择成功，退出循环
                 print(f'无效的序号，请输入 1 到 {len(self.source_options)} 之间的序号。')
             except ValueError:
                 print('请输入有效的数字序号。')
+
+    def __switch_source(self, source_name):
+        """切换动漫源"""
+        if self.context.source and self.context.source.name == source_name:
+            return
+        print(f'正在切换到{source_name}动漫下载网站源...')
+
+        if source_name not in self.sources:
+             source_class = self.source_map[source_name]
+             self.sources[source_name] = source_class(
+                self.context.output_path, self.context.http, self.context.driver
+            )
+
+        self.context.source = self.sources[source_name]
+        # self.prompt = self.prefix + self.context.source.name + '> '
 
     def do_s(self, arg):
         """搜索动漫，输入s <搜索关键字>，例如：s 猎人"""
         if not arg:
             print('请输入搜索关键字！')
             return
-        if self.context.source:
-            self.context.reset_comic()
-            self.context.searched_results = self.context.source.search(arg)
-            for index, comic in enumerate(self.context.searched_results):
-                print(f'{index}: {comic.author} {comic.name} {comic.url}')
-        else:
-            print('请您先选择动漫下载网站源！')
+
+        self.context.reset_comic()
+        self.context.searched_results = []
+
+        # 遍历所有源进行搜索
+        for source_name in self.source_options:
+            try:
+                # 确保源已初始化
+                if source_name not in self.sources:
+                    source_class = self.source_map[source_name]
+                    self.sources[source_name] = source_class(
+                        self.context.output_path, self.context.http, self.context.driver
+                    )
+
+                source = self.sources[source_name]
+                print(f'正在 {source.name} 中搜索...')
+                results = source.search(arg)
+
+                # 每个源最多取10个结果
+                count = 0
+                for comic in results:
+                    if count >= 10:
+                        break
+                    comic.source = source_name
+                    self.context.searched_results.append(comic)
+                    count += 1
+            except Exception as e:
+                print(f'在 {source_name} 中搜索失败: {e}')
+
+        for index, comic in enumerate(self.context.searched_results):
+            source_obj = self.sources.get(comic.source)
+            source_display = source_obj.name if source_obj else comic.source
+            print(f'{index}: [{source_display}] {comic.author} {comic.name} {comic.url}')
 
     def do_i(self, arg):
         """查看动漫详情，输入i <搜索结果序号/动漫URL地址>，例如：d 12，或者d https://www.maofly.com/manga/38316.html"""
-        if not self.context.source:
-            print('请您先选择动漫下载网站源！')
-            return
         if not arg:
             print('请输入动漫URL地址或者搜索结果序号！')
             return
 
+        url = None
         if arg.isdigit():
-            if self.context.searched_results and len(self.context.searched_results) > int(arg):
-                url = self.context.searched_results[int(arg)].url
+            idx = int(arg)
+            if self.context.searched_results and len(self.context.searched_results) > idx:
+                comic = self.context.searched_results[idx]
+                url = comic.url
+                if comic.source:
+                    self.__switch_source(comic.source)
             else:
                 print('请先搜索动漫，或输入正确的搜索结果序号！')
                 return
-        elif arg.startswith(self.context.source.base_url):
-            url = arg
         else:
-            print('请输入完整的动漫地址！')
-            return
+            # 尝试根据URL匹配源
+            matched_source = None
+            for source_name, source_class in self.source_map.items():
+                if arg.startswith(source_class.base_url):
+                    matched_source = source_name
+                    break
+
+            if matched_source:
+                self.__switch_source(matched_source)
+                url = arg
+            else:
+                 # 如果没有匹配到，检查当前是否已经选择了源
+                 if self.context.source and arg.startswith(self.context.source.base_url):
+                     url = arg
+                 else:
+                    print('请输入完整的动漫地址，且确保该地址属于支持的动漫源！')
+                    return
+
+        if not self.context.source:
+             print('无法确定该动漫所属的源，请先搜索或手动选择源。')
+             return
 
         self.context.comic = self.context.source.info(url)
 
@@ -176,28 +226,48 @@ class Shell(cmd.Cmd):
 
     def do_d(self, arg):
         """全量下载动漫，输入d <搜索结果序号/动漫URL地址>，例如：d 12，或者d https://www.maofly.com/manga/38316.html"""
-        if not self.context.source:
-            print('请您先选择动漫下载网站源！')
-            return
         if not arg:
             if self.context.comic is None:
                 print('请先查看动漫详情！')
                 return
+            if not self.context.source:
+                 print('当前没有选中的动漫源！')
+                 return
             self.context.source.download_full(self.context.comic)
         elif arg.isdigit():
-            if self.context.searched_results and len(self.context.searched_results) > int(arg):
-                self.context.source.download_full_by_url(
-                    self.context.searched_results[int(arg)].url
-                )
+            idx = int(arg)
+            if self.context.searched_results and len(self.context.searched_results) > idx:
+                comic = self.context.searched_results[idx]
+                if comic.source:
+                    self.__switch_source(comic.source)
+
+                if self.context.source:
+                    self.context.source.download_full_by_url(comic.url)
+                else:
+                    print('无法确定源，无法下载。')
+                    return
             else:
                 print('请先搜索动漫，或输入正确的搜索结果序号！')
                 return
-        elif arg.startswith(self.context.source.base_url):
-            self.context.source.download_full_by_url(arg)
         else:
-            print('请输入完整的动漫地址！')
-            return
-        self.context.searched_results.clear()
+            # Try to match URL to source
+            matched_source = None
+            for source_name, source_class in self.source_map.items():
+                if arg.startswith(source_class.base_url):
+                    matched_source = source_name
+                    break
+
+            if matched_source:
+                 self.__switch_source(matched_source)
+            elif self.context.source and arg.startswith(self.context.source.base_url):
+                 pass # already in correct source context
+            else:
+                print('请输入完整的动漫地址，且确保该地址属于支持的动漫源！')
+                return
+
+            self.context.source.download_full_by_url(arg)
+
+        # self.context.searched_results.clear() # Maybe don't clear results so user can download another one?
         print('下载完成')
 
     def do_q(self, arg):
