@@ -3,7 +3,7 @@ name = "comic_downloader"
 dynamic = ["version"]
 description = "Effortlessly download comics via this lightweight, single-threaded command-line tool."
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
 authors = [{ name = "fjcanyue" }]
 urls = { repository = "https://github.com/fjcanyue/comic_downloader" }
 keywords = ["comics downloader", "python"]
@@ -31,6 +31,7 @@ dev = [
   "toml-sort>=0.24.3",
   "uv>=0.8.20",
   "bump-my-version>=1.2.3",
+  "pyinstaller>=6.17.0",
 ]
 docs = [
   "mkdocs>=1.6.1",
@@ -61,6 +62,9 @@ no_sort_tables = true
 sort_inline_arrays = true
 spaces_before_inline_comment = 4
 spaces_indent_inline_array = 4
+
+[tool.setuptools]
+packages = ["downloader"]
 
 [tool.bumpversion]
 current_version = "0.0.1"
