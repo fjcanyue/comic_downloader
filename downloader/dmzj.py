@@ -11,20 +11,7 @@ class DmzjComic(ComicSource):
     base_url = 'http://manhua.dmzj.com'
     base_img_url = 'http://images.dmzj.com'
     download_interval = 5
-
-    config = {
-        'search_js': 'if(typeof g_search_data !== "undefined") { return g_search_data; } else { return []; }',
-        'info_name_xpath': '//span[@class="anim_title_text"]/a/h1',
-        'info_backup_name_xpath': '//div[@class="comic_deCon_new"]/div[@class="comic_deCon_left"]/h1/a',
-        'info_meta_xpath': '//div[@class="anim-main_list"]/table/tr',
-        'info_books_xpaths': [
-            '//div[contains(@class,"cartoon_online_border")]//div[contains(@class,"tab-content")]//ul[contains(@class,"list_con_li")]',
-            '//div[@class="middleright"]/div[@class="middleright_mr"]/div[@class="photo_part"]',
-            '//div[contains(@class, "chapter_con")]/ul/li',
-        ],
-        'info_vol_extract': {'name': './a', 'url': './a/@href'},
-        'imgs_js': 'eval("var __a__=" + pages);return __a__;',
-    }
+    config_file = 'dmzj.json'
 
     def __init__(self, output_dir, http, driver):
         super().__init__(output_dir, http, driver)
@@ -118,7 +105,7 @@ class DmzjComic(ComicSource):
             return comic  # 即使没有章节，也返回已获取的漫画基本信息
         # vol_divs = root.xpath('//div[@class="cartoon_online_border" or @class="cartoon_online_border_other"]')
         # for index, book in enumerate(book_list):
-        for book in book_list:
+        for book in book_list_nodes:
             # 根据 book_list_nodes 的结构调整章节名和卷列表的获取方式
             # 检查是否直接是章节列表 (每个元素是一个章节)
             is_direct_chapter_list = 'chapter_con' in (xpath_expr or '')

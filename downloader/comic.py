@@ -21,6 +21,35 @@ from tqdm import tqdm
 # logger.add(sys.stderr, format="{time} {level} {message}") # 添加自定义格式的 stderr 输出
 
 
+class ComicVolume:
+    def __init__(self, name: str, url: str, book_name: Optional[str] = None) -> None:
+        self.name: str = name
+        self.url: str = url
+        self.book_name: Optional[str] = book_name
+
+
+class ComicBook:
+    def __init__(self) -> None:
+        self.name: Optional[str] = None
+        self.vols: List[ComicVolume] = []
+
+
+class Comic:
+    def __init__(self) -> None:
+        self.name: Optional[str] = None
+        self.author: Optional[str] = None
+        self.url: Optional[str] = None
+        self.metadata: List[Dict[str, str]] = []
+        self.books: List[ComicBook] = []
+
+
+filter_dir_re = re.compile(r'[\/:*?"<>|]')
+
+
+def filter_dir_name(name: str) -> str:
+    return re.sub(filter_dir_re, '-', name)
+
+
 class ComicSource(ABC):
     def __init__(self, output_dir: str, http: requests.Session, driver: Any) -> None:
         """动漫源构造函数
@@ -41,6 +70,40 @@ class ComicSource(ABC):
 
         self.parser: etree.HTMLParser = etree.HTMLParser()
         self.logger = logger
+
+        # Load configuration if config_file is specified
+        if hasattr(self, 'config_file') and self.config_file:
+            self.load_config()
+        elif hasattr(self, 'config') and self.config:
+             # Already has config (maybe hardcoded), do nothing or validate
+             pass
+        else:
+             self.config = {}
+
+    def load_config(self):
+        """Load configuration from the configs directory."""
+        # Assuming configs are stored in 'configs/' directory at the project root
+        # We can find the project root relative to this file
+
+        # comic.py is in downloader/ directory. Project root is one level up.
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(current_dir)
+        config_path = os.path.join(project_root, 'configs', self.config_file)
+
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                self.config = json.load(f)
+            self.logger.debug(f"Loaded config from {config_path}")
+        except FileNotFoundError:
+            self.logger.error(f"Config file not found: {config_path}")
+            self.config = {}
+        except json.JSONDecodeError as e:
+            self.logger.error(f"Error decoding JSON from {config_path}: {e}")
+            self.config = {}
+        except Exception as e:
+             self.logger.error(f"Unexpected error loading config {config_path}: {e}")
+             self.config = {}
+
 
     @abstractmethod
     def search(self, keyword: str) -> List[Comic]:
@@ -311,32 +374,3 @@ class ComicSource(ABC):
         except Exception as e:
             logger.error(f'处理HTML页面时发生未知错误: {url}, 错误: {e}', exc_info=True)
             return None
-
-
-class Comic:
-    def __init__(self) -> None:
-        self.name: Optional[str] = None
-        self.author: Optional[str] = None
-        self.url: Optional[str] = None
-        self.metadata: List[Dict[str, str]] = []
-        self.books: List[ComicBook] = []
-
-
-class ComicBook:
-    def __init__(self) -> None:
-        self.name: Optional[str] = None
-        self.vols: List[ComicVolume] = []
-
-
-class ComicVolume:
-    def __init__(self, name: str, url: str, book_name: Optional[str] = None) -> None:
-        self.name: str = name
-        self.url: str = url
-        self.book_name: Optional[str] = book_name
-
-
-filter_dir_re = re.compile(r'[\/:*?"<>|]')
-
-
-def filter_dir_name(name: str) -> str:
-    return re.sub(filter_dir_re, '-', name)

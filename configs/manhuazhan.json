@@ -1,0 +1,3 @@
+{
+    "imgs_js": "return typeof newImgs !== \"undefined\" ? newImgs : [];"
+}

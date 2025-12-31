@@ -9,18 +9,7 @@ class BoyaComic(ComicSource):
     """
     name = '博雅漫画'
     base_url = 'http://www.boyamh.com'
-
-    config = {
-        'search_xpath': '//ul[contains(@class,"cartoon-block-box")]/li',
-        'info_name_xpath': '//div[contains(@class,"article-info-item")]/h1',
-        'info_meta_xpath': '//div[contains(@class,"info-item-bottom")]/p',
-        'info_books_xpath': '//div[contains(@class,"article-chapter-list")]',
-        'info_book_name_xpath': 'div/div[contains(@class,"cart-tag")]',
-        'info_vols_xpath': 'ul[contains(@class,"chapter-list")]/li',
-        'info_vol_extract': {'name': './a', 'url': './a/@href'},
-        'imgs_xpath': '//div[contains(@class,"chapter-content")]/img',
-        'imgs_attr': 'data-original',
-    }
+    config_file = 'boya.json'
 
     def search(self, keyword):
         logger.info(f'开始在 {self.name} 搜索: {keyword}')
