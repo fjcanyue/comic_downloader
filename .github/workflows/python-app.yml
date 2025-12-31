@@ -12,20 +12,24 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v3
       
-    - name: Set up Python 3
-      uses: actions/setup-python@v3
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+      with:
+        enable-cache: true
+        cache-dependency-glob: "uv.lock"
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
       with:
         python-version: "3.9"
 
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        uv sync
 
     - name: Run pyinstaller
       run: |
-        pip install pyinstaller
-        pyinstaller downloader.spec
+        uv run pyinstaller downloader.spec
 
     - name: Generate tag name
       run: |
