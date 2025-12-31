@@ -7,14 +7,14 @@ from downloader.comic import Comic, ComicBook, ComicSource, ComicVolume, logger
 
 
 class MaoflyComic(ComicSource):
+    """
+    This class is deprecated and will be removed in future versions.
+    """
     name = '漫画猫'
     base_url = 'https://www.maofly.com'
     base_img_url = 'https://mao.mhtupian.com/uploads'
     download_interval = 5
-
-    config = {
-        'imgs_js': None  # 使用自定义JS解码逻辑
-    }
+    config_file = 'maofly.json'
 
     def __init__(self, output_dir, http, driver):
         super().__init__(output_dir, http, driver)

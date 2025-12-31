@@ -3,7 +3,7 @@ name = "comic_downloader"
 dynamic = ["version"]
 description = "Effortlessly download comics via this lightweight, single-threaded command-line tool."
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
 authors = [{ name = "fjcanyue" }]
 urls = { repository = "https://github.com/fjcanyue/comic_downloader" }
 keywords = ["comics downloader", "python"]
@@ -31,6 +31,7 @@ dev = [
   "toml-sort>=0.24.3",
   "uv>=0.8.20",
   "bump-my-version>=1.2.3",
+  "pyinstaller>=6.17.0",
 ]
 docs = [
   "mkdocs>=1.6.1",
@@ -62,6 +63,9 @@ sort_inline_arrays = true
 spaces_before_inline_comment = 4
 spaces_indent_inline_array = 4
 
+[tool.setuptools]
+packages = ["downloader"]
+
 [tool.bumpversion]
 current_version = "0.0.1"
 
@@ -85,23 +89,26 @@ line-length = 100
 
 [tool.ruff.lint]
 # 启用所有稳定规则
-select = [
-  "E",     # pycodestyle errors
-  "W",     # pycodestyle warnings
-  "F",     # pyflakes
-  "UP",    # pyupgrade
-  "B",     # flake8-bugbear
-  "S",     # bandit (security issues)
-  "N",     # pep8-naming (naming conventions)
-  "SIM",   # flake8-simplify
-  "I",     # isort
-  "PERF",  # performance issues
-  "PIE",   # flake8-pie (unnecessary code)
-  "ASYNC", # async/await best practices
-  "RET",   # flake8-return (return improvements)
-  "LOG",   #flake8-logging
-  "G",     #flake8-logging-format
-]
+ select = [
+   "E",     # pycodestyle errors
+   "W",     # pycodestyle warnings
+   "F",     # pyflakes
+   "UP",    # pyupgrade
+   "B",     # flake8-bugbear
+   "S",     # bandit (security issues)
+   "N",     # pep8-naming (naming conventions)
+   "SIM",   # flake8-simplify
+   "I",     # isort
+   "PERF",  # performance issues
+   "PIE",   # flake8-pie (unnecessary code)
+   "ASYNC", # async/await best practices
+   "RET",   # flake8-return (return improvements)
+   "LOG",   #flake8-logging
+   "G",     #flake8-logging-format
+   "FA",    # flake8-future-annotations
+   "PL",    # pylint
+   "RUF",   # ruff-specific rules
+ ]
 
 # 忽略特定规则
 ignore = [

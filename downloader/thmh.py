@@ -4,11 +4,13 @@ from downloader.comic import Comic, ComicBook, ComicSource, ComicVolume, logger
 
 
 class TmhComic(ComicSource):
+    """
+    This class is deprecated and will be removed in future versions.
+    """
     name = '31漫画'
     base_url = 'https://www.31mh.com'
     download_interval = 5
-
-    config = {'imgs_js': 'return typeof chapterImages !== "undefined" ? chapterImages : [];'}
+    config_file = 'thmh.json'
 
     def __init__(self, output_dir, http, driver):
         super().__init__(output_dir, http, driver)

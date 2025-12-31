@@ -8,18 +8,7 @@ class MoruiComic(ComicSource):
     base_url = 'https://www.morui.com'
     base_img_url = 'http://lao.haotu90.top'
     download_interval = 5
-
-    config = {
-        'search_xpath': '//li[contains(@class,"item-lg")]',
-        'search_extract': {'name': './a/@title', 'url': './a/@href'},
-        'info_name_xpath': '//div[contains(@class,"book-title")]/h1/span',
-        'info_meta_xpath': '//ul[contains(@class,"detail-list")]/li',
-        'info_books_xpath': '//div[contains(@class,"comic-chapters")]',
-        'info_book_name_xpath': 'div[contains(@class,"chapter-category")]/div[contains(@class,"caption")]/span',
-        'info_vols_xpath': 'div[contains(@class,"chapter-body")]/ul/li',
-        'info_vol_extract': {'name': './a/span', 'url': './a/@href'},
-        'imgs_js': 'return typeof chapterImages !== "undefined" ? chapterImages : [];',
-    }
+    config_file = 'morui.json'
 
     def __init__(self, output_dir, http, driver):
         super().__init__(output_dir, http, driver)

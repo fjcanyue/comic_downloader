@@ -36,24 +36,21 @@ comic_downloader <下载路径>
 安装依赖（可选，用源码启动方式必须执行）。
    
 ```shell
-pip install -r requirements.txt
+uv sync
 ```
 
 ### 运行
 
 ```shell
-python main.py <下载路径>
+uv run main.py <下载路径>
 ```
 
 ### 打包
-使用 conda 创建虚拟环境进行打包，避免打包文件过大。
+
+使用 uv 进行打包。
 
 ```shell
-conda create -n comic_downloader python=3.9
-conda activate comic_downloader
-pip install -r requirements.txt
-pip install pyinstaller
-pyinstaller downloader.spec
+uv run pyinstaller downloader.spec
 ```
 
 ## 内部命令使用说明

@@ -1,10 +1,12 @@
 import concurrent.futures
+import json
 import os
 import re
 import shutil
 from abc import ABC, abstractmethod
 from io import StringIO
 from time import sleep
+from typing import List, Dict, Optional, Any, Union
 
 import requests
 from loguru import logger
@@ -19,53 +21,116 @@ from tqdm import tqdm
 # logger.add(sys.stderr, format="{time} {level} {message}") # 添加自定义格式的 stderr 输出
 
 
+class ComicVolume:
+    def __init__(self, name: str, url: str, book_name: Optional[str] = None) -> None:
+        self.name: str = name
+        self.url: str = url
+        self.book_name: Optional[str] = book_name
+
+
+class ComicBook:
+    def __init__(self) -> None:
+        self.name: Optional[str] = None
+        self.vols: List[ComicVolume] = []
+
+
+class Comic:
+    def __init__(self) -> None:
+        self.name: Optional[str] = None
+        self.author: Optional[str] = None
+        self.url: Optional[str] = None
+        self.metadata: List[Dict[str, str]] = []
+        self.books: List[ComicBook] = []
+
+
+filter_dir_re = re.compile(r'[\/:*?"<>|]')
+
+
+def filter_dir_name(name: str) -> str:
+    return re.sub(filter_dir_re, '-', name)
+
+
 class ComicSource(ABC):
-    def __init__(self, output_dir, http, driver):
+    def __init__(self, output_dir: str, http: requests.Session, driver: Any) -> None:
         """动漫源构造函数
 
         Args:
-            output_dir (str): 下载根目录
-            http (Session): requests 会话对象
-            driver (WebDriver): Selenium 网页驱动对象
+            output_dir: 下载根目录
+            http: requests 会话对象
+            driver: Selenium 网页驱动对象
         """
-        self.output_dir = output_dir
+        self.output_dir: str = output_dir
         """下载根目录"""
-        self.http = http
+        self.http: requests.Session = http
         """requests 会话对象"""
-        self.driver = driver
+        self.driver: Any = driver
         """Selenium 网页驱动对象"""
 
         self.http.headers.update({'referer': self.base_url})
 
-        self.parser = etree.HTMLParser()
+        self.parser: etree.HTMLParser = etree.HTMLParser()
         self.logger = logger
 
+        # Load configuration if config_file is specified
+        if hasattr(self, 'config_file') and self.config_file:
+            self.load_config()
+        elif hasattr(self, 'config') and self.config:
+             # Already has config (maybe hardcoded), do nothing or validate
+             pass
+        else:
+             self.config = {}
+
+    def load_config(self):
+        """Load configuration from the configs directory."""
+        # Assuming configs are stored in 'configs/' directory at the project root
+        # We can find the project root relative to this file
+
+        # comic.py is in downloader/ directory. Project root is one level up.
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(current_dir)
+        config_path = os.path.join(project_root, 'configs', self.config_file)
+
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                self.config = json.load(f)
+            self.logger.debug(f"Loaded config from {config_path}")
+        except FileNotFoundError:
+            self.logger.error(f"Config file not found: {config_path}")
+            self.config = {}
+        except json.JSONDecodeError as e:
+            self.logger.error(f"Error decoding JSON from {config_path}: {e}")
+            self.config = {}
+        except Exception as e:
+             self.logger.error(f"Unexpected error loading config {config_path}: {e}")
+             self.config = {}
+
+
     @abstractmethod
-    def search(self, keyword):
+    def search(self, keyword: str) -> List[Comic]:
         """搜索动漫
 
         Args:
-            keyword (str): 搜索关键字
+            keyword: 搜索关键字
 
         Returns:
-            array: 搜索结果
+            搜索结果列表
         """
 
     @abstractmethod
-    def info(self, url):
+    def info(self, url: str) -> Optional[Comic]:
         """查看动漫详细信息
 
         Args:
-            url (str): 动漫URL地址
+            url: 动漫URL地址
         """
 
-    def download_full_by_url(self, url):
+    def download_full_by_url(self, url: str) -> None:
         """全量下载指定动漫
 
         Args:
-            url (str): 动漫URL地址
+            url: 动漫URL地址
         """
-        self.logger.info(f'开始全量下载动漫: {url}')
+        self.logger.debug(f'开始全量下载动漫: {url}')
         try:
             comic_info = self.info(url)
             if comic_info:
@@ -76,17 +141,17 @@ class ComicSource(ABC):
         except Exception as e:
             logger.error(f'全量下载动漫失败: {url}, 错误: {e}', exc_info=True)
 
-    def download_full(self, comic):
+    def download_full(self, comic: Comic) -> None:
         """全量下载指定动漫
 
         Args:
-            comic (Comic): 动漫对象
+            comic: 动漫对象
         """
-        path = os.path.join(self.output_dir, __filter_dir__(comic.name))
+        path = os.path.join(self.output_dir, filter_dir_name(comic.name))
         logger.info(f'创建动漫目录: {path}')
         os.makedirs(path, exist_ok=True)
         for book in comic.books:
-            book_path = os.path.join(path, __filter_dir__(book.name))
+            book_path = os.path.join(path, filter_dir_name(book.name))
             logger.info(f'处理章节: {book.name}')
             for vol in tqdm(book.vols, desc=book.name):
                 try:
@@ -105,15 +170,17 @@ class ComicSource(ABC):
             array: 图片URL地址数组
         """
 
-    def download_vols(self, comic_name, book_name, vols):
+    def download_vols(self, comic_name: str, book_name: str, vols: List[ComicVolume]) -> None:
         """按指定范围下载动漫
 
         Args:
-            comic_name (str): 动漫名称
-            book_name (str): 动漫章节名称
-            vols (array): 待下载的动漫卷/话列表
+            comic_name: 动漫名称
+            book_name: 动漫章节名称
+            vols: 待下载的动漫卷/话列表
         """
-        path = os.path.join(self.output_dir, __filter_dir__(comic_name), __filter_dir__(book_name))
+        path = os.path.join(
+            self.output_dir, filter_dir_name(comic_name), filter_dir_name(book_name)
+        )
         logger.info(f'创建章节目录: {path} 用于下载指定卷/话')
         os.makedirs(path, exist_ok=True)
         for vol in tqdm(vols, desc=book_name):
@@ -122,13 +189,13 @@ class ComicSource(ABC):
             except Exception as e:
                 logger.error(f'下载卷/话失败: {vol.name} ({vol.url}), 错误: {e}', exc_info=True)
 
-    def __download_vol__(self, path, vol_name, url):
+    def __download_vol__(self, path: str, vol_name: str, url: str) -> None:
         """下载动漫卷/话
 
         Args:
-            path (str): 下载路径
-            vol_name (str): 动漫卷/话名称
-            url (str): 动漫卷/话URL地址
+            path: 下载路径
+            vol_name: 动漫卷/话名称
+            url: 动漫卷/话URL地址
         """
         logger.info(f'开始下载卷/话: {vol_name} 从 {url}')
         try:
@@ -136,7 +203,7 @@ class ComicSource(ABC):
             if not imgs:
                 logger.warning(f'未解析到任何图片: {vol_name} ({url})')
                 return
-            target_path = os.path.join(path, __filter_dir__(vol_name))
+            target_path = os.path.join(path, filter_dir_name(vol_name))
             self.__download_vol_images__(target_path, vol_name, imgs)
             logger.info(f'卷/话 {vol_name} 下载完成.')
         except Exception as e:
@@ -307,32 +374,3 @@ class ComicSource(ABC):
         except Exception as e:
             logger.error(f'处理HTML页面时发生未知错误: {url}, 错误: {e}', exc_info=True)
             return None
-
-
-class Comic:
-    def __init__(self):
-        self.name = None
-        self.author = None
-        self.url = None
-        self.metadata = []
-        self.books = []
-
-
-class ComicBook:
-    def __init__(self):
-        self.name = None
-        self.vols = []
-
-
-class ComicVolume:
-    def __init__(self, name, url, book_name=None):
-        self.name = name
-        self.url = url
-        self.book_name = book_name
-
-
-__filter_dir_re = re.compile(r'[\/:*?"<>|]')
-
-
-def __filter_dir__(name):
-    return re.sub(__filter_dir_re, '-', name)
