@@ -1,0 +1,2 @@
+2026-01-02 01:15:06.132 | INFO     | __main__:<module>:1 - This should go to file not console
+2026-01-02 01:15:15.142 | INFO     | __main__:<module>:1 - This should go to file and console
