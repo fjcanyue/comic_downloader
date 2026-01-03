@@ -6,7 +6,7 @@ block_cipher = None
 
 a = Analysis(
     ['main.py'],
-    pathex=['.\\downloader\\comic.py', '.\\downloader\\shell.py', '.\\downloader\\maofly.py', '.\\downloader\\dmzj.py'],
+    pathex=['downloader/comic.py', 'downloader/shell.py', 'downloader/maofly.py', 'downloader/dmzj.py'],
     binaries=[],
     datas=[],
     hiddenimports=[],

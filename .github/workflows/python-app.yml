@@ -6,7 +6,24 @@ on:
 
 jobs:
   build:
-    runs-on: windows-2022
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-2022]
+        include:
+          - os: ubuntu-latest
+            artifact_name: comic_downloader_linux
+            executable_name: comic_downloader
+            final_name: comic_downloader_linux
+          - os: macos-latest
+            artifact_name: comic_downloader_macos
+            executable_name: comic_downloader
+            final_name: comic_downloader_macos
+          - os: windows-2022
+            artifact_name: comic_downloader_windows
+            executable_name: comic_downloader.exe
+            final_name: comic_downloader_windows.exe
+
+    runs-on: ${{ matrix.os }}
     steps:
     
     - name: Checkout
@@ -31,17 +48,33 @@ jobs:
       run: |
         uv run pyinstaller downloader.spec
 
-    - name: Generate tag name
+    - name: Rename Output
+      shell: bash
       run: |
-        Set-TimeZone -Id "China Standard Time"
-        echo ("TAG_NAME="+((Get-Date).tostring('yyyy.MM.dd-HHmm'))) >> $env:GITHUB_ENV
-      shell: powershell
-        
+         mv dist/${{ matrix.executable_name }} dist/${{ matrix.final_name }}
+
     - name: Upload a Build Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: comic_downloader.exe
-        path: dist
+        name: ${{ matrix.artifact_name }}
+        path: dist/${{ matrix.final_name }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+    - name: Generate tag name
+      run: |
+        export TZ='Asia/Shanghai'
+        echo "TAG_NAME=$(date +'%Y.%m.%d-%H%M')" >> $GITHUB_ENV
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Display structure of downloaded files
+      run: ls -R artifacts
 
     - name: Draft Release
       uses: release-drafter/release-drafter@v5
@@ -59,8 +92,11 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         tag_name: ${{ env.TAG_NAME }}
-        files: dist/*
-        
+        files: |
+          artifacts/comic_downloader_linux/comic_downloader_linux
+          artifacts/comic_downloader_macos/comic_downloader_macos
+          artifacts/comic_downloader_windows/comic_downloader_windows.exe
+
     - name: Delete workflow runs
       uses: GitRML/delete-workflow-runs@main
       with:
