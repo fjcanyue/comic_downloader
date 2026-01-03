@@ -15,10 +15,10 @@ from tqdm import tqdm
 
 # 配置 loguru 日志记录器
 # loguru 默认会输出到 stderr，并且包含时间、级别、模块、行号等信息
-# 可以根据需要添加或移除 sink，或修改格式
-# logger.add("comic_downloader.log", rotation="500 MB") # 输出到文件，并按大小轮转
-# logger.remove() # 移除默认的 stderr 输出
-# logger.add(sys.stderr, format="{time} {level} {message}") # 添加自定义格式的 stderr 输出
+# 移除默认的 stderr 输出，防止输出到控制台
+logger.remove()
+# 添加文件输出，并按大小轮转
+logger.add("comic_downloader.log", rotation="500 MB", level="INFO")
 
 
 class ComicVolume:
@@ -39,6 +39,7 @@ class Comic:
         self.name: Optional[str] = None
         self.author: Optional[str] = None
         self.url: Optional[str] = None
+        self.source: Optional[str] = None
         self.metadata: List[Dict[str, str]] = []
         self.books: List[ComicBook] = []
 
