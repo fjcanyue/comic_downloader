@@ -3,6 +3,7 @@ from textual.containers import Container, Vertical, Horizontal
 from textual.widgets import Header, Footer, Input, DataTable, Static, Button, Label, Markdown
 from textual.screen import Screen, ModalScreen
 from textual.worker import Worker
+from textual.css.query import NoMatches
 from textual import on, work
 from unittest.mock import patch
 import tqdm
@@ -129,6 +130,7 @@ class ComicApp(App):
         super().__init__()
         self.manager = ComicManager(output_path)
         self.selected_comic = None
+        self.current_results = []
 
     def on_mount(self):
         self.push_screen(SearchScreen())
@@ -143,6 +145,7 @@ class ComicApp(App):
 
     def update_results(self, results):
         try:
+            self.current_results = results # Store results locally to avoid race conditions
             # Query by ID to be specific and avoid issues if multiple tables exist (though unlikely)
             table = self.query_one("#results_table", DataTable)
             table.clear()
@@ -155,13 +158,9 @@ class ComicApp(App):
             pass
 
     def show_details(self, index: int):
-        if 0 <= index < len(self.manager.searched_results):
-            # We have the basic info, but we might need to fetch detailed info (like chapters)
-            # if they were not loaded in search result.
-            # In `Shell.do_s`, it gets basic info. `Shell.do_i` calls `source.info(url)` to get full info.
-            # So we must fetch details.
+        if 0 <= index < len(self.current_results):
 
-            basic_comic = self.manager.searched_results[index]
+            basic_comic = self.current_results[index]
             self.notify("Fetching details...")
             self.fetch_details(basic_comic.url)
 

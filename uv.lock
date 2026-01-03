@@ -393,9 +393,9 @@ requires-dist = [
     { name = "lxml", specifier = ">=5.4.0" },
     { name = "prompt-toolkit", specifier = ">=3.0.51" },
     { name = "requests", specifier = ">=2.32.4" },
-    { name = "rich", specifier = ">=14.2.0" },
+    { name = "rich", specifier = ">=13.0.0" },
     { name = "selenium", specifier = ">=4.33.0" },
-    { name = "textual", specifier = ">=6.12.0" },
+    { name = "textual", specifier = ">=0.40.0" },
     { name = "tqdm", specifier = ">=4.67.1" },
 ]
 

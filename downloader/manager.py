@@ -46,7 +46,16 @@ class ComicManager:
     def _create_webdriver(self):
         options = Options()
         options.add_argument('--headless')
-        return webdriver.Firefox(options=options)
+        try:
+            return webdriver.Firefox(options=options)
+        except Exception as e:
+            logger.error(f"Failed to initialize Firefox driver: {e}")
+            # Try Chrome as fallback? Or just return None and handle it later?
+            # Existing code expects a driver.
+            # Let's try to just log and re-raise, or return None.
+            # If we return None, `_get_source` will pass None to source constructor.
+            # Sources use driver for parsing images (dumanwu).
+            return None
 
     def _get_source(self, source_name: str):
         if source_name not in self.sources:
