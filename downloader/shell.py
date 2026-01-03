@@ -193,28 +193,34 @@ class Shell(cmd.Cmd):
             for meta in self.context.comic.metadata:
                 md_content += f"- **{meta['k']}**: {meta['v']}\n"
 
-        md_content += "\n## Chapters\n"
-
-        for book_index, book in enumerate(self.context.comic.books):
-            md_content += f"### {book_index}: {book.name}\n"
-
-            # 使用列表显示卷信息，或者使用表格
-            # 表格可能更紧凑
-            # 但Markdown在Rich中表格支持有限（主要是GFM），不如直接用Table
-            # 这里为了符合"Markdown输出"的要求，使用Markdown列表，
-            # 或者混合使用 Rich Table。用户明确说 "Markdown 输出漫画详情"。
-
-            # 分组显示卷，每行显示几个
-            line_items = []
-            for index, vol in enumerate(book.vols):
-                line_items.append(f"`{index}`: {vol.name}")
-                if len(line_items) >= 4:
-                    md_content += " | ".join(line_items) + "\n\n"
-                    line_items = []
-            if line_items:
-                 md_content += " | ".join(line_items) + "\n\n"
-
         self.console.print(Markdown(md_content))
+
+        # Display chapters/volumes using tables
+        for book_index, book in enumerate(self.context.comic.books):
+            # Create a table for each book
+            # Using a multi-column layout for compactness: 3 columns of (Index, Name)
+
+            table = Table(title=f"{book_index}: {book.name}", show_header=False, box=None, padding=(0, 2))
+
+            COLUMNS = 3
+            for _ in range(COLUMNS):
+                table.add_column("Index", justify="right", style="cyan")
+                table.add_column("Name", style="white")
+
+            row_buffer = []
+            for index, vol in enumerate(book.vols):
+                row_buffer.extend([str(index), vol.name])
+                if len(row_buffer) == COLUMNS * 2:
+                    table.add_row(*row_buffer)
+                    row_buffer = []
+
+            if row_buffer:
+                # Pad the rest
+                while len(row_buffer) < COLUMNS * 2:
+                    row_buffer.extend(["", ""])
+                table.add_row(*row_buffer)
+
+            self.console.print(table)
 
 
     def do_v(self, arg):
