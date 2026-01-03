@@ -24,6 +24,11 @@ class NoOpTqdm:
 
 class SearchScreen(Screen):
     BINDINGS = [("escape", "quit", "Quit")]
+    DEFAULT_CSS = """
+    SearchScreen {
+        layers: base;
+    }
+    """
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -137,11 +142,17 @@ class ComicApp(App):
         self.call_from_thread(self.update_results, results)
 
     def update_results(self, results):
-        table = self.query_one(DataTable)
-        table.clear()
-        for idx, comic in enumerate(results):
-            table.add_row(str(idx), comic.source or "Unknown", comic.name, comic.author, comic.url, key=str(idx))
-        self.notify(f"Found {len(results)} results.")
+        try:
+            # Query by ID to be specific and avoid issues if multiple tables exist (though unlikely)
+            table = self.query_one("#results_table", DataTable)
+            table.clear()
+            for idx, comic in enumerate(results):
+                table.add_row(str(idx), comic.source or "Unknown", comic.name, comic.author, comic.url, key=str(idx))
+            self.notify(f"Found {len(results)} results.")
+        except NoMatches:
+            # If the screen was popped or table not found, just ignore or log
+            # This can happen if the user navigates away or quits before search completes
+            pass
 
     def show_details(self, index: int):
         if 0 <= index < len(self.manager.searched_results):
