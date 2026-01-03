@@ -17,5 +17,12 @@ site/
 
 **/geckodriver.log
 
+# logs
+*.log
+
+# coverage
+.coverage
+htmlcov/
+
 ### VS Code ###
 .vscode/
