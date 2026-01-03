@@ -6,6 +6,10 @@ from requests.packages.urllib3.util.retry import Retry
 from selenium import webdriver
 from selenium.webdriver.firefox.options import Options
 
+from rich.console import Console
+from rich.table import Table
+from rich.markdown import Markdown
+
 from downloader.dumanwu import DumanwuComic
 from downloader.morui import MoruiComic
 from downloader.thmh import TmhComic
@@ -30,6 +34,7 @@ class Shell(cmd.Cmd):
 
     def __init__(self, output_path):
         super().__init__()
+        self.console = Console()
         self.context = Context()
         self.context.create(output_path)
         # 定义支持的漫画源映射
@@ -43,32 +48,32 @@ class Shell(cmd.Cmd):
 
     def do_source(self, arg):
         """选择动漫下载网站源。输入 source  后，根据提示选择源序号。"""
-        print('请选择动漫下载网站源:')
+        self.console.print('请选择动漫下载网站源:')
         for index, source_name in enumerate(self.source_options):
-            print(f'{index + 1}. {source_name}')
+            self.console.print(f'{index + 1}. {source_name}')
 
         while True:
             try:
                 source_index_str = input('请输入网站源序号: ')
                 if not source_index_str:  # 用户直接回车，重新显示列表
-                    print('请选择动漫下载网站源:')
+                    self.console.print('请选择动漫下载网站源:')
                     for index, source_name in enumerate(self.source_options):
-                        print(f'{index + 1}. {source_name}')
+                        self.console.print(f'{index + 1}. {source_name}')
                     continue  # 继续下一次循环，等待用户输入
                 source_index = int(source_index_str) - 1  # 序号从1开始，索引从0开始
                 if 0 <= source_index < len(self.source_options):
                     source_name = self.source_options[source_index]
                     self.__switch_source(source_name)
                     break  # 选择成功，退出循环
-                print(f'无效的序号，请输入 1 到 {len(self.source_options)} 之间的序号。')
+                self.console.print(f'无效的序号，请输入 1 到 {len(self.source_options)} 之间的序号。')
             except ValueError:
-                print('请输入有效的数字序号。')
+                self.console.print('请输入有效的数字序号。')
 
     def __switch_source(self, source_name):
         """切换动漫源"""
         if self.context.source and self.context.source.name == source_name:
             return
-        print(f'正在切换到{source_name}动漫下载网站源...')
+        self.console.print(f'正在切换到{source_name}动漫下载网站源...')
 
         if source_name not in self.sources:
              source_class = self.source_map[source_name]
@@ -82,46 +87,62 @@ class Shell(cmd.Cmd):
     def do_s(self, arg):
         """搜索动漫，输入s <搜索关键字>，例如：s 猎人"""
         if not arg:
-            print('请输入搜索关键字！')
+            self.console.print('请输入搜索关键字！')
             return
 
         self.context.reset_comic()
         self.context.searched_results = []
 
         # 遍历所有源进行搜索
-        for source_name in self.source_options:
-            try:
-                # 确保源已初始化
-                if source_name not in self.sources:
-                    source_class = self.source_map[source_name]
-                    self.sources[source_name] = source_class(
-                        self.context.output_path, self.context.http, self.context.driver
-                    )
+        with self.console.status("正在搜索...", spinner="dots"):
+            for source_name in self.source_options:
+                try:
+                    # 确保源已初始化
+                    if source_name not in self.sources:
+                        source_class = self.source_map[source_name]
+                        self.sources[source_name] = source_class(
+                            self.context.output_path, self.context.http, self.context.driver
+                        )
 
-                source = self.sources[source_name]
-                print(f'正在 {source.name} 中搜索...')
-                results = source.search(arg)
+                    source = self.sources[source_name]
+                    # self.console.print(f'正在 {source.name} 中搜索...')
+                    results = source.search(arg)
 
-                # 每个源最多取10个结果
-                count = 0
-                for comic in results:
-                    if count >= 10:
-                        break
-                    comic.source = source_name
-                    self.context.searched_results.append(comic)
-                    count += 1
-            except Exception as e:
-                print(f'在 {source_name} 中搜索失败: {e}')
+                    # 每个源最多取10个结果
+                    count = 0
+                    for comic in results:
+                        if count >= 10:
+                            break
+                        comic.source = source_name
+                        self.context.searched_results.append(comic)
+                        count += 1
+                except Exception as e:
+                    self.console.print(f'在 {source_name} 中搜索失败: {e}', style="bold red")
+
+        table = Table(title="搜索结果")
+        table.add_column("Index", justify="right", style="cyan", no_wrap=True)
+        table.add_column("Source", style="magenta")
+        table.add_column("Author", style="green")
+        table.add_column("Name", style="bold yellow")
+        table.add_column("URL", style="blue")
 
         for index, comic in enumerate(self.context.searched_results):
             source_obj = self.sources.get(comic.source)
             source_display = source_obj.name if source_obj else comic.source
-            print(f'{index}: [{source_display}] {comic.author} {comic.name} {comic.url}')
+            table.add_row(
+                str(index),
+                source_display,
+                comic.author if comic.author else "N/A",
+                comic.name if comic.name else "N/A",
+                comic.url if comic.url else "N/A"
+            )
+
+        self.console.print(table)
 
     def do_i(self, arg):
         """查看动漫详情，输入i <搜索结果序号/动漫URL地址>，例如：d 12，或者d https://www.maofly.com/manga/38316.html"""
         if not arg:
-            print('请输入动漫URL地址或者搜索结果序号！')
+            self.console.print('请输入动漫URL地址或者搜索结果序号！')
             return
 
         url = None
@@ -133,7 +154,7 @@ class Shell(cmd.Cmd):
                 if comic.source:
                     self.__switch_source(comic.source)
             else:
-                print('请先搜索动漫，或输入正确的搜索结果序号！')
+                self.console.print('请先搜索动漫，或输入正确的搜索结果序号！')
                 return
         else:
             # 尝试根据URL匹配源
@@ -151,52 +172,67 @@ class Shell(cmd.Cmd):
                  if self.context.source and arg.startswith(self.context.source.base_url):
                      url = arg
                  else:
-                    print('请输入完整的动漫地址，且确保该地址属于支持的动漫源！')
+                    self.console.print('请输入完整的动漫地址，且确保该地址属于支持的动漫源！')
                     return
 
         if not self.context.source:
-             print('无法确定该动漫所属的源，请先搜索或手动选择源。')
+             self.console.print('无法确定该动漫所属的源，请先搜索或手动选择源。')
              return
 
-        self.context.comic = self.context.source.info(url)
+        with self.console.status("正在获取详情...", spinner="dots"):
+            self.context.comic = self.context.source.info(url)
 
         if self.context.comic is None:
-            print('未能获取动漫详情，请检查输入的地址或稍后重试。')
+            self.console.print('未能获取动漫详情，请检查输入的地址或稍后重试。', style="bold red")
             return
 
-        print(__build_fixed_string__(f' {self.context.comic.name} ', 100, '{:=^{len}}'))
+        md_content = f"# {self.context.comic.name}\n\n"
 
-        for meta in self.context.comic.metadata:
-            print(f'{meta["k"]}: {meta["v"]}')
+        if self.context.comic.metadata:
+            md_content += "## Metadata\n"
+            for meta in self.context.comic.metadata:
+                md_content += f"- **{meta['k']}**: {meta['v']}\n"
+
+        md_content += "\n## Chapters\n"
 
         for book_index, book in enumerate(self.context.comic.books):
-            print(__build_fixed_string__(f' {book_index}: {book.name} ', 100, '{:=^{len}}'))
-            line = ''
+            md_content += f"### {book_index}: {book.name}\n"
+
+            # 使用列表显示卷信息，或者使用表格
+            # 表格可能更紧凑
+            # 但Markdown在Rich中表格支持有限（主要是GFM），不如直接用Table
+            # 这里为了符合"Markdown输出"的要求，使用Markdown列表，
+            # 或者混合使用 Rich Table。用户明确说 "Markdown 输出漫画详情"。
+
+            # 分组显示卷，每行显示几个
+            line_items = []
             for index, vol in enumerate(book.vols):
-                s = f'{index:3d}: {vol.name}'
-                s = __build_fixed_string__(s, 40, '{:<{len}}')
-                if index % 3 == 2 or index == len(book.vols) - 1:
-                    print(line + s)
-                    line = ''
-                else:
-                    line += s
+                line_items.append(f"`{index}`: {vol.name}")
+                if len(line_items) >= 4:
+                    md_content += " | ".join(line_items) + "\n\n"
+                    line_items = []
+            if line_items:
+                 md_content += " | ".join(line_items) + "\n\n"
+
+        self.console.print(Markdown(md_content))
+
 
     def do_v(self, arg):
         """下载动漫，输入v <章节序号> <起始序号> <截止序号>，例如：v 0 11 12"""
         if not self.context.source:
-            print('请您先选择动漫下载网站源！')
+            self.console.print('请您先选择动漫下载网站源！')
             return
         if not arg:
-            print('请输入动漫章节序号！')
+            self.console.print('请输入动漫章节序号！')
             return
         if self.context.comic is None:
-            print('请先查看动漫详情！')
+            self.console.print('请先查看动漫详情！')
             return
 
         args = arg.split()
         book_index = int(args[0])
         if len(self.context.comic.books) <= book_index:
-            print('请输入正确的动漫章节序号！')
+            self.console.print('请输入正确的动漫章节序号！')
             return
 
         book = self.context.comic.books[book_index]
@@ -205,22 +241,22 @@ class Shell(cmd.Cmd):
         elif len(args) == 2:
             vol_to = int(args[1])
             if len(book.vols) <= vol_to:
-                print('请输入正确的截止序号！')
+                self.console.print('请输入正确的截止序号！')
                 return
 
             vols = book.vols[0 : vol_to + 1]
         elif len(args) == 3:
             vol_from = int(args[1])
             if len(book.vols) <= vol_from or vol_from < 0:
-                print('请输入正确的起始序号！')
+                self.console.print('请输入正确的起始序号！')
                 return
             vol_to = int(args[2])
             if len(book.vols) <= vol_to or vol_from > vol_to:
-                print('请输入正确的截止序号！')
+                self.console.print('请输入正确的截止序号！')
                 return
             vols = book.vols[vol_from : vol_to + 1]
         else:
-            print('参数错误，请重新输入！')
+            self.console.print('参数错误，请重新输入！')
             return
         self.context.source.download_vols(self.context.comic.name, book.name, vols)
 
@@ -228,10 +264,10 @@ class Shell(cmd.Cmd):
         """全量下载动漫，输入d <搜索结果序号/动漫URL地址>，例如：d 12，或者d https://www.maofly.com/manga/38316.html"""
         if not arg:
             if self.context.comic is None:
-                print('请先查看动漫详情！')
+                self.console.print('请先查看动漫详情！')
                 return
             if not self.context.source:
-                 print('当前没有选中的动漫源！')
+                 self.console.print('当前没有选中的动漫源！')
                  return
             self.context.source.download_full(self.context.comic)
         elif arg.isdigit():
@@ -244,10 +280,10 @@ class Shell(cmd.Cmd):
                 if self.context.source:
                     self.context.source.download_full_by_url(comic.url)
                 else:
-                    print('无法确定源，无法下载。')
+                    self.console.print('无法确定源，无法下载。')
                     return
             else:
-                print('请先搜索动漫，或输入正确的搜索结果序号！')
+                self.console.print('请先搜索动漫，或输入正确的搜索结果序号！')
                 return
         else:
             # Try to match URL to source
@@ -262,18 +298,18 @@ class Shell(cmd.Cmd):
             elif self.context.source and arg.startswith(self.context.source.base_url):
                  pass # already in correct source context
             else:
-                print('请输入完整的动漫地址，且确保该地址属于支持的动漫源！')
+                self.console.print('请输入完整的动漫地址，且确保该地址属于支持的动漫源！')
                 return
 
             self.context.source.download_full_by_url(arg)
 
         # self.context.searched_results.clear() # Maybe don't clear results so user can download another one?
-        print('下载完成')
+        self.console.print('下载完成', style="bold green")
 
     def do_q(self, arg):
         """退出动漫下载器"""
         self.context.destory()
-        print('感谢使用，再会！')
+        self.console.print('感谢使用，再会！')
         return True
 
 
@@ -334,11 +370,3 @@ class Context:
 
     def reset_result(self):
         self.searched_results = []
-
-
-def __build_fixed_string__(string, length, formatter):
-    # 修复 GBK 编码无法处理特殊字符导致的 UnicodeEncodeError
-    format_len = length - len(string.encode('GBK', errors='ignore')) + len(string)
-    if format_len < 0:
-        format_len = 0
-    return formatter.format(string, len=format_len)

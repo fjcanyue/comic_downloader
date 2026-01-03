@@ -11,7 +11,7 @@ from typing import List, Dict, Optional, Any, Union
 import requests
 from loguru import logger
 from lxml import etree
-from tqdm import tqdm
+from rich.progress import Progress, TextColumn, BarColumn, DownloadColumn, TransferSpeedColumn, TimeRemainingColumn
 
 # 配置 loguru 日志记录器
 # loguru 默认会输出到 stderr，并且包含时间、级别、模块、行号等信息
@@ -151,14 +151,29 @@ class ComicSource(ABC):
         path = os.path.join(self.output_dir, filter_dir_name(comic.name))
         logger.info(f'创建动漫目录: {path}')
         os.makedirs(path, exist_ok=True)
-        for book in comic.books:
-            book_path = os.path.join(path, filter_dir_name(book.name))
-            logger.info(f'处理章节: {book.name}')
-            for vol in tqdm(book.vols, desc=book.name):
-                try:
-                    self.__download_vol__(book_path, vol.name, vol.url)
-                except Exception as e:
-                    logger.error(f'下载卷/话失败: {vol.name} ({vol.url}), 错误: {e}', exc_info=True)
+
+        with Progress(
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            "[progress.percentage]{task.percentage:>3.0f}%",
+            TimeRemainingColumn(),
+        ) as progress:
+            for book in comic.books:
+                book_path = os.path.join(path, filter_dir_name(book.name))
+                logger.info(f'处理章节: {book.name}')
+
+                # 创建一个针对该书的任务
+                task_id = progress.add_task(description=f"下载 {book.name}", total=len(book.vols))
+
+                for vol in book.vols:
+                    try:
+                        self.__download_vol__(book_path, vol.name, vol.url, progress)
+                        progress.advance(task_id)
+                    except Exception as e:
+                        logger.error(f'下载卷/话失败: {vol.name} ({vol.url}), 错误: {e}', exc_info=True)
+
+                # 任务完成后移除或保留? 一般保留显示完成状态
+                progress.update(task_id, description=f"{book.name} 完成")
 
     @abstractmethod
     def __parse_imgs__(self, url):
@@ -184,19 +199,29 @@ class ComicSource(ABC):
         )
         logger.info(f'创建章节目录: {path} 用于下载指定卷/话')
         os.makedirs(path, exist_ok=True)
-        for vol in tqdm(vols, desc=book_name):
-            try:
-                self.__download_vol__(path, vol.name, vol.url)
-            except Exception as e:
-                logger.error(f'下载卷/话失败: {vol.name} ({vol.url}), 错误: {e}', exc_info=True)
 
-    def __download_vol__(self, path: str, vol_name: str, url: str) -> None:
+        with Progress(
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            "[progress.percentage]{task.percentage:>3.0f}%",
+            TimeRemainingColumn(),
+        ) as progress:
+             task_id = progress.add_task(description=f"下载 {book_name}", total=len(vols))
+             for vol in vols:
+                try:
+                    self.__download_vol__(path, vol.name, vol.url, progress)
+                    progress.advance(task_id)
+                except Exception as e:
+                    logger.error(f'下载卷/话失败: {vol.name} ({vol.url}), 错误: {e}', exc_info=True)
+
+    def __download_vol__(self, path: str, vol_name: str, url: str, parent_progress: Optional[Progress] = None) -> None:
         """下载动漫卷/话
 
         Args:
             path: 下载路径
             vol_name: 动漫卷/话名称
             url: 动漫卷/话URL地址
+            parent_progress: 父级进度条对象，用于嵌套显示图片下载进度
         """
         logger.info(f'开始下载卷/话: {vol_name} 从 {url}')
         try:
@@ -205,13 +230,13 @@ class ComicSource(ABC):
                 logger.warning(f'未解析到任何图片: {vol_name} ({url})')
                 return
             target_path = os.path.join(path, filter_dir_name(vol_name))
-            self.__download_vol_images__(target_path, vol_name, imgs)
+            self.__download_vol_images__(target_path, vol_name, imgs, parent_progress)
             logger.info(f'卷/话 {vol_name} 下载完成.')
         except Exception as e:
             logger.error(f'处理卷/话失败: {vol_name} ({url}), 错误: {e}', exc_info=True)
             raise  # 将异常继续向上抛出，以便上层调用者知道下载失败
 
-    def __download_vol_images__(self, path, vol_name, imgs):
+    def __download_vol_images__(self, path, vol_name, imgs, progress: Optional[Progress] = None):
         """下载图片"""
         logger.info(f'开始下载图片到目录: {path} (共 {len(imgs)} 张)')
         os.makedirs(path, exist_ok=True)
@@ -250,27 +275,27 @@ class ComicSource(ABC):
                 logger.error(f'写入图片文件失败: {file_path}, 错误: {e}')
                 return False, full_img_url
 
-        # 使用 ThreadPoolExecutor 进行并发下载，可以根据需要调整 max_workers
-        # 例如，如果 self.http 是 requests.Session，则 max_workers 应该较小，或者在 download_image 中创建新的 Session
-        # 默认的 max_workers 通常是 os.cpu_count() * 5
-        # 对于IO密集型任务，可以设置稍大一些的 worker 数量
-        # 考虑到下载间隔，worker 数量不宜过大，以免实际并发效果不佳或被目标网站限制
-        # 假设一个合理的并发数为 5 到 10，具体取决于 self.download_interval 的值
-        # 如果 download_interval 较大，则并发数意义不大
-        # 如果 download_interval 较小或为0，则可以适当增加并发数
-        # 这里暂时设置为5，可以根据实际情况调整
         max_workers = getattr(self, 'max_download_workers', 5)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # 使用 tqdm 显示进度
-            futures = [
-                executor.submit(download_image, (index, img_url_part))
-                for index, img_url_part in enumerate(imgs)
-            ]
-            for future in tqdm(
-                concurrent.futures.as_completed(futures), total=len(imgs), desc=vol_name
-            ):
-                success, url = future.result()
-                # 可以在这里处理下载失败的情况，例如记录失败的URL列表
+
+        task_id = None
+        if progress:
+            task_id = progress.add_task(description=f"  [cyan]{vol_name}", total=len(imgs))
+
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = [
+                    executor.submit(download_image, (index, img_url_part))
+                    for index, img_url_part in enumerate(imgs)
+                ]
+
+                for future in concurrent.futures.as_completed(futures):
+                    success, url = future.result()
+                    if progress and task_id is not None:
+                         progress.advance(task_id)
+        finally:
+            if progress and task_id is not None:
+                 progress.remove_task(task_id)
+
 
         if os.path.exists(path) and os.listdir(path):  # 仅当目录存在且非空时创建压缩文件
             logger.info(f'开始压缩目录: {path}')
