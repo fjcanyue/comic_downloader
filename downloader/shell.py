@@ -105,7 +105,7 @@ class Shell(cmd.Cmd):
                         )
 
                     source = self.sources[source_name]
-                    self.console.print(f'正在 {source.name} 中搜索...')
+                    # self.console.print(f'正在 {source.name} 中搜索...')
                     results = source.search(arg)
 
                     # 每个源最多取10个结果
@@ -120,11 +120,11 @@ class Shell(cmd.Cmd):
                     self.console.print(f'在 {source_name} 中搜索失败: {e}', style="bold red")
 
         table = Table(title="搜索结果")
-        table.add_column("序号", justify="right", style="cyan", no_wrap=True)
-        table.add_column("来源")
-        table.add_column("作者")
-        table.add_column("名称", style="bold yellow")
-        table.add_column("URL", style="cyan")
+        table.add_column("Index", justify="right", style="cyan", no_wrap=True)
+        table.add_column("Source", style="magenta")
+        table.add_column("Author", style="green")
+        table.add_column("Name", style="bold yellow")
+        table.add_column("URL", style="blue")
 
         for index, comic in enumerate(self.context.searched_results):
             source_obj = self.sources.get(comic.source)
@@ -189,7 +189,7 @@ class Shell(cmd.Cmd):
         md_content = f"# {self.context.comic.name}\n\n"
 
         if self.context.comic.metadata:
-            md_content += "## 元数据\n"
+            md_content += "## Metadata\n"
             for meta in self.context.comic.metadata:
                 md_content += f"- **{meta['k']}**: {meta['v']}\n"
 

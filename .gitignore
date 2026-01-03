@@ -19,6 +19,3 @@ site/
 
 ### VS Code ###
 .vscode/
-
-# log files
-*.log
