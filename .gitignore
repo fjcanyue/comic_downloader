@@ -16,6 +16,7 @@ site/
 .cache
 
 **/geckodriver.log
+**/comic_downloader.log
 
 ### VS Code ###
 .vscode/
