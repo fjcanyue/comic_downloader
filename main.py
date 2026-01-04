@@ -2,6 +2,9 @@ import os
 import signal
 import sys
 
+# Disable Selenium Manager stats to Plausible
+os.environ['SE_AVOID_STATS'] = 'true'
+
 from loguru import logger
 
 from downloader.shell import Shell
