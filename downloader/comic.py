@@ -5,6 +5,7 @@ import re
 import shutil
 from abc import ABC, abstractmethod
 from io import StringIO
+from pathlib import Path
 from time import sleep
 from typing import List, Dict, Optional, Any, Union
 
@@ -12,13 +13,6 @@ import requests
 from loguru import logger
 from lxml import etree
 from rich.progress import Progress, TextColumn, BarColumn, DownloadColumn, TransferSpeedColumn, TimeRemainingColumn
-
-# 配置 loguru 日志记录器
-# loguru 默认会输出到 stderr，并且包含时间、级别、模块、行号等信息
-# 移除默认的 stderr 输出，防止输出到控制台
-logger.remove()
-# 添加文件输出，并按大小轮转
-logger.add("comic_downloader.log", rotation="500 MB", level="INFO")
 
 
 class ComicVolume:
@@ -67,8 +61,6 @@ class ComicSource(ABC):
         self.driver: Any = driver
         """Selenium 网页驱动对象"""
 
-        self.http.headers.update({'referer': self.base_url})
-
         self.parser: etree.HTMLParser = etree.HTMLParser()
         self.logger = logger
 
@@ -84,12 +76,11 @@ class ComicSource(ABC):
     def load_config(self):
         """Load configuration from the configs directory."""
         # Assuming configs are stored in 'configs/' directory at the project root
-        # We can find the project root relative to this file
 
         # comic.py is in downloader/ directory. Project root is one level up.
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        project_root = os.path.dirname(current_dir)
-        config_path = os.path.join(project_root, 'configs', self.config_file)
+        current_file = Path(__file__)
+        project_root = current_file.parent.parent
+        config_path = project_root / 'configs' / self.config_file
 
         try:
             with open(config_path, 'r', encoding='utf-8') as f:
@@ -278,12 +269,11 @@ class ComicSource(ABC):
 
             logger.debug(f'下载图片: {full_img_url} 到 {file_path}')
             try:
-                # 注意：requests.Session 不是线程安全的，如果 http 对象是 Session，并发下载时需要为每个线程创建独立的 Session
-                # 或者使用线程安全的 HTTP 客户端库。此处假设 self.http.get 是线程安全的，或者不是 Session 对象。
-                # 如果 self.http 是 requests.Session()，则需要调整为在 download_image 内部创建 session
-                # import requests
-                # r = requests.get(full_img_url, timeout=30, headers=getattr(self.http, 'headers', {}))
-                r = self.http.get(full_img_url, timeout=30)
+                # 使用临时 headers，避免修改共享 session
+                headers = {'referer': self.base_url}
+                # 注意：requests.Session 本身是线程安全的，但如果多个线程同时修改 headers 会有问题。
+                # 这里我们调用 get 时不修改 session 的 headers，而是通过参数传入。
+                r = self.http.get(full_img_url, timeout=30, headers=headers)
                 r.raise_for_status()
                 with open(file_path, 'wb') as f:
                     f.write(r.content)
@@ -394,21 +384,30 @@ class ComicSource(ABC):
             self.logger.error(f'JS执行失败: {js_code}, 错误: {e}')
             return fallback
 
-    def __parse_html__(self, url, method='GET', data=None, encoding='utf-8'):
+    def __parse_html__(self, url, method='GET', data=None, encoding='utf-8', headers=None):
         """解析HTML
 
         Args:
             url (str): 动漫卷/话URL地址
+            method (str): HTTP方法
+            data (dict): POST数据
+            encoding (str): 编码
+            headers (dict): 请求头
 
         Returns:
             array: 根元素
         """
         self.logger.debug(f'开始解析HTML: {url}, 方法: {method}')
+
+        request_headers = {'referer': self.base_url}
+        if headers:
+            request_headers.update(headers)
+
         try:
             if method == 'GET':
-                r = self.http.get(url, timeout=30)  # 增加超时
+                r = self.http.get(url, timeout=30, headers=request_headers)  # 增加超时
             elif method == 'POST':
-                r = self.http.post(url, data=data, timeout=30)  # 增加超时
+                r = self.http.post(url, data=data, timeout=30, headers=request_headers)  # 增加超时
             else:
                 logger.error(f'不支持的HTTP方法: {method}')
                 return None
