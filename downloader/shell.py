@@ -1,18 +1,24 @@
 import cmd
+import pkgutil
+import inspect
+import importlib
+import os
+import sys
 
 import requests
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 from selenium import webdriver
-from selenium.webdriver.firefox.options import Options
+from selenium.webdriver.firefox.options import Options as FirefoxOptions
+from selenium.webdriver.chrome.options import Options as ChromeOptions
+from selenium.webdriver.edge.options import Options as EdgeOptions
 
 from rich.console import Console
 from rich.table import Table
 from rich.markdown import Markdown
 
-from downloader.dumanwu import DumanwuComic
-from downloader.morui import MoruiComic
-from downloader.thmh import TmhComic
+from downloader.comic import ComicSource
+import downloader
 
 
 class Shell(cmd.Cmd):
@@ -35,16 +41,37 @@ class Shell(cmd.Cmd):
     def __init__(self, output_path):
         super().__init__()
         self.console = Console()
-        self.context = Context()
+        self.context = Context(self.console)
         self.context.create(output_path)
-        # 定义支持的漫画源映射
-        self.source_map = {
-            'morui': MoruiComic,
-            'dumanwu': DumanwuComic,
-            'thmh': TmhComic,
-        }
+
+        # 动态发现源
+        self.source_map = self._discover_sources()
         self.source_options = list(self.source_map.keys())  # 存储源名称列表，方便按索引访问
         self.sources = {}
+
+    def _discover_sources(self):
+        """动态发现 downloader 包下的所有 ComicSource 实现"""
+        sources = {}
+        # 获取 downloader 包的路径
+        package_path = os.path.dirname(downloader.__file__)
+
+        for _, name, _ in pkgutil.iter_modules([package_path]):
+            if name == 'comic' or name == 'shell' or name == 'scroll_loader':
+                continue
+
+            try:
+                # 动态导入模块
+                module = importlib.import_module(f'downloader.{name}')
+                # 查找模块中的 ComicSource 子类
+                for item_name, item in inspect.getmembers(module, inspect.isclass):
+                    if issubclass(item, ComicSource) and item is not ComicSource:
+                        # 使用模块名作为 key，或者可以添加一个 name 属性到 ComicSource 子类中
+                        # 这里假设文件名对应源名称 (例如 boya.py -> boya)
+                        sources[name] = item
+            except Exception as e:
+                self.console.print(f"Failed to load module {name}: {e}", style="bold red")
+
+        return sources
 
     def do_source(self, arg):
         """选择动漫下载网站源。输入 source  后，根据提示选择源序号。"""
@@ -128,7 +155,7 @@ class Shell(cmd.Cmd):
 
         for index, comic in enumerate(self.context.searched_results):
             source_obj = self.sources.get(comic.source)
-            source_display = source_obj.name if source_obj else comic.source
+            source_display = getattr(source_obj, 'name', comic.source)
             table.add_row(
                 str(index),
                 source_display,
@@ -140,7 +167,7 @@ class Shell(cmd.Cmd):
         self.console.print(table)
 
     def do_i(self, arg):
-        """查看动漫详情，输入i <搜索结果序号/动漫URL地址>，例如：d 12，或者d https://www.maofly.com/manga/38316.html"""
+        """查看动漫详情，输入i <搜索结果序号/动漫URL地址>，例如：d 12，或者d https://www.maofly.com/manga/13954.html"""
         if not arg:
             self.console.print('请输入动漫URL地址或者搜索结果序号！')
             return
@@ -160,7 +187,7 @@ class Shell(cmd.Cmd):
             # 尝试根据URL匹配源
             matched_source = None
             for source_name, source_class in self.source_map.items():
-                if arg.startswith(source_class.base_url):
+                if hasattr(source_class, 'base_url') and arg.startswith(source_class.base_url):
                     matched_source = source_name
                     break
 
@@ -169,7 +196,7 @@ class Shell(cmd.Cmd):
                 url = arg
             else:
                  # 如果没有匹配到，检查当前是否已经选择了源
-                 if self.context.source and arg.startswith(self.context.source.base_url):
+                 if self.context.source and hasattr(self.context.source, 'base_url') and arg.startswith(self.context.source.base_url):
                      url = arg
                  else:
                     self.console.print('请输入完整的动漫地址，且确保该地址属于支持的动漫源！')
@@ -295,13 +322,13 @@ class Shell(cmd.Cmd):
             # Try to match URL to source
             matched_source = None
             for source_name, source_class in self.source_map.items():
-                if arg.startswith(source_class.base_url):
+                if hasattr(source_class, 'base_url') and arg.startswith(source_class.base_url):
                     matched_source = source_name
                     break
 
             if matched_source:
                  self.__switch_source(matched_source)
-            elif self.context.source and arg.startswith(self.context.source.base_url):
+            elif self.context.source and hasattr(self.context.source, 'base_url') and arg.startswith(self.context.source.base_url):
                  pass # already in correct source context
             else:
                 self.console.print('请输入完整的动漫地址，且确保该地址属于支持的动漫源！')
@@ -314,7 +341,7 @@ class Shell(cmd.Cmd):
 
     def do_q(self, arg):
         """退出动漫下载器"""
-        self.context.destory()
+        self.context.destroy()
         self.console.print('感谢使用，再会！')
         return True
 
@@ -324,7 +351,7 @@ class Context:
     命令行上下文类。
     """
 
-    def __init__(self):
+    def __init__(self, console):
         self.output_path = None
         '本机存储路径'
         self.http = None
@@ -337,6 +364,7 @@ class Context:
         '动漫网站源'
         self.driver = None
         '网页驱动'
+        self.console = console
         self.reset()
 
     def create(self, output_path):
@@ -357,14 +385,40 @@ class Context:
         self.http.mount('https://', adapter)
         self.http.mount('http://', adapter)
 
-        options = Options()
-        options.add_argument('--headless')
-        self.driver = webdriver.Firefox(options=options)
-        # self.driver = webdriver.Chrome(options=options)
-        # self.driver.get(url)
+        self.init_driver()
 
-    def destory(self):
-        self.driver.close()
+    def init_driver(self):
+        """尝试初始化 WebDriver，支持 Firefox, Chrome, Edge"""
+        drivers = [
+            ('Firefox', webdriver.Firefox, FirefoxOptions),
+            ('Chrome', webdriver.Chrome, ChromeOptions),
+            ('Edge', webdriver.Edge, EdgeOptions)
+        ]
+
+        for name, driver_cls, options_cls in drivers:
+            try:
+                options = options_cls()
+                options.add_argument('--headless')
+                # 某些驱动可能需要特定的 options 设置才能在某些环境下运行
+                if name == 'Chrome':
+                    options.add_argument('--no-sandbox')
+                    options.add_argument('--disable-dev-shm-usage')
+
+                self.driver = driver_cls(options=options)
+                # self.console.print(f"成功初始化 {name} 浏览器驱动", style="green")
+                return
+            except Exception as e:
+                # self.console.print(f"初始化 {name} 驱动失败: {e}", style="yellow")
+                continue
+
+        self.console.print("所有浏览器驱动初始化失败，请确保已安装 Firefox/Chrome/Edge 及其对应驱动。", style="bold red")
+
+    def destroy(self):
+        if self.driver:
+            try:
+                self.driver.quit()
+            except Exception:
+                pass
 
     def reset(self):
         self.source = None
