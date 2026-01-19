@@ -46,13 +46,14 @@ def filter_dir_name(name: str) -> str:
 
 
 class ComicSource(ABC):
-    def __init__(self, output_dir: str, http: requests.Session, driver: Any) -> None:
+    def __init__(self, output_dir: str, http: requests.Session, driver: Any, overwrite: bool = True) -> None:
         """动漫源构造函数
 
         Args:
             output_dir: 下载根目录
             http: requests 会话对象
             driver: Selenium 网页驱动对象
+            overwrite: 是否覆盖已存在的文件
         """
         self.output_dir: str = output_dir
         """下载根目录"""
@@ -60,6 +61,8 @@ class ComicSource(ABC):
         """requests 会话对象"""
         self.driver: Any = driver
         """Selenium 网页驱动对象"""
+        self.overwrite: bool = overwrite
+        """是否覆盖已存在的文件"""
 
         self.parser: etree.HTMLParser = etree.HTMLParser()
         self.logger = logger
@@ -215,6 +218,33 @@ class ComicSource(ABC):
             parent_progress: 父级进度条对象，用于嵌套显示图片下载进度
         """
         logger.info(f'开始下载卷/话: {vol_name} 从 {url}')
+
+        # 检查文件是否已存在
+        if not self.overwrite:
+            target_zip_name = filter_dir_name(vol_name) + '.zip'
+            target_zip_path = os.path.join(path, target_zip_name)
+
+            # Check basic existence
+            if os.path.exists(target_zip_path):
+                logger.info(f'文件已存在，跳过: {target_zip_path}')
+                return
+
+            # Check padding logic
+            # 如果文件名前面是数字，可以补最多两个0，如果补0后有对应zip文件也跳过
+            base_name = filter_dir_name(vol_name)
+            match = re.match(r'^(\d+)(.*)$', base_name)
+            if match:
+                num_part = match.group(1)
+                rest_part = match.group(2)
+
+                # Try padding with 1 or 2 zeros
+                for i in range(1, 3):
+                     padded_num = num_part.zfill(len(num_part) + i)
+                     padded_name = padded_num + rest_part + '.zip'
+                     padded_path = os.path.join(path, padded_name)
+                     if os.path.exists(padded_path):
+                         logger.info(f'文件已存在(补零匹配)，跳过: {padded_path}')
+                         return
 
         # 添加解析提示任务
         parse_task_id = None
