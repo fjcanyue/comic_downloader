@@ -21,13 +21,11 @@ def main():
     if '-d' in args:
         logger.add(sys.stderr, level="DEBUG")
         args.remove('-d')
-    else:
-        # Default behavior: log errors to stderr or just keep it quiet in console?
-        # Typically CLI tools are quiet unless error happens or output is needed.
-        # But here we probably want some feedback if not using Shell's print.
-        # However, Shell uses rich console for output, so we might not want loguru interfering.
-        # Let's keep it simple: Log to file always, Log to stderr only if -d.
-        pass
+
+    overwrite = False
+    if '--overwrite' in args:
+        overwrite = True
+        args.remove('--overwrite')
 
     logger.add("comic_downloader.log", rotation="500 MB", level="INFO")
 
@@ -37,7 +35,7 @@ def main():
     else:
         output_path = args[0]
 
-    Shell(output_path).cmdloop()
+    Shell(output_path, overwrite=overwrite).cmdloop()
 
 
 def __handler__(signum, frame):

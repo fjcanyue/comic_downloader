@@ -38,11 +38,12 @@ class Shell(cmd.Cmd):
     prefix = '动漫下载器> '
     prompt = prefix
 
-    def __init__(self, output_path):
+    def __init__(self, output_path, overwrite=False):
         super().__init__()
         self.console = Console()
         self.context = Context(self.console)
         self.context.create(output_path)
+        self.overwrite = overwrite
 
         # 动态发现源
         self.source_map = self._discover_sources()
@@ -105,7 +106,8 @@ class Shell(cmd.Cmd):
         if source_name not in self.sources:
              source_class = self.source_map[source_name]
              self.sources[source_name] = source_class(
-                self.context.output_path, self.context.http, self.context.driver
+                self.context.output_path, self.context.http, self.context.driver,
+                overwrite=self.overwrite
             )
 
         self.context.source = self.sources[source_name]
@@ -128,7 +130,8 @@ class Shell(cmd.Cmd):
                     if source_name not in self.sources:
                         source_class = self.source_map[source_name]
                         self.sources[source_name] = source_class(
-                            self.context.output_path, self.context.http, self.context.driver
+                            self.context.output_path, self.context.http, self.context.driver,
+                            overwrite=self.overwrite
                         )
 
                     source = self.sources[source_name]
