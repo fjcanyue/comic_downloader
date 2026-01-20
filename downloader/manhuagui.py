@@ -6,13 +6,13 @@ class ManhuaguiComic(ComicSource):
     This class is deprecated and will be removed in future versions.
     """
     name = '看漫画'
-    base_url = 'https://www.manhuagui.com/'
+    base_url = 'https://www.manhuagui.com'
     # base_img_url = 'http://imgpc.31mh.com/images/comic'
     download_interval = 5
     config_file = 'manhuagui.json'
 
-    def __init__(self, output_dir, http, driver):
-        super().__init__(output_dir, http, driver)
+    def __init__(self, output_dir, http, driver, overwrite=True):
+        super().__init__(output_dir, http, driver, overwrite)
 
     def search(self, keyword):
         logger.info(f'开始在 看漫画 搜索: {keyword}')
@@ -48,7 +48,7 @@ class ManhuaguiComic(ComicSource):
         for book in book_list:
             b = book.xpath('div/a')[0]
             comic = Comic()
-            comic.url = '%s/%s' % (self.base_url, b.attrib.get('href'))
+            comic.url = '%s%s' % (self.base_url, b.attrib.get('href'))
             author_list = book.xpath('div[contains(@class,"book-detail")]/dl/dd[3]/span/a')
             authors = []
             for author in author_list:

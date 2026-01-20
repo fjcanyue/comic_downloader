@@ -16,8 +16,8 @@ class MaoflyComic(ComicSource):
     download_interval = 5
     config_file = 'maofly.json'
 
-    def __init__(self, output_dir, http, driver):
-        super().__init__(output_dir, http, driver)
+    def __init__(self, output_dir, http, driver, overwrite=True):
+        super().__init__(output_dir, http, driver, overwrite)
         try:
             logger.info(f'正在为 {self.name} 初始化JS解码器...')
             js_url = '%s/static/js/string.min.js' % self.base_url
