@@ -5,11 +5,13 @@ class ManhuaguiComic(ComicSource):
     """
     This class is deprecated and will be removed in future versions.
     """
+
     name = '看漫画'
     base_url = 'https://www.manhuagui.com'
     # base_img_url = 'http://imgpc.31mh.com/images/comic'
     download_interval = 5
     config_file = 'manhuagui.json'
+    enable = True
 
     def __init__(self, output_dir, http, driver, overwrite=True):
         super().__init__(output_dir, http, driver, overwrite)

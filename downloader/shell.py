@@ -1,24 +1,22 @@
 import cmd
-import pkgutil
-import inspect
 import importlib
+import inspect
 import os
-import sys
+import pkgutil
 
 import requests
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
+from rich.console import Console
+from rich.markdown import Markdown
+from rich.table import Table
 from selenium import webdriver
-from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.edge.options import Options as EdgeOptions
+from selenium.webdriver.firefox.options import Options as FirefoxOptions
 
-from rich.console import Console
-from rich.table import Table
-from rich.markdown import Markdown
-
-from downloader.comic import ComicSource
 import downloader
+from downloader.comic import ComicSource
 
 
 class Shell(cmd.Cmd):
@@ -65,12 +63,12 @@ class Shell(cmd.Cmd):
                 module = importlib.import_module(f'downloader.{name}')
                 # 查找模块中的 ComicSource 子类
                 for item_name, item in inspect.getmembers(module, inspect.isclass):
-                    if issubclass(item, ComicSource) and item is not ComicSource:
+                    if issubclass(item, ComicSource) and item is not ComicSource and item.enable:
                         # 使用模块名作为 key，或者可以添加一个 name 属性到 ComicSource 子类中
                         # 这里假设文件名对应源名称 (例如 boya.py -> boya)
                         sources[name] = item
             except Exception as e:
-                self.console.print(f"Failed to load module {name}: {e}", style="bold red")
+                self.console.print(f'Failed to load module {name}: {e}', style='bold red')
 
         return sources
 
@@ -93,7 +91,9 @@ class Shell(cmd.Cmd):
                     source_name = self.source_options[source_index]
                     self.__switch_source(source_name)
                     break  # 选择成功，退出循环
-                self.console.print(f'无效的序号，请输入 1 到 {len(self.source_options)} 之间的序号。')
+                self.console.print(
+                    f'无效的序号，请输入 1 到 {len(self.source_options)} 之间的序号。'
+                )
             except ValueError:
                 self.console.print('请输入有效的数字序号。')
 
@@ -104,10 +104,12 @@ class Shell(cmd.Cmd):
         self.console.print(f'正在切换到{source_name}动漫下载网站源...')
 
         if source_name not in self.sources:
-             source_class = self.source_map[source_name]
-             self.sources[source_name] = source_class(
-                self.context.output_path, self.context.http, self.context.driver,
-                overwrite=self.overwrite
+            source_class = self.source_map[source_name]
+            self.sources[source_name] = source_class(
+                self.context.output_path,
+                self.context.http,
+                self.context.driver,
+                overwrite=self.overwrite,
             )
 
         self.context.source = self.sources[source_name]
@@ -123,19 +125,22 @@ class Shell(cmd.Cmd):
         self.context.searched_results = []
 
         # 遍历所有源进行搜索
-        with self.console.status("正在搜索...", spinner="dots"):
+        console_status = self.console.status('正在搜索...', spinner='dots')
+        with console_status:
             for source_name in self.source_options:
                 try:
                     # 确保源已初始化
                     if source_name not in self.sources:
                         source_class = self.source_map[source_name]
                         self.sources[source_name] = source_class(
-                            self.context.output_path, self.context.http, self.context.driver,
-                            overwrite=self.overwrite
+                            self.context.output_path,
+                            self.context.http,
+                            self.context.driver,
+                            overwrite=self.overwrite,
                         )
 
                     source = self.sources[source_name]
-                    # self.console.print(f'正在 {source.name} 中搜索...')
+                    console_status.update(f'正在 {source.name} 中搜索...')
                     results = source.search(arg)
 
                     # 每个源最多取10个结果
@@ -147,14 +152,14 @@ class Shell(cmd.Cmd):
                         self.context.searched_results.append(comic)
                         count += 1
                 except Exception as e:
-                    self.console.print(f'在 {source_name} 中搜索失败: {e}', style="bold red")
+                    self.console.print(f'在 {source_name} 中搜索失败: {e}', style='bold red')
 
-        table = Table(title="搜索结果")
-        table.add_column("Index", justify="right", style="cyan", no_wrap=True)
-        table.add_column("Source", style="magenta")
-        table.add_column("Author", style="green")
-        table.add_column("Name", style="bold yellow")
-        table.add_column("URL", style="blue")
+        table = Table(title='搜索结果')
+        table.add_column('Index', justify='right', style='cyan', no_wrap=True)
+        table.add_column('Source', style='magenta')
+        table.add_column('Author', style='green')
+        table.add_column('Name', style='bold yellow')
+        table.add_column('URL', style='blue')
 
         for index, comic in enumerate(self.context.searched_results):
             source_obj = self.sources.get(comic.source)
@@ -162,9 +167,9 @@ class Shell(cmd.Cmd):
             table.add_row(
                 str(index),
                 source_display,
-                comic.author if comic.author else "N/A",
-                comic.name if comic.name else "N/A",
-                comic.url if comic.url else "N/A"
+                comic.author if comic.author else 'N/A',
+                comic.name if comic.name else 'N/A',
+                comic.url if comic.url else 'N/A',
             )
 
         self.console.print(table)
@@ -197,31 +202,34 @@ class Shell(cmd.Cmd):
             if matched_source:
                 self.__switch_source(matched_source)
                 url = arg
+            # 如果没有匹配到，检查当前是否已经选择了源
+            elif (
+                self.context.source
+                and hasattr(self.context.source, 'base_url')
+                and arg.startswith(self.context.source.base_url)
+            ):
+                url = arg
             else:
-                 # 如果没有匹配到，检查当前是否已经选择了源
-                 if self.context.source and hasattr(self.context.source, 'base_url') and arg.startswith(self.context.source.base_url):
-                     url = arg
-                 else:
-                    self.console.print('请输入完整的动漫地址，且确保该地址属于支持的动漫源！')
-                    return
+                self.console.print('请输入完整的动漫地址，且确保该地址属于支持的动漫源！')
+                return
 
         if not self.context.source:
-             self.console.print('无法确定该动漫所属的源，请先搜索或手动选择源。')
-             return
+            self.console.print('无法确定该动漫所属的源，请先搜索或手动选择源。')
+            return
 
-        with self.console.status("正在获取详情...", spinner="dots"):
+        with self.console.status('正在获取详情...', spinner='dots'):
             self.context.comic = self.context.source.info(url)
 
         if self.context.comic is None:
-            self.console.print('未能获取动漫详情，请检查输入的地址或稍后重试。', style="bold red")
+            self.console.print('未能获取动漫详情，请检查输入的地址或稍后重试。', style='bold red')
             return
 
-        md_content = f"# {self.context.comic.name}\n\n"
+        md_content = f'# {self.context.comic.name}\n\n'
 
         if self.context.comic.metadata:
-            md_content += "## Metadata\n"
+            md_content += '## Metadata\n'
             for meta in self.context.comic.metadata:
-                md_content += f"- **{meta['k']}**: {meta['v']}\n"
+                md_content += f'- **{meta["k"]}**: {meta["v"]}\n'
 
         self.console.print(Markdown(md_content))
 
@@ -230,12 +238,14 @@ class Shell(cmd.Cmd):
             # Create a table for each book
             # Using a multi-column layout for compactness: 3 columns of (Index, Name)
 
-            table = Table(title=f"{book_index}: {book.name}", show_header=False, box=None, padding=(0, 2))
+            table = Table(
+                title=f'{book_index}: {book.name}', show_header=False, box=None, padding=(0, 2)
+            )
 
             COLUMNS = 3
             for _ in range(COLUMNS):
-                table.add_column("Index", justify="right", style="cyan")
-                table.add_column("Name", style="white")
+                table.add_column('Index', justify='right', style='cyan')
+                table.add_column('Name', style='white')
 
             row_buffer = []
             for index, vol in enumerate(book.vols):
@@ -247,11 +257,10 @@ class Shell(cmd.Cmd):
             if row_buffer:
                 # Pad the rest
                 while len(row_buffer) < COLUMNS * 2:
-                    row_buffer.extend(["", ""])
+                    row_buffer.extend(['', ''])
                 table.add_row(*row_buffer)
 
             self.console.print(table)
-
 
     def do_v(self, arg):
         """下载动漫，输入v <章节序号> <起始序号> <截止序号>，例如：v 0 11 12"""
@@ -303,8 +312,8 @@ class Shell(cmd.Cmd):
                 self.console.print('请先查看动漫详情！')
                 return
             if not self.context.source:
-                 self.console.print('当前没有选中的动漫源！')
-                 return
+                self.console.print('当前没有选中的动漫源！')
+                return
             self.context.source.download_full(self.context.comic)
         elif arg.isdigit():
             idx = int(arg)
@@ -330,9 +339,13 @@ class Shell(cmd.Cmd):
                     break
 
             if matched_source:
-                 self.__switch_source(matched_source)
-            elif self.context.source and hasattr(self.context.source, 'base_url') and arg.startswith(self.context.source.base_url):
-                 pass # already in correct source context
+                self.__switch_source(matched_source)
+            elif (
+                self.context.source
+                and hasattr(self.context.source, 'base_url')
+                and arg.startswith(self.context.source.base_url)
+            ):
+                pass  # already in correct source context
             else:
                 self.console.print('请输入完整的动漫地址，且确保该地址属于支持的动漫源！')
                 return
@@ -340,7 +353,7 @@ class Shell(cmd.Cmd):
             self.context.source.download_full_by_url(arg)
 
         # self.context.searched_results.clear() # Maybe don't clear results so user can download another one?
-        self.console.print('下载完成', style="bold green")
+        self.console.print('下载完成', style='bold green')
 
     def do_q(self, arg):
         """退出动漫下载器"""
@@ -393,9 +406,9 @@ class Context:
     def init_driver(self):
         """尝试初始化 WebDriver，支持 Firefox, Chrome, Edge"""
         drivers = [
-            ('Firefox', webdriver.Firefox, FirefoxOptions),
             ('Chrome', webdriver.Chrome, ChromeOptions),
-            ('Edge', webdriver.Edge, EdgeOptions)
+            ('Firefox', webdriver.Firefox, FirefoxOptions),
+            ('Edge', webdriver.Edge, EdgeOptions),
         ]
 
         for name, driver_cls, options_cls in drivers:
@@ -410,11 +423,14 @@ class Context:
                 self.driver = driver_cls(options=options)
                 # self.console.print(f"成功初始化 {name} 浏览器驱动", style="green")
                 return
-            except Exception as e:
+            except Exception:
                 # self.console.print(f"初始化 {name} 驱动失败: {e}", style="yellow")
                 continue
 
-        self.console.print("所有浏览器驱动初始化失败，请确保已安装 Firefox/Chrome/Edge 及其对应驱动。", style="bold red")
+        self.console.print(
+            '所有浏览器驱动初始化失败，请确保已安装 Firefox/Chrome/Edge 及其对应驱动。',
+            style='bold red',
+        )
 
     def destroy(self):
         if self.driver:

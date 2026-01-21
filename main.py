@@ -1,6 +1,7 @@
 import os
 import signal
 import sys
+
 from loguru import logger
 
 # Disable Selenium Manager stats to Plausible
@@ -17,9 +18,9 @@ def main():
     logger.remove()
 
     # Check for debug flag
-    log_level = "INFO"
+    log_level = 'INFO'
     if '-d' in args:
-        logger.add(sys.stderr, level="DEBUG")
+        logger.add(sys.stderr, level='DEBUG')
         args.remove('-d')
 
     overwrite = False
@@ -27,7 +28,7 @@ def main():
         overwrite = True
         args.remove('--overwrite')
 
-    logger.add("comic_downloader.log", rotation="500 MB", level="INFO")
+    logger.add('comic_downloader.log', rotation='500 MB', level='INFO')
 
     if len(args) == 0:
         path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

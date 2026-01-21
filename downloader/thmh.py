@@ -11,6 +11,7 @@ class TmhComic(ComicSource):
     base_url = 'https://www.31mh.cc'
     download_interval = 5
     config_file = 'thmh.json'
+    enable = True
 
     def __init__(self, output_dir, http, driver, overwrite=True):
         super().__init__(output_dir, http, driver, overwrite)

@@ -11,6 +11,7 @@ class ManhuazhanComic(ComicSource):
     base_url = 'https://www.manhuazhan.com'
     download_interval = 5
     config_file = 'manhuazhan.json'
+    enable = True
 
     def __init__(self, output_dir, http, driver, overwrite=True):
         super().__init__(output_dir, http, driver, overwrite)

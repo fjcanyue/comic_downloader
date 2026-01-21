@@ -7,35 +7,35 @@ from abc import ABC, abstractmethod
 from io import StringIO
 from pathlib import Path
 from time import sleep
-from typing import List, Dict, Optional, Any, Union
+from typing import Any
 
 import requests
 from loguru import logger
 from lxml import etree
-from rich.progress import Progress, TextColumn, BarColumn, DownloadColumn, TransferSpeedColumn, TimeRemainingColumn
+from rich.progress import BarColumn, Progress, TextColumn
 
 
 class ComicVolume:
-    def __init__(self, name: str, url: str, book_name: Optional[str] = None) -> None:
+    def __init__(self, name: str, url: str, book_name: str | None = None) -> None:
         self.name: str = name
         self.url: str = url
-        self.book_name: Optional[str] = book_name
+        self.book_name: str | None = book_name
 
 
 class ComicBook:
     def __init__(self) -> None:
-        self.name: Optional[str] = None
-        self.vols: List[ComicVolume] = []
+        self.name: str | None = None
+        self.vols: list[ComicVolume] = []
 
 
 class Comic:
     def __init__(self) -> None:
-        self.name: Optional[str] = None
-        self.author: Optional[str] = None
-        self.url: Optional[str] = None
-        self.source: Optional[str] = None
-        self.metadata: List[Dict[str, str]] = []
-        self.books: List[ComicBook] = []
+        self.name: str | None = None
+        self.author: str | None = None
+        self.url: str | None = None
+        self.source: str | None = None
+        self.metadata: list[dict[str, str]] = []
+        self.books: list[ComicBook] = []
 
 
 filter_dir_re = re.compile(r'[\/:*?"<>|]')
@@ -46,7 +46,9 @@ def filter_dir_name(name: str) -> str:
 
 
 class ComicSource(ABC):
-    def __init__(self, output_dir: str, http: requests.Session, driver: Any, overwrite: bool = True) -> None:
+    def __init__(
+        self, output_dir: str, http: requests.Session, driver: Any, overwrite: bool = True
+    ) -> None:
         """动漫源构造函数
 
         Args:
@@ -71,10 +73,10 @@ class ComicSource(ABC):
         if hasattr(self, 'config_file') and self.config_file:
             self.load_config()
         elif hasattr(self, 'config') and self.config:
-             # Already has config (maybe hardcoded), do nothing or validate
-             pass
+            # Already has config (maybe hardcoded), do nothing or validate
+            pass
         else:
-             self.config = {}
+            self.config = {}
 
     def load_config(self):
         """Load configuration from the configs directory."""
@@ -86,22 +88,21 @@ class ComicSource(ABC):
         config_path = project_root / 'configs' / self.config_file
 
         try:
-            with open(config_path, 'r', encoding='utf-8') as f:
+            with open(config_path, encoding='utf-8') as f:
                 self.config = json.load(f)
-            self.logger.debug(f"Loaded config from {config_path}")
+            self.logger.debug(f'Loaded config from {config_path}')
         except FileNotFoundError:
-            self.logger.error(f"Config file not found: {config_path}")
+            self.logger.error(f'Config file not found: {config_path}')
             self.config = {}
         except json.JSONDecodeError as e:
-            self.logger.error(f"Error decoding JSON from {config_path}: {e}")
+            self.logger.error(f'Error decoding JSON from {config_path}: {e}')
             self.config = {}
         except Exception as e:
-             self.logger.error(f"Unexpected error loading config {config_path}: {e}")
-             self.config = {}
-
+            self.logger.error(f'Unexpected error loading config {config_path}: {e}')
+            self.config = {}
 
     @abstractmethod
-    def search(self, keyword: str) -> List[Comic]:
+    def search(self, keyword: str) -> list[Comic]:
         """搜索动漫
 
         Args:
@@ -112,7 +113,7 @@ class ComicSource(ABC):
         """
 
     @abstractmethod
-    def info(self, url: str) -> Optional[Comic]:
+    def info(self, url: str) -> Comic | None:
         """查看动漫详细信息
 
         Args:
@@ -147,27 +148,28 @@ class ComicSource(ABC):
         os.makedirs(path, exist_ok=True)
 
         with Progress(
-            TextColumn("[progress.description]{task.description}"),
+            TextColumn('[progress.description]{task.description}'),
             BarColumn(),
-            "[progress.percentage]{task.percentage:>3.0f}%",
-            TimeRemainingColumn(),
+            '[progress.percentage]{task.percentage:>3.0f}%',
         ) as progress:
             for book in comic.books:
                 book_path = os.path.join(path, filter_dir_name(book.name))
                 logger.info(f'处理章节: {book.name}')
 
                 # 创建一个针对该书的任务
-                task_id = progress.add_task(description=f"下载 {book.name}", total=len(book.vols))
+                task_id = progress.add_task(description=f'下载 {book.name}', total=len(book.vols))
 
                 for vol in book.vols:
                     try:
                         self.__download_vol__(book_path, vol.name, vol.url, progress)
                         progress.advance(task_id)
                     except Exception as e:
-                        logger.error(f'下载卷/话失败: {vol.name} ({vol.url}), 错误: {e}', exc_info=True)
+                        logger.error(
+                            f'下载卷/话失败: {vol.name} ({vol.url}), 错误: {e}', exc_info=True
+                        )
 
                 # 任务完成后移除或保留? 一般保留显示完成状态
-                progress.update(task_id, description=f"{book.name} 完成")
+                progress.update(task_id, description=f'{book.name} 完成')
 
     @abstractmethod
     def __parse_imgs__(self, url):
@@ -180,7 +182,7 @@ class ComicSource(ABC):
             array: 图片URL地址数组
         """
 
-    def download_vols(self, comic_name: str, book_name: str, vols: List[ComicVolume]) -> None:
+    def download_vols(self, comic_name: str, book_name: str, vols: list[ComicVolume]) -> None:
         """按指定范围下载动漫
 
         Args:
@@ -195,20 +197,21 @@ class ComicSource(ABC):
         os.makedirs(path, exist_ok=True)
 
         with Progress(
-            TextColumn("[progress.description]{task.description}"),
+            TextColumn('[progress.description]{task.description}'),
             BarColumn(),
-            "[progress.percentage]{task.percentage:>3.0f}%",
-            TimeRemainingColumn(),
+            '[progress.percentage]{task.percentage:>3.0f}%',
         ) as progress:
-             task_id = progress.add_task(description=f"下载 {book_name}", total=len(vols))
-             for vol in vols:
+            task_id = progress.add_task(description=f'下载 {book_name}', total=len(vols))
+            for vol in vols:
                 try:
                     self.__download_vol__(path, vol.name, vol.url, progress)
                     progress.advance(task_id)
                 except Exception as e:
                     logger.error(f'下载卷/话失败: {vol.name} ({vol.url}), 错误: {e}', exc_info=True)
 
-    def __download_vol__(self, path: str, vol_name: str, url: str, parent_progress: Optional[Progress] = None) -> None:
+    def __download_vol__(
+        self, path: str, vol_name: str, url: str, parent_progress: Progress | None = None
+    ) -> None:
         """下载动漫卷/话
 
         Args:
@@ -239,19 +242,21 @@ class ComicSource(ABC):
 
                 # Try padding with 1 or 2 zeros
                 for i in range(1, 3):
-                     padded_num = num_part.zfill(len(num_part) + i)
-                     padded_name = padded_num + rest_part + '.zip'
-                     padded_path = os.path.join(path, padded_name)
-                     if os.path.exists(padded_path):
-                         logger.info(f'文件已存在(补零匹配)，跳过: {padded_path}')
-                         return
+                    padded_num = num_part.zfill(len(num_part) + i)
+                    padded_name = padded_num + rest_part + '.zip'
+                    padded_path = os.path.join(path, padded_name)
+                    if os.path.exists(padded_path):
+                        logger.info(f'文件已存在(补零匹配)，跳过: {padded_path}')
+                        return
 
         # 添加解析提示任务
         parse_task_id = None
         if parent_progress:
-            parse_task_id = parent_progress.add_task(description=f"[yellow]正在解析 {vol_name} 图片...", total=None)
+            parse_task_id = parent_progress.add_task(
+                description=f'[yellow]正在解析 {vol_name} 图片...', total=None
+            )
         else:
-            print(f"正在解析 {vol_name} 图片...")
+            print(f'正在解析 {vol_name} 图片...')
 
         try:
             imgs = self.__parse_imgs__(url)
@@ -259,7 +264,7 @@ class ComicSource(ABC):
             # 解析完成后移除解析任务
             if parent_progress and parse_task_id is not None:
                 parent_progress.remove_task(parse_task_id)
-                parse_task_id = None # 防止在 except 块中再次移除
+                parse_task_id = None  # 防止在 except 块中再次移除
 
             if not imgs:
                 logger.warning(f'未解析到任何图片: {vol_name} ({url})')
@@ -270,15 +275,15 @@ class ComicSource(ABC):
         except Exception as e:
             # 异常发生时也要清理任务，并确保不会重复移除
             if parent_progress and parse_task_id is not None:
-                 try:
+                try:
                     parent_progress.remove_task(parse_task_id)
-                 except KeyError:
-                    pass # 任务可能已经被移除了，忽略错误
+                except KeyError:
+                    pass  # 任务可能已经被移除了，忽略错误
 
             logger.error(f'处理卷/话失败: {vol_name} ({url}), 错误: {e}', exc_info=True)
             raise  # 将异常继续向上抛出，以便上层调用者知道下载失败
 
-    def __download_vol_images__(self, path, vol_name, imgs, progress: Optional[Progress] = None):
+    def __download_vol_images__(self, path, vol_name, imgs, progress: Progress | None = None):
         """下载图片"""
         logger.info(f'开始下载图片到目录: {path} (共 {len(imgs)} 张)')
         os.makedirs(path, exist_ok=True)
@@ -320,7 +325,7 @@ class ComicSource(ABC):
 
         task_id = None
         if progress:
-            task_id = progress.add_task(description=f"  [cyan]{vol_name}", total=len(imgs))
+            task_id = progress.add_task(description=f'  [cyan]{vol_name}', total=len(imgs))
 
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -332,11 +337,10 @@ class ComicSource(ABC):
                 for future in concurrent.futures.as_completed(futures):
                     success, url = future.result()
                     if progress and task_id is not None:
-                         progress.advance(task_id)
+                        progress.advance(task_id)
         finally:
             if progress and task_id is not None:
-                 progress.remove_task(task_id)
-
+                progress.remove_task(task_id)
 
         if os.path.exists(path) and os.listdir(path):  # 仅当目录存在且非空时创建压缩文件
             logger.info(f'开始压缩目录: {path}')

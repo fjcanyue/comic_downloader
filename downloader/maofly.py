@@ -15,6 +15,7 @@ class MaoflyComic(ComicSource):
     base_img_url = 'https://mao.mhtupian.com/uploads'
     download_interval = 5
     config_file = 'maofly.json'
+    enable = False
 
     def __init__(self, output_dir, http, driver, overwrite=True):
         super().__init__(output_dir, http, driver, overwrite)
