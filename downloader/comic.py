@@ -3,6 +3,7 @@ import json
 import os
 import re
 import shutil
+import sys
 from abc import ABC, abstractmethod
 from io import StringIO
 from pathlib import Path
@@ -82,10 +83,14 @@ class ComicSource(ABC):
         """Load configuration from the configs directory."""
         # Assuming configs are stored in 'configs/' directory at the project root
 
-        # comic.py is in downloader/ directory. Project root is one level up.
-        current_file = Path(__file__)
-        project_root = current_file.parent.parent
-        config_path = project_root / 'configs' / self.config_file
+        if getattr(sys, 'frozen', False):
+            # PyInstaller creates a temp folder and stores path in _MEIPASS
+            base_path = Path(sys._MEIPASS)
+        else:
+            # comic.py is in downloader/ directory. Project root is one level up.
+            base_path = Path(__file__).parent.parent
+
+        config_path = base_path / 'configs' / self.config_file
 
         try:
             with open(config_path, encoding='utf-8') as f:

@@ -8,7 +8,7 @@ a = Analysis(
     ['main.py'],
     pathex=['downloader/comic.py', 'downloader/shell.py', 'downloader/maofly.py', 'downloader/dmzj.py'],
     binaries=[],
-    datas=[],
+    datas=[('configs', 'configs')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
