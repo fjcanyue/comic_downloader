@@ -10,6 +10,7 @@ class BoyaComic(ComicSource):
     name = '博雅漫画'
     base_url = 'http://www.boyamh.com'
     config_file = 'boya.json'
+    enable = False
 
     def search(self, keyword):
         logger.info(f'开始在 {self.name} 搜索: {keyword}')

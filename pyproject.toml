@@ -116,6 +116,9 @@ ignore = [
   "SIM108", # This is an opinionated style rule that may not always be to everyone's taste, especially for code that makes use of complex conditions
   "E501",   # line too long, handled by formatter
   "B008",   # do not perform function calls in argument defaults
+  "RUF001", # String contains ambiguous
+  "RUF002", # String contains ambiguous
+  "RUF003", # String contains ambiguous
 ]
 
 # 导入排序配置

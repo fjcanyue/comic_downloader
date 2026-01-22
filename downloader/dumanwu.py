@@ -17,9 +17,10 @@ class DumanwuComic(ComicSource):
     # base_img_url = 'http://imgpc.31mh.com/images/comic'
     download_interval = 5
     config_file = 'dumanwu.json'
+    enable = True
 
-    def __init__(self, output_dir, http, driver):
-        super().__init__(output_dir, http, driver)
+    def __init__(self, output_dir, http, driver, overwrite=True):
+        super().__init__(output_dir, http, driver, overwrite)
 
     def search(self, keyword):
         self.logger.info(

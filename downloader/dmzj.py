@@ -12,9 +12,10 @@ class DmzjComic(ComicSource):
     base_img_url = 'http://images.dmzj.com'
     download_interval = 5
     config_file = 'dmzj.json'
+    enable = False
 
-    def __init__(self, output_dir, http, driver):
-        super().__init__(output_dir, http, driver)
+    def __init__(self, output_dir, http, driver, overwrite=True):
+        super().__init__(output_dir, http, driver, overwrite)
 
     def search(self, keyword):
         logger.info(f'开始在 动漫之家 搜索: {keyword}')
