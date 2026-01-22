@@ -111,7 +111,7 @@ class ManhuaguiComic(ComicSource):
             except IndexError:
                 logger.warning(f'解析章节名称失败，使用默认名称: 章节卷 {book_index + 1} ({url})')
                 comic_book.name = f'章节卷 {book_index + 1}'
-            vol_list = book.xpath('ul/li')
+            vol_list = book_node.xpath('ul/li')
             for vol in vol_list:
                 v = vol.xpath('a')[0]
                 comic_book.vols.append(
