@@ -6,10 +6,19 @@ block_cipher = None
 
 a = Analysis(
     ['main.py'],
-    pathex=['downloader/comic.py', 'downloader/shell.py', 'downloader/maofly.py', 'downloader/dmzj.py'],
+    pathex=['downloader'],
     binaries=[],
-    datas=[],
-    hiddenimports=[],
+    datas=[('configs', 'configs')],
+    hiddenimports=[
+        'downloader.boya',
+        'downloader.dmzj',
+        'downloader.dumanwu',
+        'downloader.manhuagui',
+        'downloader.manhuazhan',
+        'downloader.maofly',
+        'downloader.morui',
+        'downloader.thmh'
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
