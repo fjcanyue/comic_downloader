@@ -13,6 +13,7 @@ class DmzjComic(ComicSource):
     download_interval = 5
     config_file = 'dmzj.json'
     enable = False
+    search_requires_driver = True
 
     def __init__(self, output_dir, http, driver, overwrite=True):
         super().__init__(output_dir, http, driver, overwrite)

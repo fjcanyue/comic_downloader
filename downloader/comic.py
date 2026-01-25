@@ -347,13 +347,34 @@ class ComicSource(ABC):
             if progress and task_id is not None:
                 progress.remove_task(task_id)
 
-        if os.path.exists(path) and os.listdir(path):  # 仅当目录存在且非空时创建压缩文件
-            logger.info(f'开始压缩目录: {path}')
-            try:
-                shutil.make_archive(path, 'zip', path)
-                logger.info(f'目录 {path} 压缩完成.')
-            except Exception as e:
-                logger.error(f'压缩目录失败: {path}, 错误: {e}', exc_info=True)
+        if os.path.exists(path) and os.listdir(
+            path
+        ):  # 仅当目录存在且非空，图片数量相同时创建压缩文件
+            # 检查实际下载的图片数量是否与预期相同
+            actual_files = sorted(os.listdir(path))
+            expected_count = len(imgs)
+            actual_count = len(actual_files)
+
+            if expected_count == actual_count:
+                logger.info(f'开始压缩目录: {path}')
+                try:
+                    shutil.make_archive(path, 'zip', path)
+                    logger.info(f'目录 {path} 压缩完成.')
+                except Exception as e:
+                    logger.error(f'压缩目录失败: {path}, 错误: {e}', exc_info=True)
+            else:
+                # 计算缺少的文件
+                missing_files = []
+                for i in range(1, expected_count + 1):
+                    expected_filename = f'{i:04d}.jpg'
+                    if expected_filename not in actual_files:
+                        missing_files.append(expected_filename)
+
+                logger.warning(
+                    f'目录 {path} 图片数量不匹配，跳过压缩. '
+                    f'预期 {expected_count} 张，实际 {actual_count} 张. '
+                    f'缺少文件: {missing_files}'
+                )
         elif not os.path.exists(path):
             logger.warning(f'目录 {path} 不存在, 跳过压缩.')
         else:
