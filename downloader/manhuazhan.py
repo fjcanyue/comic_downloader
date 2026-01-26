@@ -7,6 +7,7 @@ class ManhuazhanComic(ComicSource):
     """
     This class is deprecated and will be removed in future versions.
     """
+
     name = '漫画站'
     base_url = 'https://www.manhuazhan.com'
     download_interval = 5

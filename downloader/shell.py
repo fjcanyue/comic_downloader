@@ -1,10 +1,16 @@
 import cmd
+import concurrent.futures
 import importlib
 import inspect
 import os
 import pkgutil
+import threading
+import time
+from dataclasses import dataclass
+from typing import Callable
 
 import requests
+from loguru import logger
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 from rich.console import Console
@@ -17,6 +23,86 @@ from selenium.webdriver.firefox.options import Options as FirefoxOptions
 
 import downloader
 from downloader.comic import ComicSource
+
+
+@dataclass(frozen=True)
+class SearchTask:
+    source_name: str
+    search_func: Callable[[str], list]
+    uses_driver: bool
+    display_name: str
+
+
+@dataclass
+class SearchOutcome:
+    source_name: str
+    results: list
+    error_message: str | None
+    duration: float
+
+
+def _execute_search_task(
+    task: SearchTask, keyword: str, per_source_limit: int, driver_lock: threading.Lock | None
+) -> SearchOutcome:
+    start = time.perf_counter()
+    try:
+        # Selenium driver 不是线程安全的，访问时强制串行化
+        if task.uses_driver:
+            if driver_lock is None:
+                raise RuntimeError('浏览器驱动锁未初始化')
+            with driver_lock:
+                results = task.search_func(keyword)
+        else:
+            results = task.search_func(keyword)
+
+        trimmed = []
+        for comic in results:
+            if len(trimmed) >= per_source_limit:
+                break
+            comic.source = task.source_name
+            trimmed.append(comic)
+
+        duration = time.perf_counter() - start
+        return SearchOutcome(task.source_name, trimmed, None, duration)
+    except Exception as e:
+        duration = time.perf_counter() - start
+        logger.exception('搜索任务失败: {source_name}', source_name=task.source_name)
+        return SearchOutcome(task.source_name, [], str(e), duration)
+
+
+def _run_search_serial(
+    tasks: list[SearchTask],
+    keyword: str,
+    per_source_limit: int,
+    driver_lock: threading.Lock | None,
+) -> list[SearchOutcome]:
+    return [_execute_search_task(task, keyword, per_source_limit, driver_lock) for task in tasks]
+
+
+def _run_search_parallel(
+    tasks: list[SearchTask],
+    keyword: str,
+    per_source_limit: int,
+    driver_lock: threading.Lock | None,
+    max_workers: int | None = None,
+) -> list[SearchOutcome]:
+    if not tasks:
+        return []
+    if max_workers is None:
+        max_workers = min(8, len(tasks))
+    if max_workers <= 1:
+        return _run_search_serial(tasks, keyword, per_source_limit, driver_lock)
+
+    # 并行执行后按完成顺序收集，再在外层按源顺序合并
+    outcomes = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [
+            executor.submit(_execute_search_task, task, keyword, per_source_limit, driver_lock)
+            for task in tasks
+        ]
+        for future in concurrent.futures.as_completed(futures):
+            outcomes.append(future.result())
+    return outcomes
 
 
 class Shell(cmd.Cmd):
@@ -42,6 +128,7 @@ class Shell(cmd.Cmd):
         self.context = Context(self.console)
         self.context.create(output_path)
         self.overwrite = overwrite
+        self.search_driver_lock = threading.Lock()
 
         # 动态发现源
         self.source_map = self._discover_sources()
@@ -124,35 +211,80 @@ class Shell(cmd.Cmd):
         self.context.reset_comic()
         self.context.searched_results = []
 
-        # 遍历所有源进行搜索
+        tasks = []
+        for source_name in self.source_options:
+            source_class = self.source_map[source_name]
+            uses_driver = bool(getattr(source_class, 'search_requires_driver', False))
+            display_name = getattr(source_class, 'name', source_name)
+
+            # 每个搜索任务使用独立 Session，避免并发共享会话带来的线程安全风险
+            def build_search_func(
+                target_class=source_class, needs_driver=uses_driver
+            ) -> Callable[[str], list]:
+                def _search(keyword: str) -> list:
+                    if needs_driver and self.context.driver is None:
+                        raise RuntimeError('浏览器驱动未初始化')
+                    http = self.context.create_http_session()
+                    source = target_class(
+                        self.context.output_path,
+                        http,
+                        self.context.driver,
+                        overwrite=self.overwrite,
+                    )
+                    return source.search(keyword)
+
+                return _search
+
+            tasks.append(
+                SearchTask(
+                    source_name=source_name,
+                    search_func=build_search_func(),
+                    uses_driver=uses_driver,
+                    display_name=display_name,
+                )
+            )
+
+            if source_name not in self.sources:
+                self.sources[source_name] = source_class(
+                    self.context.output_path,
+                    self.context.http,
+                    self.context.driver,
+                    overwrite=self.overwrite,
+                )
+
+        task_lookup = {task.source_name: task for task in tasks}
         console_status = self.console.status('正在搜索...', spinner='dots')
+        search_start = time.perf_counter()
         with console_status:
-            for source_name in self.source_options:
-                try:
-                    # 确保源已初始化
-                    if source_name not in self.sources:
-                        source_class = self.source_map[source_name]
-                        self.sources[source_name] = source_class(
-                            self.context.output_path,
-                            self.context.http,
-                            self.context.driver,
-                            overwrite=self.overwrite,
-                        )
+            outcomes = _run_search_parallel(
+                tasks, arg, 10, self.search_driver_lock, max_workers=min(8, len(tasks))
+            )
 
-                    source = self.sources[source_name]
-                    console_status.update(f'正在 {source.name} 中搜索...')
-                    results = source.search(arg)
+            for outcome in outcomes:
+                task = task_lookup.get(outcome.source_name)
+                if task:
+                    console_status.update(f'完成 {task.display_name} 搜索')
 
-                    # 每个源最多取10个结果
-                    count = 0
-                    for comic in results:
-                        if count >= 10:
-                            break
-                        comic.source = source_name
-                        self.context.searched_results.append(comic)
-                        count += 1
-                except Exception as e:
-                    self.console.print(f'在 {source_name} 中搜索失败: {e}', style='bold red')
+        # 按源顺序合并结果，保持与原串行逻辑一致
+        outcomes_by_source = {outcome.source_name: outcome for outcome in outcomes}
+        for source_name in self.source_options:
+            outcome = outcomes_by_source.get(source_name)
+            if not outcome:
+                continue
+            if outcome.error_message:
+                self.console.print(
+                    f'在 {source_name} 中搜索失败: {outcome.error_message}', style='bold red'
+                )
+            self.context.searched_results.extend(outcome.results)
+
+        search_duration = time.perf_counter() - search_start
+        logger.info(
+            '搜索完成: keyword={keyword}, sources={sources}, results={results}, duration={duration:.2f}s',
+            keyword=arg,
+            sources=len(tasks),
+            results=len(self.context.searched_results),
+            duration=search_duration,
+        )
 
         table = Table(title='搜索结果')
         table.add_column('Index', justify='right', style='cyan', no_wrap=True)
@@ -386,22 +518,26 @@ class Context:
     def create(self, output_path):
         self.output_path = output_path
         print(f'动漫文件本机存储路径为: {output_path}')
+        self.http = self.create_http_session()
 
+        self.init_driver()
+
+    def create_http_session(self):
         retry_strategy = Retry(
             total=3, status_forcelist=[400, 429, 500, 502, 503, 504], allowed_methods=['GET']
         )
         adapter = HTTPAdapter(max_retries=retry_strategy)
-        self.http = requests.Session()
-        self.http.headers.update(
+        http = requests.Session()
+        http.headers.update(
             {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36',
                 'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6',
             }
         )
-        self.http.mount('https://', adapter)
-        self.http.mount('http://', adapter)
-
-        self.init_driver()
+        http.mount('https://', adapter)
+        http.mount('http://', adapter)
+        return http
 
     def init_driver(self):
         """尝试初始化 WebDriver，支持 Firefox, Chrome, Edge"""
