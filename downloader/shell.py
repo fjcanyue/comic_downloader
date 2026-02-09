@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import cmd
 import concurrent.futures
 import importlib
@@ -95,13 +97,21 @@ def _run_search_parallel(
 
     # 并行执行后按完成顺序收集，再在外层按源顺序合并
     outcomes = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
+    try:
         futures = [
             executor.submit(_execute_search_task, task, keyword, per_source_limit, driver_lock)
             for task in tasks
         ]
         for future in concurrent.futures.as_completed(futures):
             outcomes.append(future.result())
+        executor.shutdown(wait=True)
+    except (KeyboardInterrupt, SystemExit):
+        executor.shutdown(wait=False, cancel_futures=True)
+        raise
+    except:
+        executor.shutdown(wait=True)
+        raise
     return outcomes
 
 
