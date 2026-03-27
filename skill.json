@@ -1,0 +1,78 @@
+{
+  "name": "comic_downloader",
+  "description": "一个用于搜索、查看详情和下载动漫的命令行工具",
+  "skills": [
+    {
+      "name": "search",
+      "description": "搜索动漫。根据给定的关键字从所有支持的动漫源中搜索，返回搜索结果列表（包括名称、作者、源和对应的URL）。",
+      "command_template": "comic_downloader search \"{keyword}\"",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "keyword": {
+            "type": "string",
+            "description": "要搜索的动漫关键字（例如：猎人）。"
+          }
+        },
+        "required": ["keyword"]
+      }
+    },
+    {
+      "name": "info",
+      "description": "查看动漫详情。根据动漫的URL，获取其详细信息，包括元数据以及所有的章节和话/卷列表。",
+      "command_template": "comic_downloader info {url}",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "动漫的完整URL地址。"
+          }
+        },
+        "required": ["url"]
+      }
+    },
+    {
+      "name": "download",
+      "description": "全量下载动漫。根据动漫的URL，下载该动漫的所有章节。注意此操作可能耗时较长。",
+      "command_template": "comic_downloader download {url}",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "动漫的完整URL地址。"
+          }
+        },
+        "required": ["url"]
+      }
+    },
+    {
+      "name": "download_vols",
+      "description": "按范围下载动漫章节。根据动漫URL和指定的章节序号，下载特定的一话或一系列话/卷。",
+      "command_template": "comic_downloader download_vols {url} {book_index} {start_index} {end_index}",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "动漫的完整URL地址。"
+          },
+          "book_index": {
+            "type": "integer",
+            "description": "要下载的章节（Book）序号（基于 info 命令输出的表格中的序号，从0开始）。"
+          },
+          "start_index": {
+            "type": "integer",
+            "description": "可选。要下载的话/卷（Volume）的起始序号（基于 info 命令输出的表格中的 Index）。如果只提供起始序号，将下载从该序号到章节末尾的所有话。"
+          },
+          "end_index": {
+            "type": "integer",
+            "description": "可选。要下载的话/卷（Volume）的截止序号。如果提供，将下载从起始序号到截止序号（包含）的所有话。"
+          }
+        },
+        "required": ["url", "book_index"]
+      }
+    }
+  ]
+}
