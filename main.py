@@ -36,7 +36,11 @@ def main():
     else:
         output_path = args[0]
 
-    Shell(output_path, overwrite=overwrite).cmdloop()
+    shell = Shell(output_path, overwrite=overwrite)
+    try:
+        shell.cmdloop()
+    finally:
+        shell.context.destroy()
 
 
 def __handler__(signum, frame):

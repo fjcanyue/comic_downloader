@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import cmd
 import concurrent.futures
 import importlib
@@ -6,8 +8,8 @@ import os
 import pkgutil
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 import requests
 from loguru import logger
@@ -95,13 +97,21 @@ def _run_search_parallel(
 
     # 并行执行后按完成顺序收集，再在外层按源顺序合并
     outcomes = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
+    try:
         futures = [
             executor.submit(_execute_search_task, task, keyword, per_source_limit, driver_lock)
             for task in tasks
         ]
         for future in concurrent.futures.as_completed(futures):
             outcomes.append(future.result())
+        executor.shutdown(wait=True)
+    except (KeyboardInterrupt, SystemExit):
+        executor.shutdown(wait=False, cancel_futures=True)
+        raise
+    except:
+        executor.shutdown(wait=True)
+        raise
     return outcomes
 
 
@@ -287,17 +297,17 @@ class Shell(cmd.Cmd):
         )
 
         table = Table(title='搜索结果')
-        table.add_column('Index', justify='right', style='cyan', no_wrap=True)
-        table.add_column('Source', style='magenta')
-        table.add_column('Author', style='green')
-        table.add_column('Name', style='bold yellow')
-        table.add_column('URL', style='blue')
+        table.add_column('序号', justify='right', no_wrap=True)
+        table.add_column('动漫源')
+        table.add_column('作者')
+        table.add_column('名称')
+        table.add_column('URL', style='#75D7EC')
 
         for index, comic in enumerate(self.context.searched_results):
             source_obj = self.sources.get(comic.source)
             source_display = getattr(source_obj, 'name', comic.source)
             table.add_row(
-                str(index),
+                str(index + 1),
                 source_display,
                 comic.author if comic.author else 'N/A',
                 comic.name if comic.name else 'N/A',
@@ -314,7 +324,7 @@ class Shell(cmd.Cmd):
 
         url = None
         if arg.isdigit():
-            idx = int(arg)
+            idx = int(arg) - 1
             if self.context.searched_results and len(self.context.searched_results) > idx:
                 comic = self.context.searched_results[idx]
                 url = comic.url
@@ -371,7 +381,7 @@ class Shell(cmd.Cmd):
             # Using a multi-column layout for compactness: 3 columns of (Index, Name)
 
             table = Table(
-                title=f'{book_index}: {book.name}', show_header=False, box=None, padding=(0, 2)
+                title=f'{book_index + 1}: {book.name}', show_header=False, box=None, padding=(0, 2)
             )
 
             COLUMNS = 3
@@ -381,7 +391,7 @@ class Shell(cmd.Cmd):
 
             row_buffer = []
             for index, vol in enumerate(book.vols):
-                row_buffer.extend([str(index), vol.name])
+                row_buffer.extend([str(index + 1), vol.name])
                 if len(row_buffer) == COLUMNS * 2:
                     table.add_row(*row_buffer)
                     row_buffer = []
@@ -395,7 +405,7 @@ class Shell(cmd.Cmd):
             self.console.print(table)
 
     def do_v(self, arg):
-        """下载动漫，输入v <章节序号> <起始序号> <截止序号>，例如：v 0 11 12"""
+        """下载动漫，输入v <章节序号> <起始序号> <截止序号>，例如：v 1 11 12"""
         if not self.context.source:
             self.console.print('请您先选择动漫下载网站源！')
             return
@@ -407,7 +417,7 @@ class Shell(cmd.Cmd):
             return
 
         args = arg.split()
-        book_index = int(args[0])
+        book_index = int(args[0]) - 1
         if len(self.context.comic.books) <= book_index:
             self.console.print('请输入正确的动漫章节序号！')
             return
@@ -416,18 +426,18 @@ class Shell(cmd.Cmd):
         if len(args) == 1:
             vols = book.vols
         elif len(args) == 2:
-            vol_to = int(args[1])
+            vol_to = int(args[1]) - 1
             if len(book.vols) <= vol_to:
                 self.console.print('请输入正确的截止序号！')
                 return
 
             vols = book.vols[0 : vol_to + 1]
         elif len(args) == 3:
-            vol_from = int(args[1])
+            vol_from = int(args[1]) - 1
             if len(book.vols) <= vol_from or vol_from < 0:
                 self.console.print('请输入正确的起始序号！')
                 return
-            vol_to = int(args[2])
+            vol_to = int(args[2]) - 1
             if len(book.vols) <= vol_to or vol_from > vol_to:
                 self.console.print('请输入正确的截止序号！')
                 return
@@ -448,7 +458,7 @@ class Shell(cmd.Cmd):
                 return
             self.context.source.download_full(self.context.comic)
         elif arg.isdigit():
-            idx = int(arg)
+            idx = int(arg) - 1
             if self.context.searched_results and len(self.context.searched_results) > idx:
                 comic = self.context.searched_results[idx]
                 if comic.source:

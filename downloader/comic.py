@@ -332,17 +332,24 @@ class ComicSource(ABC):
         if progress:
             task_id = progress.add_task(description=f'  [cyan]{vol_name}', total=len(imgs))
 
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
         try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                futures = [
-                    executor.submit(download_image, (index, img_url_part))
-                    for index, img_url_part in enumerate(imgs)
-                ]
+            futures = [
+                executor.submit(download_image, (index, img_url_part))
+                for index, img_url_part in enumerate(imgs)
+            ]
 
-                for future in concurrent.futures.as_completed(futures):
-                    success, url = future.result()
-                    if progress and task_id is not None:
-                        progress.advance(task_id)
+            for future in concurrent.futures.as_completed(futures):
+                success, url = future.result()
+                if progress and task_id is not None:
+                    progress.advance(task_id)
+            executor.shutdown(wait=True)
+        except (KeyboardInterrupt, SystemExit):
+            executor.shutdown(wait=False, cancel_futures=True)
+            raise
+        except:
+            executor.shutdown(wait=True)
+            raise
         finally:
             if progress and task_id is not None:
                 progress.remove_task(task_id)
