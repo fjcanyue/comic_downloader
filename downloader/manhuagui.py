@@ -1,3 +1,5 @@
+from selenium.webdriver.support.ui import WebDriverWait
+
 from downloader.comic import Comic, ComicBook, ComicSource, ComicVolume, logger
 
 
@@ -132,6 +134,11 @@ class ManhuaguiComic(ComicSource):
         try:
             self.driver.get(url)
             self.driver.implicitly_wait(5)
+            WebDriverWait(self.driver, 10).until(
+                lambda d: d.execute_script(
+                    "return typeof pVars !== 'undefined' && pVars.page !== undefined"
+                )
+            )
             imgs = self.execute_js_safely(self.driver, self.config['imgs_js'], [])
             if imgs:
                 logger.info(f'成功解析到 {len(imgs)} 张图片来自 {url}')
