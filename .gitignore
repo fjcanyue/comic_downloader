@@ -8,12 +8,18 @@ __pycache__/
 *.so
 *~
 venv/
+.venv/
+.uv-cache/
+.uv-python/
 
 site/
 
 # due to using nox and pytest
 .nox
 .cache
+.pytest_cache/
+.coverage
+htmlcov/
 
 **/geckodriver.log
 **/comic_downloader.log

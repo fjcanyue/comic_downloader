@@ -18,6 +18,7 @@ dependencies = [
 ]
 
 [project.scripts]
+comic_downloader = "main:main"
 run-app = "main:main"
 
 # DEV SETTING
@@ -81,7 +82,7 @@ filename = "downloader/__init__.py"
 target-version = "py310"
 
 # 定义源码目录，帮助 Ruff 正确解析导入。
-src = ["src"]
+src = ["downloader"]
 
 indent-width = 4
 # 行长度限制为 100 个字符
@@ -122,10 +123,11 @@ ignore = [
 ]
 
 # 导入排序配置
-isort = { combine-as-imports = true, known-first-party = ["agents"] }
+isort = { combine-as-imports = true, known-first-party = ["downloader"] }
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = [
+  "PLR2004",
   "S101",
   "RET504",
 ] # Allow assert statements and unnecessary assignments before return in tests
@@ -142,7 +144,8 @@ quote-style = "single"
 #                           Pytest 配置
 # ==============================================================================
 [tool.pytest.ini_options]
-addopts = "-ra -q -s --strict-markers --cov=my_package --cov-report=term-missing --cov-report html:htmlcov"
+addopts = "-ra -q -s --strict-markers --cov=downloader --cov-report=term-missing --cov-report html:htmlcov"
+pythonpath = ["."]
 markers = [
   "slow: marks tests as slow (deselect with '-m \"not slow\"')",
   "integration: marks tests as integration tests",

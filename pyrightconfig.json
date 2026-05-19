@@ -1,6 +1,7 @@
 {
     "include": [
-        "downloader"
+        "downloader",
+        "tests"
     ],
     "exclude": [
         "**/__pycache__",
@@ -15,10 +16,10 @@
     "reportMissingImports": "error",
     "reportMissingTypeStubs": false,
     "pythonVersion": "3.10",
-    "pythonPlatform": "Linux",
+    "pythonPlatform": "Windows",
     "executionEnvironments": [
         {
-            "root": "downloader"
+            "root": "."
         }
     ]
 }
