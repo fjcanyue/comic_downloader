@@ -2,10 +2,6 @@ from __future__ import annotations
 
 import cmd
 import concurrent.futures
-import importlib
-import inspect
-import os
-import pkgutil
 import threading
 import time
 from collections.abc import Callable
@@ -14,7 +10,6 @@ from dataclasses import dataclass
 import requests
 from loguru import logger
 from requests.adapters import HTTPAdapter
-from requests.packages.urllib3.util.retry import Retry
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.table import Table
@@ -22,9 +17,38 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.edge.options import Options as EdgeOptions
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
+from urllib3.util.retry import Retry
 
-import downloader
-from downloader.comic import ComicSource
+from downloader.sources import load_source_classes
+
+
+def parse_1_based_index(value: str, length: int, label: str) -> int:
+    try:
+        index = int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f'请输入正确的{label}序号！') from None
+    if index < 1 or index > length:
+        raise ValueError(f'请输入正确的{label}序号！')
+    return index - 1
+
+
+def parse_volume_slice(args: list[str], book_count: int, vol_count: int) -> tuple[int, slice]:
+    if not args:
+        raise ValueError('请输入动漫章节序号！')
+
+    book_index = parse_1_based_index(args[0], book_count, '动漫章节')
+    if len(args) == 1:
+        return book_index, slice(None)
+    if len(args) == 2:
+        vol_to = parse_1_based_index(args[1], vol_count, '截止')
+        return book_index, slice(0, vol_to + 1)
+    if len(args) == 3:
+        vol_from = parse_1_based_index(args[1], vol_count, '起始')
+        vol_to = parse_1_based_index(args[2], vol_count, '截止')
+        if vol_from > vol_to:
+            raise ValueError('请输入正确的截止序号！')
+        return book_index, slice(vol_from, vol_to + 1)
+    raise ValueError('参数错误，请重新输入！')
 
 
 @dataclass(frozen=True)
@@ -123,9 +147,9 @@ class Shell(cmd.Cmd):
     * d: 全量下载动漫，输入d <搜索结果序号/动漫URL地址>。例如：输入 d 12，或者d https://www.maofly.com/manga/38316.html
     * i: 查看动漫详情，输入i <搜索结果序号/动漫URL地址>。例如：输入 i 12，或者i https://www.maofly.com/manga/13954.html
     * v: 按范围下载动漫，需要先执行查看动漫详情命令，根据详情的序号列表，指定下载范围。支持三种模式：
-      - 输入v <章节序号>，下载该章节下的所有动漫。例如：输入 v 0。
-      - 输入v <章节序号> <截止序号>，下载该章节下，从章节开始到截止序号的动漫。例如：输入 v 0 12
-      - 输入v <章节序号> <起始序号> <截止序号>，下载该章节下，从起始位置到截止位置的动漫。例如：输入 v 0 12 18
+      - 输入v <章节序号>，下载该章节下的所有动漫。例如：输入 v 1。
+      - 输入v <章节序号> <截止序号>，下载该章节下，从章节开始到截止序号的动漫。例如：输入 v 1 12
+      - 输入v <章节序号> <起始序号> <截止序号>，下载该章节下，从起始位置到截止位置的动漫。例如：输入 v 1 12 18
     * source: 手动切换动漫下载网站源 (可选)。
     * q: 退出动漫下载器
     """
@@ -139,35 +163,21 @@ class Shell(cmd.Cmd):
         self.context.create(output_path)
         self.overwrite = overwrite
         self.search_driver_lock = threading.Lock()
+        self.current_source_name = None
 
-        # 动态发现源
+        # 默认源排除 deprecated 站点；完整源用于直接 URL 匹配。
+        self.all_source_map = self._discover_sources(include_deprecated=True)
         self.source_map = self._discover_sources()
         self.source_options = list(self.source_map.keys())  # 存储源名称列表，方便按索引访问
         self.sources = {}
 
-    def _discover_sources(self):
-        """动态发现 downloader 包下的所有 ComicSource 实现"""
-        sources = {}
-        # 获取 downloader 包的路径
-        package_path = os.path.dirname(downloader.__file__)
-
-        for _, name, _ in pkgutil.iter_modules([package_path]):
-            if name == 'comic' or name == 'shell' or name == 'scroll_loader':
-                continue
-
-            try:
-                # 动态导入模块
-                module = importlib.import_module(f'downloader.{name}')
-                # 查找模块中的 ComicSource 子类
-                for item_name, item in inspect.getmembers(module, inspect.isclass):
-                    if issubclass(item, ComicSource) and item is not ComicSource and item.enable:
-                        # 使用模块名作为 key，或者可以添加一个 name 属性到 ComicSource 子类中
-                        # 这里假设文件名对应源名称 (例如 boya.py -> boya)
-                        sources[name] = item
-            except Exception as e:
-                self.console.print(f'Failed to load module {name}: {e}', style='bold red')
-
-        return sources
+    def _discover_sources(self, include_deprecated: bool = False):
+        """加载已声明的 ComicSource 实现。"""
+        try:
+            return load_source_classes(include_deprecated=include_deprecated)
+        except Exception as e:
+            self.console.print(f'Failed to load comic sources: {e}', style='bold red')
+            return {}
 
     def do_source(self, arg):
         """选择动漫下载网站源。输入 source  后，根据提示选择源序号。"""
@@ -196,12 +206,12 @@ class Shell(cmd.Cmd):
 
     def __switch_source(self, source_name):
         """切换动漫源"""
-        if self.context.source and self.context.source.name == source_name:
+        if self.current_source_name == source_name:
             return
         self.console.print(f'正在切换到{source_name}动漫下载网站源...')
 
         if source_name not in self.sources:
-            source_class = self.source_map[source_name]
+            source_class = self.source_map.get(source_name) or self.all_source_map[source_name]
             self.sources[source_name] = source_class(
                 self.context.output_path,
                 self.context.http,
@@ -210,6 +220,7 @@ class Shell(cmd.Cmd):
             )
 
         self.context.source = self.sources[source_name]
+        self.current_source_name = source_name
         # self.prompt = self.prefix + self.context.source.name + '> '
 
     def do_s(self, arg):
@@ -324,8 +335,12 @@ class Shell(cmd.Cmd):
 
         url = None
         if arg.isdigit():
-            idx = int(arg) - 1
-            if self.context.searched_results and len(self.context.searched_results) > idx:
+            try:
+                idx = parse_1_based_index(arg, len(self.context.searched_results), '搜索结果')
+            except ValueError:
+                self.console.print('请先搜索动漫，或输入正确的搜索结果序号！')
+                return
+            if self.context.searched_results:
                 comic = self.context.searched_results[idx]
                 url = comic.url
                 if comic.source:
@@ -336,7 +351,7 @@ class Shell(cmd.Cmd):
         else:
             # 尝试根据URL匹配源
             matched_source = None
-            for source_name, source_class in self.source_map.items():
+            for source_name, source_class in self.all_source_map.items():
                 if hasattr(source_class, 'base_url') and arg.startswith(source_class.base_url):
                     matched_source = source_name
                     break
@@ -417,38 +432,20 @@ class Shell(cmd.Cmd):
             return
 
         args = arg.split()
-        book_index = int(args[0]) - 1
-        if len(self.context.comic.books) <= book_index:
-            self.console.print('请输入正确的动漫章节序号！')
+        try:
+            book_index = parse_1_based_index(args[0], len(self.context.comic.books), '动漫章节')
+            book = self.context.comic.books[book_index]
+            _, vol_slice = parse_volume_slice(args, len(self.context.comic.books), len(book.vols))
+        except ValueError as e:
+            self.console.print(str(e))
             return
-
-        book = self.context.comic.books[book_index]
-        if len(args) == 1:
-            vols = book.vols
-        elif len(args) == 2:
-            vol_to = int(args[1]) - 1
-            if len(book.vols) <= vol_to:
-                self.console.print('请输入正确的截止序号！')
-                return
-
-            vols = book.vols[0 : vol_to + 1]
-        elif len(args) == 3:
-            vol_from = int(args[1]) - 1
-            if len(book.vols) <= vol_from or vol_from < 0:
-                self.console.print('请输入正确的起始序号！')
-                return
-            vol_to = int(args[2]) - 1
-            if len(book.vols) <= vol_to or vol_from > vol_to:
-                self.console.print('请输入正确的截止序号！')
-                return
-            vols = book.vols[vol_from : vol_to + 1]
-        else:
-            self.console.print('参数错误，请重新输入！')
-            return
-        self.context.source.download_vols(self.context.comic.name, book.name, vols)
+        vols = book.vols[vol_slice]
+        summary = self.context.source.download_vols(self.context.comic.name, book.name, vols)
+        self.__print_download_summary(summary)
 
     def do_d(self, arg):
         """全量下载动漫，输入d <搜索结果序号/动漫URL地址>，例如：d 12，或者d https://www.maofly.com/manga/38316.html"""
+        summary = None
         if not arg:
             if self.context.comic is None:
                 self.console.print('请先查看动漫详情！')
@@ -456,16 +453,20 @@ class Shell(cmd.Cmd):
             if not self.context.source:
                 self.console.print('当前没有选中的动漫源！')
                 return
-            self.context.source.download_full(self.context.comic)
+            summary = self.context.source.download_full(self.context.comic)
         elif arg.isdigit():
-            idx = int(arg) - 1
-            if self.context.searched_results and len(self.context.searched_results) > idx:
+            try:
+                idx = parse_1_based_index(arg, len(self.context.searched_results), '搜索结果')
+            except ValueError:
+                self.console.print('请先搜索动漫，或输入正确的搜索结果序号！')
+                return
+            if self.context.searched_results:
                 comic = self.context.searched_results[idx]
                 if comic.source:
                     self.__switch_source(comic.source)
 
                 if self.context.source:
-                    self.context.source.download_full_by_url(comic.url)
+                    summary = self.context.source.download_full_by_url(comic.url)
                 else:
                     self.console.print('无法确定源，无法下载。')
                     return
@@ -475,7 +476,7 @@ class Shell(cmd.Cmd):
         else:
             # Try to match URL to source
             matched_source = None
-            for source_name, source_class in self.source_map.items():
+            for source_name, source_class in self.all_source_map.items():
                 if hasattr(source_class, 'base_url') and arg.startswith(source_class.base_url):
                     matched_source = source_name
                     break
@@ -492,10 +493,24 @@ class Shell(cmd.Cmd):
                 self.console.print('请输入完整的动漫地址，且确保该地址属于支持的动漫源！')
                 return
 
-            self.context.source.download_full_by_url(arg)
+            summary = self.context.source.download_full_by_url(arg)
 
         # self.context.searched_results.clear() # Maybe don't clear results so user can download another one?
-        self.console.print('下载完成', style='bold green')
+        if summary:
+            self.__print_download_summary(summary)
+
+    def __print_download_summary(self, summary):
+        if summary.ok:
+            self.console.print(
+                f'下载完成：成功 {summary.downloaded}，跳过 {summary.skipped}',
+                style='bold green',
+            )
+            return
+        self.console.print(
+            f'下载完成，但存在失败：成功 {summary.downloaded}，跳过 {summary.skipped}，'
+            f'失败 {summary.failed}，部分失败 {summary.partial}',
+            style='bold yellow',
+        )
 
     def do_q(self, arg):
         """退出动漫下载器"""
