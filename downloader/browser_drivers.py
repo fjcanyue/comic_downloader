@@ -73,7 +73,6 @@ class SeleniumBaseDriver:
     def __init__(self, *, headless: bool, timeout_seconds: float) -> None:
         kwargs: dict[str, Any] = {
             'uc': True,
-            'test': True,
             'locale': 'zh-CN',
         }
         if headless:

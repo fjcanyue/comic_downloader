@@ -132,7 +132,7 @@ def test_seleniumbase_driver_navigates_active_cdp_page(monkeypatch):
     assert active_cdp is not None
     driver.activate_cdp_mode('https://example.test/detail')
 
-    assert created_kwargs == [{'uc': True, 'test': True, 'locale': 'zh-CN', 'headed': True}]
+    assert created_kwargs == [{'uc': True, 'locale': 'zh-CN', 'headed': True}]
     assert fake_sb.activate_calls == ['https://example.test/search']
     assert active_cdp.get_calls == ['https://example.test/detail']
 
