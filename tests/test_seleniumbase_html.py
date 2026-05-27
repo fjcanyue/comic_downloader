@@ -113,6 +113,69 @@ def test_seleniumbase_driver_navigates_active_cdp_page(monkeypatch):
     assert active_cdp.get_calls == ['https://example.test/detail']
 
 
+def test_seleniumbase_driver_quit_skips_reconnect_teardown(monkeypatch):
+    events = []
+
+    class FakeManagedDriver:
+        def __init__(self):
+            self._already_quit = False
+
+        def quit(self):
+            events.append(('driver_quit', self._already_quit))
+
+    class FakeSb:
+        def __init__(self):
+            self.cdp = None
+            self.driver = FakeManagedDriver()
+
+    fake_sb = FakeSb()
+
+    class FakeContext:
+        def __enter__(self):
+            return fake_sb
+
+        def __exit__(self, exc_type, exc, tb):
+            teardown_done = getattr(fake_sb, '_BaseCase__called_teardown', False)
+            events.append(('context_exit', teardown_done))
+            if not teardown_done:
+                raise KeyboardInterrupt
+            return False
+
+    monkeypatch.setattr(browser_drivers, 'SB', lambda **kwargs: FakeContext())
+
+    driver = browser_drivers.SeleniumBaseDriver(headless=True, timeout_seconds=3.0)
+
+    driver.quit()
+    driver.quit()
+
+    assert events == [('driver_quit', True), ('context_exit', True)]
+
+
+def test_seleniumbase_driver_quit_suppresses_cleanup_interrupt(monkeypatch):
+    exit_calls = []
+
+    class FakeSb:
+        cdp = None
+        driver = None
+
+    class FakeContext:
+        def __enter__(self):
+            return FakeSb()
+
+        def __exit__(self, exc_type, exc, tb):
+            exit_calls.append(True)
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(browser_drivers, 'SB', lambda **kwargs: FakeContext())
+
+    driver = browser_drivers.SeleniumBaseDriver(headless=True, timeout_seconds=3.0)
+
+    driver.quit()
+    driver.quit()
+
+    assert exit_calls == [True]
+
+
 class FakeCloakDriver:
     def __init__(self, html):
         self.html = html

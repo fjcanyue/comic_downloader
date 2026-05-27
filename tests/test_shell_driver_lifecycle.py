@@ -159,3 +159,25 @@ def test_shell_attaches_lazy_driver_to_current_source(monkeypatch, tmp_path):
         assert source.driver is driver
     finally:
         shell.context.destroy()
+
+
+def test_context_destroy_suppresses_driver_cleanup_interrupt():
+    class InterruptingDriver:
+        def __init__(self):
+            self.quit_calls = 0
+
+        def quit(self):
+            self.quit_calls += 1
+            raise KeyboardInterrupt
+
+    driver = InterruptingDriver()
+    context = Context(quiet_console())
+    context.create('download-output')
+    context.driver = driver
+    context.drivers[('selenium', True)] = driver
+
+    context.destroy()
+
+    assert driver.quit_calls == 1
+    assert context.driver is None
+    assert context.drivers == {}

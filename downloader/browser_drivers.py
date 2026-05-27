@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+from contextlib import suppress
 from typing import Any
 
 import requests
@@ -160,7 +161,36 @@ class SeleniumBaseDriver:
         if self._closed:
             return
         self._closed = True
-        self._context.__exit__(None, None, None)
+        self._quit_managed_driver()
+        self._mark_seleniumbase_teardown_done()
+        self._exit_context()
+
+    def _quit_managed_driver(self) -> None:
+        driver = getattr(self._sb, 'driver', None)
+        if driver is None:
+            return
+
+        with suppress(Exception):
+            driver._already_quit = True
+
+        quit_driver = getattr(driver, 'quit', None)
+        if callable(quit_driver):
+            try:
+                with suppress(Exception):
+                    quit_driver()
+            except KeyboardInterrupt:
+                return
+
+    def _mark_seleniumbase_teardown_done(self) -> None:
+        with suppress(Exception):
+            self._sb._BaseCase__called_teardown = True
+
+    def _exit_context(self) -> None:
+        try:
+            with suppress(Exception):
+                self._context.__exit__(None, None, None)
+        except KeyboardInterrupt:
+            return
 
     def _download_bytes_with_cdp_fetch(self, url: str) -> bytes:
         cdp = self.cdp

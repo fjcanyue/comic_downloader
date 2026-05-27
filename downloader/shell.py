@@ -831,6 +831,8 @@ class Context:
     def _quit_driver(self, driver) -> None:
         try:
             driver.quit()
+        except KeyboardInterrupt as e:
+            logger.debug('关闭浏览器驱动被中断: {error}', error=e)
         except Exception as e:
             logger.debug('关闭浏览器驱动失败: {error}', error=e)
 
