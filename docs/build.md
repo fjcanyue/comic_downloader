@@ -1,19 +1,19 @@
 # Builds
 
-This project uses standard Python packaging tools to create distributions.
+项目使用 PyInstaller 打包为单个可执行文件。
 
-## Building the project
+## 打包为 EXE
 
-1.  Ensure you have the latest version of `build` installed:
+```bash
+uv run pyinstaller downloader.spec
+```
 
-    ```bash
-    pip install --upgrade build
-    ```
+打包产物在 `dist/comic_downloader.exe`。
 
-2.  From the root of the project directory, run the following command:
+## Python 源码构建
 
-    ```bash
-    python -m build
-    ```
+```bash
+uv build
+```
 
-This will create a `dist` directory containing the built packages (a `.whl` file and a `.tar.gz` file).
+构建产物在 `dist/` 目录下（`.whl` 和 `.tar.gz`）。

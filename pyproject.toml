@@ -9,12 +9,14 @@ urls = { repository = "https://github.com/fjcanyue/comic_downloader" }
 keywords = ["comics downloader", "python"]
 requires-python = ">=3.10.0"
 dependencies = [
-  "lxml>=5.4.0",
+  "lxml>=6.1.1",
   "requests>=2.32.4",
-  "selenium>=4.33.0",
-  "prompt-toolkit>=3.0.51",
+  "selenium>=4.44.0",
+  "seleniumbase>=4.49.2",
+  "cloakbrowser[geoip]>=0.3.31",
+  "prompt-toolkit>=3.0.52",
   "loguru>=0.7.3",
-  "rich>=14.2.0",
+  "rich>=15.0.0",
 ]
 
 [project.scripts]

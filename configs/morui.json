@@ -1,6 +1,10 @@
 {
   "base_url": "https://www.morui.com",
   "base_img_url": "http://lao.haotu90.top",
+  "browser_mode": "seleniumbase",
+  "browser_wait_selector": ".page-main",
+  "browser_wait_seconds": 60.0,
+  "browser_headless": false,
   "download_interval": 5,
   "search_xpath": "//li[contains(@class,'item-lg')]",
   "search_extract": {

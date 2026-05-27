@@ -1,77 +1,121 @@
 # Basic Usage
 
-This guide will walk you through the basic usage of the Comic Downloader.
+## 1. 启动工具
 
-## 1. Launch the tool
-
-Open your terminal and run the following command:
+打开终端运行：
 
 ```bash
-main
+comic_downloader
 ```
 
-You will be greeted with a welcome message and a prompt.
+或从源码启动：
 
-## 2. Select a source
+```bash
+uv run main.py
+```
 
-Before you can start downloading comics, you need to select a source. The tool supports multiple comic sources.
+## 2. 搜索动漫
 
-To see the available sources, type `source` and press Enter. A list of supported sources will be displayed.
-
-Enter the number corresponding to the source you want to use.
-
-## 3. Search for a comic
-
-Once you have selected a source, you can search for comics.
-
-Use the `s` command followed by your search query. For example:
+使用 `s` 命令搜索：
 
 ```bash
 s one piece
 ```
 
-The tool will display a list of search results with their corresponding index numbers.
+工具会并行搜索所有启用的源，展示结果表格（含序号、源名称、作者、名称、URL）。
 
-## 4. View comic details
+每次搜索会清除之前的结果。
 
-To view more details about a comic, use the `i` command followed by the index number from the search results.
+## 3. 查看动漫详情
 
-```bash
-i 0
-```
-
-This will display information about the comic, including its chapters.
-
-## 5. Download comics
-
-There are two ways to download comics:
-
-### Download all chapters
-
-To download all chapters of a comic, use the `d` command followed by the index number from the search results.
+使用 `i` 命令查看详情：
 
 ```bash
-d 0
+i 1
 ```
 
-### Download a range of chapters
-
-To download a specific range of chapters, use the `v` command. You need to view the comic details first to see the chapter list.
-
-The `v` command has three modes:
-
--   `v <chapter_index>`: Download all episodes in a specific chapter.
--   `v <chapter_index> <to_episode_index>`: Download episodes from the beginning of the chapter up to a specific episode.
--   `v <chapter_index> <from_episode_index> <to_episode_index>`: Download a specific range of episodes within a chapter.
-
-For example:
+或直接传入 URL：
 
 ```bash
-v 0 5 10
+i https://www.dumanwu.com/manhua/12345/
 ```
 
-This will download episodes 5 to 10 from the first chapter.
+详情页展示漫画元数据和章节列表（按分组展示）。
 
-## 6. Quit the application
+## 4. 选择源（可选）
 
-To exit the tool, type `q` and press Enter.
+通常工具会根据搜索结果或 URL 自动匹配源。如需手动锁定：
+
+```bash
+source
+```
+
+输入对应序号即可切换。切换后仅使用该源进行后续操作。
+
+## 5. 下载动漫
+
+### 全量下载
+
+```bash
+d 1
+```
+
+或直接传入 URL：
+
+```bash
+d https://www.dumanwu.com/manhua/12345/
+```
+
+不传参数时下载当前查看的动漫：
+
+```bash
+d
+```
+
+### 范围下载
+
+先查看详情获取章节列表，再使用 `v` 命令。
+
+三种模式：
+
+- `v <章节序号>` — 下载该章节下所有话
+- `v <章节序号> <截止序号>` — 从章节开头到截止序号
+- `v <章节序号> <起始序号> <截止序号>` — 指定起始到截止范围
+
+示例：下载第 1 个章节的第 5 到 10 话：
+
+```bash
+v 1 5 10
+```
+
+### 直接 CLI 子命令
+
+不进入交互式 shell：
+
+```bash
+comic_downloader search 猎人
+comic_downloader info https://www.dumanwu.com/manhua/12345/
+comic_downloader download https://www.dumanwu.com/manhua/12345/
+comic_downloader download_vols https://... 1 5 10
+```
+
+## 6. 下载行为
+
+- 图片下载完成后自动打包为 ZIP
+- 已存在的文件自动跳过（除非使用 `--overwrite`）
+- 下载失败自动重试（可配置次数）
+- 浏览器驱动仅在源需要时初始化
+
+## 7. 退出
+
+```bash
+q
+```
+
+## 浏览器模式说明
+
+- **requests**: 纯 HTTP 请求模式，速度最快，无需浏览器。适用于无反爬或低反爬的网站。
+- **SeleniumBase**: 使用浏览器 CDP 协议渲染页面，可处理 JavaScript 渲染和基本反爬。首次使用会自动下载匹配的 ChromeDriver。
+- **CloakBrowser**: 基于 Playwright 的反爬浏览器，支持指纹伪装和代理。需要额外安装 `cloakbrowser` 包。
+
+源可能配置自动回退（requests → SeleniumBase），在请求被屏蔽时无缝切换。
