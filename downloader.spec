@@ -1,7 +1,28 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import site
+from importlib.machinery import EXTENSION_SUFFIXES
+from pathlib import Path
+
+from PyInstaller.utils.hooks import collect_submodules
+
+
+def collect_mypyc_support_modules():
+    modules = set()
+    for site_package_dir in site.getsitepackages():
+        site_package_path = Path(site_package_dir)
+        for suffix in EXTENSION_SUFFIXES:
+            for module_path in site_package_path.glob(f'*__mypyc{suffix}'):
+                modules.add(module_path.name.removesuffix(suffix))
+    return sorted(modules)
+
 
 block_cipher = None
+runtime_hiddenimports = (
+    collect_submodules('rich._unicode_data')
+    + collect_submodules('charset_normalizer')
+    + collect_mypyc_support_modules()
+)
 
 
 a = Analysis(
@@ -18,7 +39,7 @@ a = Analysis(
         'downloader.maofly',
         'downloader.morui',
         'downloader.thmh'
-    ],
+    ] + runtime_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
