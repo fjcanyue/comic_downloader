@@ -6,9 +6,9 @@
 
 | 网站 | 状态 | 浏览器模式 |
 |------|------|------------|
-| [摩锐漫画](https://www.morui.com) | ✅ 可用 | CloakBrowser / SeleniumBase |
+| [摩锐漫画](https://www.morui.com) | ✅ 可用 | SeleniumBase / CloakBrowser  |
 | [读漫屋](https://www.dumanwu.com) | ✅ 可用 | requests |
-| [漫蛙](https://www.manhuagui.com) | ✅ 可用 | requests |
+| [漫蛙](https://www.manhuagui.com) | ✅ 可用 （境外） | requests |
 | [漫画站](https://www.manhuazhan.com) | ✅ 可用 | requests |
 | [31漫画](https://www.thmh.com) | ✅ 可用 | requests |
 
@@ -66,6 +66,10 @@ uv run pyinstaller downloader.spec
 | `source` | 手动选择动漫源（可选） | `source` |
 | `q` | 退出 | `q` |
 
+ ![截图](docs/screenshot.png)
+ 
+ ![查看动漫详情命令截图](docs/screenshot_cmd_i.png)
+
 ### `v` 命令三种模式
 
 1. `v <章节序号>` — 下载该章节下的所有话
@@ -94,6 +98,6 @@ comic_downloader download_vols <URL> <章节序号> [起始] [截止]
 ## 要求
 
 - Python >= 3.10
-- 下载需要浏览器驱动时：Firefox + Gecko Driver / Chrome / Edge
+- 下载需要浏览器驱动时：Firefox + Gecko Driver / Chrome
 
 搜索和查看详情等不依赖浏览器的命令可直接运行，无需预先安装浏览器驱动。
