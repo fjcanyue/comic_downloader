@@ -16,6 +16,7 @@ import requests
 from loguru import logger
 from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
 from rich.progress import BarColumn, Progress, TextColumn
+from seleniumbase import SB
 
 
 class ComicVolume:
@@ -130,6 +131,9 @@ class ComicSource(ABC):
     image_retry_count: int = 1
     max_download_workers: int = 5
     enable: bool = True
+    seleniumbase_headless: bool | None = None
+    seleniumbase_wait_selector: str | None = None
+    seleniumbase_wait_seconds: float = 20.0
 
     def __init__(
         self, output_dir: str, http: requests.Session, driver: Any, overwrite: bool = True
@@ -792,7 +796,65 @@ class ComicSource(ABC):
             self.logger.error('JS执行失败: {js_code}, 错误: {error}', js_code=js_code, error=e)
             return fallback
 
-    def __parse_html__(self, url, method='GET', data=None, encoding='utf-8', headers=None):
+    def _seleniumbase_context(self):
+        kwargs = {
+            "uc": True,
+            "test": True,
+            "locale": "zh-CN",
+            "headed": True,
+        }
+        return SB(**kwargs)
+
+    def _wait_for_seleniumbase_html(self, sb):
+        if self.seleniumbase_wait_selector:
+            try:
+                sb.cdp.find(
+                    self.seleniumbase_wait_selector,
+                    timeout=self.seleniumbase_wait_seconds,
+                )
+            except Exception as e:
+                self.logger.debug(
+                    'SeleniumBase 等待选择器超时: {selector}, 错误: {error}',
+                    selector=self.seleniumbase_wait_selector,
+                    error=e,
+                )
+            return
+
+        if self.seleniumbase_wait_seconds > 0:
+            sb.cdp.sleep(self.seleniumbase_wait_seconds)
+
+    def _parse_html_with_seleniumbase(self, url, method='GET'):
+        if method.upper() != 'GET':
+            logger.error('SeleniumBase CDP HTML 解析仅支持 GET 请求: {}', method)
+            return None
+
+        try:
+            with self._seleniumbase_context() as sb:
+                sb.activate_cdp_mode(url)
+                sb.sleep(10)
+                sb.solve_captcha()
+                # sb.wait_for_element_absent("input[disabled]")
+                sb.sleep(10)
+                self._wait_for_seleniumbase_html(sb)
+                html = sb.cdp.get_page_source()
+                return etree.parse(StringIO(html), self.parser)
+        except Exception as e:
+            logger.error(
+                'SeleniumBase CDP 解析 HTML 页面失败: {}, 错误: {}',
+                url,
+                e,
+                exc_info=True,
+            )
+            return None
+
+    def __parse_html__(
+        self,
+        url,
+        method='GET',
+        data=None,
+        encoding='utf-8',
+        headers=None,
+    ):
         """解析HTML
 
         Args:
@@ -807,14 +869,18 @@ class ComicSource(ABC):
         """
         self.logger.debug('开始解析HTML: {url}, 方法: {method}', url=url, method=method)
 
+        method_name = method.upper()
+        if method_name == 'SELENIUMBASE':
+            return self._parse_html_with_seleniumbase(url)
+
         request_headers = {'referer': self.base_url}
         if headers:
             request_headers.update(headers)
 
         try:
-            if method == 'GET':
+            if method_name == 'GET':
                 r = self.http.get(url, timeout=30, headers=request_headers)  # 增加超时
-            elif method == 'POST':
+            elif method_name == 'POST':
                 r = self.http.post(url, data=data, timeout=30, headers=request_headers)  # 增加超时
             else:
                 logger.error('不支持的HTTP方法: {}', method)

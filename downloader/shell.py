@@ -145,6 +145,8 @@ def _run_search_parallel(
 
 
 class Shell(cmd.Cmd):
+    use_rawinput = False
+
     intro = """
     欢迎使用动漫下载器，输入 help 或者 ? 查看帮助。
     支持的命令有：
@@ -175,6 +177,14 @@ class Shell(cmd.Cmd):
         self.source_map = self._discover_sources()
         self.source_options = list(self.source_map.keys())  # 存储源名称列表，方便按索引访问
         self.sources = {}
+
+    def _read_prompt_line(self, prompt: str) -> str:
+        self.stdout.write(prompt)
+        self.stdout.flush()
+        line = self.stdin.readline()
+        if not line:
+            raise EOFError
+        return line.rstrip('\r\n')
 
     def _discover_sources(self, include_deprecated: bool = False):
         """加载已声明的 ComicSource 实现。"""
@@ -218,7 +228,7 @@ class Shell(cmd.Cmd):
 
         while True:
             try:
-                source_index_str = input('请输入网站源序号: ')
+                source_index_str = self._read_prompt_line('请输入网站源序号: ')
                 if not source_index_str:  # 用户直接回车，重新显示列表
                     self.console.print('请选择动漫下载网站源:')
                     for index, source_name in enumerate(self.source_options):
@@ -232,6 +242,9 @@ class Shell(cmd.Cmd):
                 self.console.print(
                     f'无效的序号，请输入 1 到 {len(self.source_options)} 之间的序号。'
                 )
+            except EOFError:
+                self.console.print()
+                return
             except ValueError:
                 self.console.print('请输入有效的数字序号。')
 

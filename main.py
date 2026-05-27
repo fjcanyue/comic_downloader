@@ -1,6 +1,4 @@
-# ruff: noqa: I001
 import os
-import signal
 import sys
 
 from loguru import logger
@@ -9,6 +7,8 @@ from loguru import logger
 os.environ['SE_AVOID_STATS'] = 'true'
 
 from downloader.shell import Shell
+
+INTERRUPT_EXIT_CODE = 130
 
 
 USAGE = """用法:
@@ -25,13 +25,12 @@ USAGE = """用法:
 """
 
 
-def main():
-    signal.signal(signal.SIGINT, _handle_interrupt)
+def main() -> int:
     args = sys.argv[1:]
 
     if '-h' in args or '--help' in args:
         print(USAGE)
-        return
+        return 0
 
     overwrite = _configure_runtime(args)
     output_path, subcommand, subcommand_args = _parse_command(args)
@@ -39,8 +38,13 @@ def main():
 
     try:
         _run_command(shell, subcommand, subcommand_args)
+    except KeyboardInterrupt:
+        print()
+        print('感谢使用，再会！')
+        return INTERRUPT_EXIT_CODE
     finally:
         shell.context.destroy()
+    return 0
 
 
 def _configure_runtime(args: list[str]) -> bool:
@@ -123,10 +127,5 @@ def _require_args(args: list[str], message: str) -> None:
         sys.exit(1)
 
 
-def _handle_interrupt(signum, frame):
-    print('感谢使用，再会！')
-    sys.exit(1)
-
-
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

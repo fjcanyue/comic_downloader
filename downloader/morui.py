@@ -9,6 +9,9 @@ class MoruiComic(ComicSource):
     base_img_url = 'http://lao.haotu90.top'
     download_interval = 5
     download_requires_driver = True
+    seleniumbase_wait_selector = '.page-main'
+    seleniumbase_wait_seconds = 60.0
+    seleniumbase_headless = False
     config_file = 'morui.json'
     enable = True
 
@@ -20,7 +23,7 @@ class MoruiComic(ComicSource):
         search_url = f'{self.base_url}/search/?keywords={keyword}'
         arr = []
         try:
-            root = self.__parse_html__(search_url)
+            root = self.__parse_html__(search_url, 'SELENIUMBASE')
             if root is None:
                 logger.error("搜索 '{}' 失败，无法获取或解析页面: {}", keyword, search_url)
                 return arr
