@@ -3,6 +3,7 @@ from __future__ import annotations
 from io import StringIO
 from typing import Any, cast
 
+from requests.adapters import HTTPAdapter
 from rich.console import Console
 
 from downloader.comic import ComicSource
@@ -23,6 +24,15 @@ def test_context_create_does_not_initialize_webdriver(monkeypatch, tmp_path):
     context.create(str(tmp_path))
 
     assert context.driver is None
+
+
+def test_context_http_session_returns_final_retry_status(tmp_path):
+    context = Context(quiet_console())
+    context.create(str(tmp_path))
+
+    adapter = cast(HTTPAdapter, context.http.get_adapter('https://'))
+
+    assert adapter.max_retries.raise_on_status is False
 
 
 def test_context_ensure_driver_initializes_once(monkeypatch, tmp_path):

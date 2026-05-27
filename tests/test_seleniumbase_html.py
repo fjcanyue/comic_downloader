@@ -3,16 +3,39 @@ from __future__ import annotations
 from io import StringIO
 from typing import Any, cast
 
+import pytest
+import requests
 from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
 
 from downloader import browser_drivers
-from downloader.browser_modes import CLOAKBROWSER_MODE, SELENIUMBASE_MODE
+from downloader.browser_modes import CLOAKBROWSER_MODE, REQUESTS_MODE, SELENIUMBASE_MODE
 from downloader.comic import ComicSource
 from downloader.morui import MoruiComic
 
 
 class DummyHttp:
     pass
+
+
+class FakeResponse:
+    def __init__(self, status_code, text=''):
+        self.status_code = status_code
+        self.text = text
+        self.encoding = None
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.HTTPError(response=self)
+
+
+class StatusHttp:
+    def __init__(self, status_code):
+        self.status_code = status_code
+        self.get_calls = []
+
+    def get(self, url, **kwargs):
+        self.get_calls.append((url, kwargs))
+        return FakeResponse(self.status_code, '<html><body>blocked</body></html>')
 
 
 class BrowserHtmlSource(ComicSource):
@@ -106,6 +129,7 @@ def test_seleniumbase_driver_navigates_active_cdp_page(monkeypatch):
     driver = browser_drivers.SeleniumBaseDriver(headless=False, timeout_seconds=3.0)
     driver.activate_cdp_mode('https://example.test/search')
     active_cdp = fake_sb.cdp
+    assert active_cdp is not None
     driver.activate_cdp_mode('https://example.test/detail')
 
     assert created_kwargs == [{'uc': True, 'test': True, 'locale': 'zh-CN', 'headed': True}]
@@ -216,6 +240,37 @@ def test_parse_html_can_use_seleniumbase_cdp(monkeypatch, tmp_path):
     assert fake_sb.cdp.find_calls == [('.page-main', 7.0)]
     assert root is not None
     assert root.xpath('string(//h1)') == 'Rendered'
+
+
+@pytest.mark.parametrize('status_code', [403, 429])
+def test_requests_html_block_status_switches_to_seleniumbase(monkeypatch, tmp_path, status_code):
+    html = '<html><body><main class="page-main"><h1>Fallback</h1></main></body></html>'
+    fake_sb = FakeSeleniumBase(html)
+
+    def fake_context(self):
+        return fake_sb
+
+    monkeypatch.setattr(BrowserHtmlSource, '_seleniumbase_context', fake_context)
+
+    http = StatusHttp(status_code)
+    source = BrowserHtmlSource(str(tmp_path), cast(Any, http), None)
+    source.browser_mode = REQUESTS_MODE
+    source.browser_wait_selector = '.page-main'
+    source.browser_wait_seconds = 5.0
+
+    root = source.__parse_html__('https://example.test/search')
+
+    assert http.get_calls == [
+        (
+            'https://example.test/search',
+            {'timeout': 30, 'headers': {'referer': 'https://example.test'}},
+        )
+    ]
+    assert source.browser_mode == SELENIUMBASE_MODE
+    assert fake_sb.activated_url == 'https://example.test/search'
+    assert fake_sb.cdp.find_calls == [('.page-main', 5.0)]
+    assert root is not None
+    assert root.xpath('string(//h1)') == 'Fallback'
 
 
 def test_parse_html_reuses_seleniumbase_driver(monkeypatch, tmp_path):

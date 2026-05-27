@@ -161,6 +161,7 @@ HTML_MODE_METHODS: dict[str, BrowserModeName] = {
     SELENIUMBASE_MODE.upper(): SELENIUMBASE_MODE,
     CLOAKBROWSER_MODE.upper(): CLOAKBROWSER_MODE,
 }
+REQUESTS_TO_SELENIUMBASE_STATUS_CODES = {403, 429}
 
 
 def filter_dir_name(name: str) -> str:
@@ -1159,9 +1160,31 @@ class ComicSource(ABC):
                 r = self.http.get(url, timeout=30, headers=request_headers)
             else:
                 r = self.http.post(url, data=data, timeout=30, headers=request_headers)
+            status_code = getattr(r, 'status_code', None)
+            if (
+                isinstance(status_code, int)
+                and status_code in REQUESTS_TO_SELENIUMBASE_STATUS_CODES
+            ):
+                return self._switch_requests_html_to_seleniumbase(url, method, status_code)
             r.raise_for_status()
             r.encoding = encoding
             return etree.parse(StringIO(r.text), self.parser)
+        except requests.exceptions.HTTPError as e:
+            response = getattr(e, 'response', None)
+            status_code = getattr(response, 'status_code', None)
+            if (
+                isinstance(status_code, int)
+                and status_code in REQUESTS_TO_SELENIUMBASE_STATUS_CODES
+            ):
+                return self._switch_requests_html_to_seleniumbase(url, method, status_code)
+            logger.error(
+                'HTML request failed: {}, method: {}, error: {}',
+                url,
+                method,
+                e,
+                exc_info=True,
+            )
+            return None
         except requests.exceptions.RequestException as e:
             logger.error(
                 'HTML request failed: {}, method: {}, error: {}',
@@ -1174,6 +1197,15 @@ class ComicSource(ABC):
         except Exception as e:
             logger.error('HTML parsing failed: {}, error: {}', url, e, exc_info=True)
             return None
+
+    def _switch_requests_html_to_seleniumbase(self, url, method, status_code: int):
+        self.browser_mode = SELENIUMBASE_MODE
+        logger.warning(
+            'Requests mode returned HTTP {}; switching source to SeleniumBase mode: {}',
+            status_code,
+            url,
+        )
+        return self._parse_html_with_seleniumbase(url, method)
 
     def __parse_html__(
         self,

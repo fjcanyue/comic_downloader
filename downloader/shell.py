@@ -671,7 +671,10 @@ class Context:
 
     def create_http_session(self):
         retry_strategy = Retry(
-            total=3, status_forcelist=[400, 429, 500, 502, 503, 504], allowed_methods=['GET']
+            total=3,
+            status_forcelist=[400, 429, 500, 502, 503, 504],
+            allowed_methods=['GET'],
+            raise_on_status=False,
         )
         adapter = HTTPAdapter(max_retries=retry_strategy)
         http = requests.Session()
