@@ -20,6 +20,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from seleniumbase import SB
 
+from downloader.browser_drivers import configure_seleniumbase_driver_cache
 from downloader.browser_modes import (
     CLOAKBROWSER_MODE,
     REQUESTS_MODE,
@@ -991,6 +992,7 @@ class ComicSource(ABC):
         return default
 
     def _seleniumbase_context(self):
+        configure_seleniumbase_driver_cache()
         headless = self._browser_headless(default=False)
         kwargs = {
             'uc': True,

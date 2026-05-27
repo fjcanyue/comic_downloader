@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import os
+import sys
 from io import StringIO
 from typing import Any, cast
 
 import pytest
 import requests
 from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
+from seleniumbase.core import browser_launcher
 
-from downloader import browser_drivers
+from downloader import browser_drivers, comic as comic_module
 from downloader.browser_modes import CLOAKBROWSER_MODE, REQUESTS_MODE, SELENIUMBASE_MODE
 from downloader.comic import ComicSource
 from downloader.morui import MoruiComic
@@ -15,6 +18,10 @@ from downloader.morui import MoruiComic
 
 class DummyHttp:
     pass
+
+
+def seleniumbase_settings():
+    return cast(Any, browser_launcher.sb_config).settings
 
 
 class FakeResponse:
@@ -135,6 +142,81 @@ def test_seleniumbase_driver_navigates_active_cdp_page(monkeypatch):
     assert created_kwargs == [{'uc': True, 'locale': 'zh-CN', 'headed': True}]
     assert fake_sb.activate_calls == ['https://example.test/search']
     assert active_cdp.get_calls == ['https://example.test/detail']
+
+
+def test_seleniumbase_driver_uses_persistent_driver_dir_when_frozen(monkeypatch, tmp_path):
+    created_kwargs = []
+    local_app_data = tmp_path / 'LocalAppData'
+    meipass_dir = tmp_path / '_MEI123456'
+    expected_driver_dir = local_app_data / 'comic_downloader' / 'seleniumbase' / 'drivers'
+
+    class FakeSb:
+        cdp = None
+        driver = None
+
+    class FakeContext:
+        def __enter__(self):
+            return FakeSb()
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    def fake_sb_factory(**kwargs):
+        created_kwargs.append(kwargs)
+        return FakeContext()
+
+    monkeypatch.setattr(browser_drivers, 'SB', fake_sb_factory)
+    monkeypatch.setattr(sys, 'frozen', True, raising=False)
+    monkeypatch.setattr(sys, '_MEIPASS', str(meipass_dir), raising=False)
+    monkeypatch.setenv('LOCALAPPDATA', str(local_app_data))
+    monkeypatch.setenv('PATH', os.defpath)
+    monkeypatch.setattr(seleniumbase_settings(), 'NEW_DRIVER_DIR', None, raising=False)
+
+    driver = browser_drivers.SeleniumBaseDriver(headless=True, timeout_seconds=3.0)
+
+    configured_driver_dir = getattr(seleniumbase_settings(), 'NEW_DRIVER_DIR', None)
+
+    assert created_kwargs == [{'uc': True, 'locale': 'zh-CN', 'headless': True}]
+    assert configured_driver_dir == str(expected_driver_dir)
+    assert expected_driver_dir.is_dir()
+    assert str(meipass_dir) not in str(expected_driver_dir)
+
+    driver.quit()
+
+
+def test_source_seleniumbase_context_uses_persistent_driver_dir_when_frozen(monkeypatch, tmp_path):
+    created_kwargs = []
+    local_app_data = tmp_path / 'LocalAppData'
+    meipass_dir = tmp_path / '_MEI789012'
+    expected_driver_dir = local_app_data / 'comic_downloader' / 'seleniumbase' / 'drivers'
+
+    class FakeContext:
+        def __enter__(self):
+            return object()
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    def fake_sb_factory(**kwargs):
+        created_kwargs.append(kwargs)
+        return FakeContext()
+
+    monkeypatch.setattr(comic_module, 'SB', fake_sb_factory)
+    monkeypatch.setattr(sys, 'frozen', True, raising=False)
+    monkeypatch.setattr(sys, '_MEIPASS', str(meipass_dir), raising=False)
+    monkeypatch.setenv('LOCALAPPDATA', str(local_app_data))
+    monkeypatch.setenv('PATH', os.defpath)
+    monkeypatch.setattr(seleniumbase_settings(), 'NEW_DRIVER_DIR', None, raising=False)
+
+    source = BrowserHtmlSource(str(tmp_path), cast(Any, DummyHttp()), None)
+    source._seleniumbase_context()
+
+    configured_driver_dir = getattr(seleniumbase_settings(), 'NEW_DRIVER_DIR', None)
+
+    assert created_kwargs == [{'uc': True, 'test': True, 'locale': 'zh-CN', 'headed': True}]
+    assert configured_driver_dir == str(expected_driver_dir)
+    assert expected_driver_dir.is_dir()
+    assert str(meipass_dir) not in str(expected_driver_dir)
 
 
 def test_seleniumbase_driver_quit_skips_reconnect_teardown(monkeypatch):

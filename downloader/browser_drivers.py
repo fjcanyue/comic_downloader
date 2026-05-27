@@ -2,16 +2,52 @@ from __future__ import annotations
 
 import base64
 import json
+import os
+import sys
 from contextlib import suppress
+from pathlib import Path
 from typing import Any
 
 import requests
 from seleniumbase import SB
+from seleniumbase.core import browser_launcher as sb_browser_launcher
 
 try:
     from cloakbrowser import launch as cloakbrowser_launch
 except ImportError:  # pragma: no cover - depends on optional runtime install
     cloakbrowser_launch = None
+
+
+def _user_cache_root() -> Path:
+    if sys.platform == 'win32':
+        cache_root = os.environ.get('LOCALAPPDATA') or os.environ.get('APPDATA')
+        if cache_root:
+            return Path(cache_root)
+        return Path.home() / 'AppData' / 'Local'
+    if sys.platform == 'darwin':
+        return Path.home() / 'Library' / 'Caches'
+    cache_root = os.environ.get('XDG_CACHE_HOME')
+    if cache_root:
+        return Path(cache_root)
+    return Path.home() / '.cache'
+
+
+def _packaged_seleniumbase_driver_dir() -> Path:
+    return _user_cache_root() / 'comic_downloader' / 'seleniumbase' / 'drivers'
+
+
+def configure_seleniumbase_driver_cache() -> None:
+    if not getattr(sys, 'frozen', False):
+        return
+
+    settings = getattr(sb_browser_launcher.sb_config, 'settings', None)
+    existing_dir = getattr(settings, 'NEW_DRIVER_DIR', None)
+    if existing_dir:
+        return
+
+    driver_dir = _packaged_seleniumbase_driver_dir()
+    driver_dir.mkdir(parents=True, exist_ok=True)
+    sb_browser_launcher.override_driver_dir(str(driver_dir))
 
 
 class CloakBrowserDriver:
@@ -71,6 +107,7 @@ class SeleniumBaseDriver:
     is_seleniumbase_driver = True
 
     def __init__(self, *, headless: bool, timeout_seconds: float) -> None:
+        configure_seleniumbase_driver_cache()
         kwargs: dict[str, Any] = {
             'uc': True,
             'locale': 'zh-CN',
