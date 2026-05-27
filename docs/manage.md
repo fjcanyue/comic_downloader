@@ -1,55 +1,91 @@
 # Management
 
-This guide covers some common project management tasks.
-
 ## Dependency Management
 
-This project uses `uv` for dependency management. The dependencies are listed in `pyproject.toml`.
+项目使用 `uv` 管理依赖，依赖列表在 `pyproject.toml` 的 `[project.dependencies]` 中。
 
-### Installing dependencies
-
-To install all dependencies, including development dependencies, run:
+### 安装依赖
 
 ```bash
-uv pip install -e .[dev,docs]
+uv sync
 ```
 
-### Adding a dependency
-
-To add a new dependency, add it to the `dependencies` list in `pyproject.toml` and then run the install command again.
-
-## Running tests
-
-This project uses `pytest` for testing. To run the tests, use the following command:
+包含开发依赖（dev 组）：
 
 ```bash
-pytest
+uv sync --group dev
 ```
 
-To run the tests with coverage, use:
+包含文档构建依赖：
 
 ```bash
-pytest --cov
+uv sync --group docs
+```
+
+### 添加依赖
+
+将依赖名添加到 `pyproject.toml` 的 `[project.dependencies]` 列表，然后运行 `uv sync`。
+
+## Running Tests
+
+```bash
+uv run pytest
+```
+
+带覆盖率报告：
+
+```bash
+uv run pytest --cov
 ```
 
 ## Linting and Formatting
 
-This project uses `ruff` for linting and formatting.
+使用 `ruff` 进行 lint 和格式化。
 
-To check for linting errors, run:
+检查 lint 错误：
 
 ```bash
-ruff check .
+uv run ruff check .
 ```
 
-To automatically fix linting errors, run:
+自动修复：
 
 ```bash
-ruff check . --fix
+uv run ruff check . --fix
 ```
 
-To format the code, run:
+格式化代码：
 
 ```bash
-ruff format .
+uv run ruff format .
+```
+
+## 类型检查
+
+```bash
+uv run pyright
+```
+
+## 打包
+
+```bash
+uv run pyinstaller downloader.spec
+```
+
+## 文档构建
+
+```bash
+uv run mkdocs serve
+```
+
+生产构建：
+
+```bash
+uv run mkdocs build
+```
+
+版本化发布：
+
+```bash
+uv run mike deploy --push --update-aliases <version> latest
 ```

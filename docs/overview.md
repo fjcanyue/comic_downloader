@@ -1,25 +1,44 @@
 # Overview
 
-This project uses `pytest` for testing.
+## 测试
 
-## Test Directory
+项目使用 `pytest` 进行测试。
 
-The tests are located in the `tests/` directory. The tests follow the standard `pytest` naming conventions.
+### 测试目录
 
-## Running Tests
+测试文件位于 `tests/` 目录，遵循标准 pytest 命名规范。
 
-To run the tests, use the following command:
+### 运行测试
 
 ```bash
-pytest
+uv run pytest
 ```
 
-## Configuration
+### 测试标记
 
-The `pytest` configuration is located in the `pyproject.toml` file under the `[tool.pytest.ini_options]` section.
+- `slow`: 慢速测试，可用 `-m 'not slow'` 排除
+- `integration`: 集成测试
+- `unit`: 单元测试
+
+### 覆盖率
+
+```bash
+uv run pytest --cov
+```
+
+HTML 覆盖率报告输出到 `htmlcov/`。
+
+## 配置
+
+pytest 配置在 `pyproject.toml` 的 `[tool.pytest.ini_options]` 中：
 
 ```toml
 [tool.pytest.ini_options]
-minversion = "6.0"
-testpaths = ["tests", "integration"]
+addopts = "-ra -q -s --strict-markers --cov=downloader --cov-report=term-missing --cov-report html:htmlcov"
+pythonpath = ["."]
+markers = [
+  "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+  "integration: marks tests as integration tests",
+  "unit: marks tests as unit tests",
+]
 ```

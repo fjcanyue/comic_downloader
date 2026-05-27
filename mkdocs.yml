@@ -1,7 +1,7 @@
 site_name: Comic Downloader
 site_description: Effortlessly download comics via this lightweight, single-threaded command-line tool
 site_author: fjcanyue
-site_url: https://hatch.pypa.io
+site_url: https://github.com/fjcanyue/comic_downloader
 repo_name: fjcanyue/comic_downloader
 repo_url: https://github.com/fjcanyue/comic_downloader
 edit_uri: blob/master/docs
@@ -63,18 +63,13 @@ nav:
     - Authors: meta/authors.md
 
 plugins:
-  # Enable for bug reports
-  # info: {}
-  # Built-in
   search: {}
-  # Extra
   glightbox: {}
   minify:
     minify_html: true
   git-revision-date-localized:
     type: date
     strict: false
-    # Required for blog plugin's generated indices
     fallback_to_build_date: true
     exclude:
       - blog/**/*
@@ -87,18 +82,13 @@ plugins:
         paths:
           - Downloader
         options:
-          # Headings
           show_root_heading: true
           show_root_full_path: false
-          # Docstrings
           show_if_no_docstring: true
-          # Signatures/annotations
           show_signature_annotations: true
-          # Other
           show_bases: false
 
 markdown_extensions:
-  # Built-in
   - markdown.extensions.abbr:
   - markdown.extensions.admonition:
   - markdown.extensions.attr_list:
@@ -108,8 +98,6 @@ markdown_extensions:
   - markdown.extensions.tables:
   - markdown.extensions.toc:
       permalink: true
-  # Extra
-  #- mkdocs-click:
   - pymdownx.arithmatex:
   - pymdownx.betterem:
       smart_enable: all
@@ -117,8 +105,6 @@ markdown_extensions:
   - pymdownx.critic:
   - pymdownx.details:
   - pymdownx.emoji:
-      # https://github.com/twitter/twemoji
-      # https://raw.githubusercontent.com/facelessuser/pymdown-extensions/master/pymdownx/twemoji_db.py
       emoji_index: !!python/name:material.extensions.emoji.twemoji
       emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - pymdownx.highlight:
@@ -134,8 +120,8 @@ markdown_extensions:
       social_url_shorthand: true
       normalize_issue_symbols: true
       provider: github
-      user: pypa
-      repo: hatch
+      user: fjcanyue
+      repo: comic_downloader
   - pymdownx.mark:
   - pymdownx.progressbar:
   - pymdownx.saneheaders:
@@ -144,9 +130,6 @@ markdown_extensions:
       check_paths: true
       base_path:
         - docs/.snippets
-      #auto_append:
-        #- links.txt
-        #- abbrs.txt
   - pymdownx.superfences:
   - pymdownx.tabbed:
       alternate_style: true
@@ -166,5 +149,4 @@ extra:
     - icon: fontawesome/solid/blog
       link: https://fjcanyue.github.io
 extra_css:
-  # - assets/css/custom.css
   - https://cdn.jsdelivr.net/npm/firacode@6.2.0/distr/fira_code.css
