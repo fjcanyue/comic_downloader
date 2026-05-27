@@ -8,8 +8,8 @@
 |------|------|------------|
 | [摩锐漫画](https://www.morui.com) | ✅ 可用 | SeleniumBase / CloakBrowser  |
 | [读漫屋](https://www.dumanwu.com) | ✅ 可用 | requests |
-| [漫蛙](https://www.manhuagui.com) | ✅ 可用 （境外） | requests |
-| [漫画站](https://www.manhuazhan.com) | ✅ 可用 | requests |
+| [漫画柜/看漫画](https://www.manhuagui.com) | ✅ 可用 （境外） | requests |
+| [漫画站](https://www.manhuazhan.org) | ✅ 可用 | requests |
 | [31漫画](https://www.thmh.com) | ✅ 可用 | requests |
 
 [![asciicast](https://asciinema.org/a/H7hsCmPz1v9mqpxF4t40oLomM.svg)](https://asciinema.org/a/H7hsCmPz1v9mqpxF4t40oLomM)
