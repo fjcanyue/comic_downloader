@@ -20,8 +20,8 @@ from selenium.webdriver.edge.options import Options as EdgeOptions
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from urllib3.util.retry import Retry
 
-from downloader.browser_drivers import CloakBrowserDriver
-from downloader.browser_modes import CLOAKBROWSER_MODE, normalize_browser_mode
+from downloader.browser_drivers import CloakBrowserDriver, SeleniumBaseDriver
+from downloader.browser_modes import CLOAKBROWSER_MODE, SELENIUMBASE_MODE, normalize_browser_mode
 from downloader.comic import Comic, ComicSource
 from downloader.sources import load_source_classes
 
@@ -707,6 +707,8 @@ class Context:
         driver_mode = self._driver_mode_for_source(source_or_class)
         if driver_mode == CLOAKBROWSER_MODE:
             return self._try_init_cloakbrowser_driver(source_or_class)
+        if driver_mode == SELENIUMBASE_MODE:
+            return self._try_init_seleniumbase_driver(source_or_class)
         return self._try_init_selenium_driver()
 
     def _try_init_selenium_driver(self) -> bool:
@@ -760,11 +762,26 @@ class Context:
             self.console.print(f'CloakBrowser 浏览器驱动初始化失败: {e}', style='bold red')
             return False
 
+    def _try_init_seleniumbase_driver(
+        self, source_or_class: ComicSource | type[ComicSource] | None
+    ) -> bool:
+        try:
+            self.driver = SeleniumBaseDriver(
+                headless=self._source_browser_headless(source_or_class),
+                timeout_seconds=self._source_browser_wait_seconds(source_or_class),
+            )
+            self.console.print('已初始化 SeleniumBase 浏览器会话', style='green')
+            return True
+        except Exception as e:
+            logger.debug('初始化 SeleniumBase 驱动失败: {error}', error=e, exc_info=True)
+            self.console.print(f'SeleniumBase 浏览器会话初始化失败: {e}', style='bold red')
+            return False
+
     def _driver_cache_key(
         self, source_or_class: ComicSource | type[ComicSource] | None = None
     ) -> tuple[str, bool]:
         driver_mode = self._driver_mode_for_source(source_or_class)
-        if driver_mode == CLOAKBROWSER_MODE:
+        if driver_mode in {CLOAKBROWSER_MODE, SELENIUMBASE_MODE}:
             return (driver_mode, self._source_browser_headless(source_or_class))
         return (driver_mode, True)
 
@@ -777,8 +794,8 @@ class Context:
             browser_mode = source_or_class._source_browser_mode()
         else:
             browser_mode = normalize_browser_mode(None)
-        if browser_mode == CLOAKBROWSER_MODE:
-            return CLOAKBROWSER_MODE
+        if browser_mode in {CLOAKBROWSER_MODE, SELENIUMBASE_MODE}:
+            return browser_mode
         return 'selenium'
 
     def _source_browser_headless(

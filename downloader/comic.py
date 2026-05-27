@@ -61,12 +61,17 @@ class ImageDownloadFailure:
     error: str
 
 
+class ImageDownloadCancelledError(Exception):
+    pass
+
+
 @dataclass
 class ImageDownloadContext:
     path: str
     use_base_img_url: bool
     rate_lock: threading.Lock = field(default_factory=threading.Lock)
     http_lock: threading.Lock = field(default_factory=threading.Lock)
+    cancel_event: threading.Event = field(default_factory=threading.Event)
     last_request_at: list[float] = field(default_factory=lambda: [0.0])
 
 
@@ -578,6 +583,7 @@ class ComicSource(ABC):
             else None
         )
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
+        futures: list[concurrent.futures.Future] = []
         try:
             futures = [
                 executor.submit(self._download_image, context, index, img_url_part)
@@ -591,14 +597,48 @@ class ComicSource(ABC):
                     progress.advance(task_id)
             executor.shutdown(wait=True)
         except (KeyboardInterrupt, SystemExit):
+            context.cancel_event.set()
+            for future in futures:
+                future.cancel()
             executor.shutdown(wait=False, cancel_futures=True)
+            self._close_active_image_downloads()
+            concurrent.futures.wait(futures, timeout=1)
             raise
+        except ImageDownloadCancelledError as exc:
+            context.cancel_event.set()
+            for future in futures:
+                future.cancel()
+            executor.shutdown(wait=False, cancel_futures=True)
+            self._close_active_image_downloads()
+            raise KeyboardInterrupt from exc
         except Exception:
+            context.cancel_event.set()
             executor.shutdown(wait=True)
             raise
         finally:
             self._remove_progress_task(progress, task_id)
         return failed_images
+
+    def _raise_if_image_download_cancelled(self, context: ImageDownloadContext) -> None:
+        if context.cancel_event.is_set():
+            raise ImageDownloadCancelledError('image download cancelled')
+
+    def _acquire_download_lock(self, lock: threading.Lock, context: ImageDownloadContext) -> None:
+        while not context.cancel_event.is_set():
+            if lock.acquire(timeout=0.1):
+                return
+        raise ImageDownloadCancelledError('image download cancelled')
+
+    def _close_active_image_downloads(self) -> None:
+        close_http = getattr(self.http, 'close', None)
+        if callable(close_http):
+            try:
+                close_http()
+            except Exception:
+                logger.debug(
+                    'Failed to close HTTP session during image download cancellation.',
+                    exc_info=True,
+                )
 
     def _download_image(
         self, context: ImageDownloadContext, index: int, img_url_part: str
@@ -609,6 +649,8 @@ class ComicSource(ABC):
         retry_count = getattr(self, 'image_retry_count', 1)
         last_error = ''
 
+        self._raise_if_image_download_cancelled(context)
+
         if self._can_reuse_image(file_path):
             logger.debug('图片已存在，跳过: {file_path}', file_path=file_path)
             return None
@@ -617,12 +659,19 @@ class ComicSource(ABC):
         for attempt in range(1, retry_count + 2):
             response = None
             try:
+                self._raise_if_image_download_cancelled(context)
                 self._wait_for_download_slot(context)
-                response = self._request_image(full_img_url, context)
-                self._write_image_response(response, tmp_path, file_path)
+                if not self._download_image_with_browser(
+                    full_img_url, context, tmp_path, file_path
+                ):
+                    response = self._request_image(full_img_url, context)
+                    self._write_image_response(response, context, tmp_path, file_path)
                 logger.debug('图片 {} 下载成功.', file_path)
                 return None
-            except (requests.exceptions.RequestException, OSError) as e:
+            except ImageDownloadCancelledError:
+                self._remove_tmp_file(tmp_path)
+                raise
+            except (requests.exceptions.RequestException, OSError, RuntimeError) as e:
                 last_error = str(e)
                 self._handle_image_download_error(tmp_path, full_img_url, attempt, retry_count, e)
             finally:
@@ -641,28 +690,66 @@ class ComicSource(ABC):
         return img_url_part
 
     def _wait_for_download_slot(self, context: ImageDownloadContext) -> None:
+        self._raise_if_image_download_cancelled(context)
         interval = getattr(self, 'download_interval', 0)
         if interval <= 0:
             return
-        with context.rate_lock:
+        self._acquire_download_lock(context.rate_lock, context)
+        try:
             now = time.monotonic()
             elapsed = now - context.last_request_at[0]
-            if context.last_request_at[0] > 0 and elapsed < interval:
-                time.sleep(interval - elapsed)
+            if (
+                context.last_request_at[0] > 0
+                and elapsed < interval
+                and context.cancel_event.wait(interval - elapsed)
+            ):
+                raise ImageDownloadCancelledError('image download cancelled')
             context.last_request_at[0] = time.monotonic()
+        finally:
+            context.rate_lock.release()
 
     def _request_image(self, full_img_url: str, context: ImageDownloadContext):
         headers = {'referer': self.base_url}
-        with context.http_lock:
+        self._raise_if_image_download_cancelled(context)
+        self._acquire_download_lock(context.http_lock, context)
+        try:
+            self._raise_if_image_download_cancelled(context)
             response = self.http.get(full_img_url, timeout=30, headers=headers, stream=True)
+        finally:
+            context.http_lock.release()
         response.raise_for_status()
         return response
 
-    def _write_image_response(self, response, tmp_path: str, file_path: str) -> None:
+    def _download_image_with_browser(
+        self, full_img_url: str, context: ImageDownloadContext, tmp_path: str, file_path: str
+    ) -> bool:
+        if self._source_browser_mode() != SELENIUMBASE_MODE:
+            return False
+        download_to_file = getattr(self.driver, 'download_to_file', None)
+        if not callable(download_to_file):
+            return False
+
+        self._raise_if_image_download_cancelled(context)
+        self._acquire_download_lock(context.http_lock, context)
+        try:
+            self._raise_if_image_download_cancelled(context)
+            download_to_file(full_img_url, tmp_path, referer=self.base_url)
+        finally:
+            context.http_lock.release()
+        self._raise_if_image_download_cancelled(context)
+        os.replace(tmp_path, file_path)
+        return True
+
+    def _write_image_response(
+        self, response, context: ImageDownloadContext, tmp_path: str, file_path: str
+    ) -> None:
+        self._raise_if_image_download_cancelled(context)
         with open(tmp_path, 'wb') as f:
             for chunk in response.iter_content(chunk_size=1024 * 64):
+                self._raise_if_image_download_cancelled(context)
                 if chunk:
                     f.write(chunk)
+        self._raise_if_image_download_cancelled(context)
         os.replace(tmp_path, file_path)
 
     def _handle_image_download_error(
@@ -1000,19 +1087,46 @@ class ComicSource(ABC):
             return html if isinstance(html, str) else None
         return None
 
+    def _active_seleniumbase_driver(self):
+        if getattr(self.driver, 'is_seleniumbase_driver', False):
+            return self.driver
+        return None
+
+    def _load_seleniumbase_html(self, sb, url: str):
+        sb.activate_cdp_mode(url)
+        sb.sleep(10)
+        solve_captcha = getattr(sb, 'solve_captcha', None)
+        if callable(solve_captcha):
+            solve_captcha()
+        sb.sleep(5)
+        self._wait_for_seleniumbase_html(sb)
+        html = self._get_seleniumbase_page_source(sb)
+        return etree.parse(StringIO(html), self.parser)
+
+    def _get_seleniumbase_page_source(self, sb) -> str:
+        cdp = getattr(sb, 'cdp', None)
+        if cdp is not None and hasattr(cdp, 'get_page_source'):
+            html = cdp.get_page_source()
+            if isinstance(html, str):
+                return html
+        get_page_source = getattr(sb, 'get_page_source', None)
+        if callable(get_page_source):
+            html = get_page_source()
+            if isinstance(html, str):
+                return html
+        raise RuntimeError('SeleniumBase returned empty HTML.')
+
     def _parse_html_with_seleniumbase(self, url, method='GET'):
         if method.upper() != 'GET':
             logger.error('SeleniumBase CDP HTML 解析仅支持 GET 请求: {}', method)
             return None
 
         try:
+            driver = self._active_seleniumbase_driver()
+            if driver is not None:
+                return self._load_seleniumbase_html(driver, url)
             with self._seleniumbase_context() as sb:
-                sb.activate_cdp_mode(url)
-                sb.sleep(10)
-                sb.solve_captcha()
-                sb.sleep(5)
-                html = sb.cdp.get_page_source()
-                return etree.parse(StringIO(html), self.parser)
+                return self._load_seleniumbase_html(sb, url)
         except Exception as e:
             logger.error(
                 'SeleniumBase CDP 解析 HTML 页面失败: {}, 错误: {}',

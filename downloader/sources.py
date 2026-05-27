@@ -17,12 +17,12 @@ class SourceDefinition:
 SOURCE_DEFINITIONS = (
     SourceDefinition('boya', 'BoyaComic', enabled=False, deprecated=True),
     SourceDefinition('dmzj', 'DmzjComic', enabled=False, deprecated=True),
-    SourceDefinition('dumanwu', 'DumanwuComic', deprecated=True),
-    SourceDefinition('manhuagui', 'ManhuaguiComic', deprecated=True),
-    SourceDefinition('manhuazhan', 'ManhuazhanComic', deprecated=True),
+    SourceDefinition('dumanwu', 'DumanwuComic'),
+    SourceDefinition('manhuagui', 'ManhuaguiComic'),
+    SourceDefinition('manhuazhan', 'ManhuazhanComic'),
     SourceDefinition('maofly', 'MaoflyComic', enabled=False, deprecated=True),
     SourceDefinition('morui', 'MoruiComic'),
-    SourceDefinition('thmh', 'TmhComic', deprecated=True),
+    SourceDefinition('thmh', 'TmhComic'),
 )
 
 

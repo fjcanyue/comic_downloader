@@ -81,6 +81,44 @@ def test_context_caches_drivers_by_source_mode(monkeypatch, tmp_path):
     assert calls == [CloakBackedSource]
 
 
+class SeleniumBaseBackedSource(ComicSource):
+    browser_mode = 'seleniumbase'
+    browser_headless = False
+
+    def search(self, keyword):
+        return []
+
+    def info(self, url):
+        return None
+
+    def __parse_imgs__(self, url):
+        return []
+
+
+def test_context_initializes_seleniumbase_for_seleniumbase_mode(monkeypatch, tmp_path):
+    driver = object()
+    calls = []
+
+    def fake_init_seleniumbase_driver(self, source_or_class=None):
+        calls.append(source_or_class)
+        self.driver = driver
+        return True
+
+    def fail_init_selenium_driver(self):
+        raise AssertionError('raw Selenium driver should not be initialized')
+
+    monkeypatch.setattr(Context, '_try_init_seleniumbase_driver', fake_init_seleniumbase_driver)
+    monkeypatch.setattr(Context, '_try_init_selenium_driver', fail_init_selenium_driver)
+
+    context = Context(quiet_console())
+    context.create(str(tmp_path))
+
+    assert context.ensure_driver(SeleniumBaseBackedSource) is True
+    assert context.ensure_driver(SeleniumBaseBackedSource) is True
+    assert context.driver is driver
+    assert calls == [SeleniumBaseBackedSource]
+
+
 def test_shell_uses_plain_stdin_for_interactive_prompt():
     assert Shell.use_rawinput is False
 

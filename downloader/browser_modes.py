@@ -26,4 +26,4 @@ def normalize_browser_mode(value: Any) -> BrowserModeName:
 
 
 def is_driver_backed_browser_mode(value: Any) -> bool:
-    return normalize_browser_mode(value) == CLOAKBROWSER_MODE
+    return normalize_browser_mode(value) in {SELENIUMBASE_MODE, CLOAKBROWSER_MODE}
