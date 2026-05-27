@@ -15,7 +15,9 @@
 
 ### 安装依赖
 
-下载 [Firefox Gecko 驱动](https://github.com/mozilla/geckodriver/releases)，解压后放到可执行Path中。
+下载图片时需要浏览器驱动。可安装 Firefox/Chrome/Edge 及其对应驱动；如果使用 Firefox，
+请下载 [Firefox Gecko 驱动](https://github.com/mozilla/geckodriver/releases)，解压后放到可执行 Path 中。
+搜索和查看详情等不依赖浏览器的命令可直接运行。
 
 ### 下载二进制文件
 
@@ -28,6 +30,8 @@
 ```shell
 comic_downloader <下载路径>
 ```
+
+不传下载路径时，默认保存到当前工作目录。
 
 ## 源代码
 

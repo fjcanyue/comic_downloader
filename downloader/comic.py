@@ -14,7 +14,7 @@ from typing import Any
 
 import requests
 from loguru import logger
-from lxml import etree
+from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
 from rich.progress import BarColumn, Progress, TextColumn
 
 
@@ -47,6 +47,23 @@ class ImageDownloadFailure:
     url: str
     file_path: str
     error: str
+
+
+@dataclass
+class ImageDownloadContext:
+    path: str
+    use_base_img_url: bool
+    rate_lock: threading.Lock = field(default_factory=threading.Lock)
+    http_lock: threading.Lock = field(default_factory=threading.Lock)
+    last_request_at: list[float] = field(default_factory=lambda: [0.0])
+
+
+@dataclass(frozen=True)
+class VolumeFileState:
+    downloaded_count: int
+    failed_images: list[ImageDownloadFailure]
+    actual_files: list[str]
+    actual_count: int
 
 
 @dataclass
@@ -109,6 +126,7 @@ class ComicSource(ABC):
     base_img_url: str = ''
     config_file: str | None = None
     download_interval: float = 0
+    download_requires_driver: bool = False
     image_retry_count: int = 1
     max_download_workers: int = 5
     enable: bool = True
@@ -166,15 +184,23 @@ class ComicSource(ABC):
         try:
             with open(config_path, encoding='utf-8') as f:
                 self.config = json.load(f)
-            self.logger.debug(f'Loaded config from {config_path}')
+            self.logger.debug('Loaded config from {config_path}', config_path=config_path)
         except FileNotFoundError:
-            self.logger.error(f'Config file not found: {config_path}')
+            self.logger.error('Config file not found: {config_path}', config_path=config_path)
             self.config = {}
         except json.JSONDecodeError as e:
-            self.logger.error(f'Error decoding JSON from {config_path}: {e}')
+            self.logger.error(
+                'Error decoding JSON from {config_path}: {error}',
+                config_path=config_path,
+                error=e,
+            )
             self.config = {}
         except Exception as e:
-            self.logger.error(f'Unexpected error loading config {config_path}: {e}')
+            self.logger.error(
+                'Unexpected error loading config {config_path}: {error}',
+                config_path=config_path,
+                error=e,
+            )
             self.config = {}
 
     @abstractmethod
@@ -202,21 +228,23 @@ class ComicSource(ABC):
         Args:
             url: 动漫URL地址
         """
-        self.logger.debug(f'开始全量下载动漫: {url}')
+        self.logger.debug('开始全量下载动漫: {url}', url=url)
         summary = DownloadSummary()
         try:
             comic_info = self.info(url)
             if comic_info:
                 summary = self.download_full(comic_info)
                 if summary.ok:
-                    logger.info(f'动漫 {comic_info.name} 全量下载完成')  # 直接使用全局 logger
+                    logger.info('动漫 {} 全量下载完成', comic_info.name)  # 直接使用全局 logger
                 else:
                     logger.warning(
-                        f'动漫 {comic_info.name} 下载完成但存在失败: '
-                        f'失败 {summary.failed}, 部分失败 {summary.partial}'
+                        '动漫 {} 下载完成但存在失败: 失败 {}, 部分失败 {}',
+                        comic_info.name,
+                        summary.failed,
+                        summary.partial,
                     )
             else:
-                logger.error(f'获取动漫信息失败: {url}')
+                logger.error('获取动漫信息失败: {}', url)
                 summary.add(
                     VolumeDownloadResult(
                         name=url,
@@ -226,10 +254,8 @@ class ComicSource(ABC):
                     )
                 )
         except Exception as e:
-            logger.error(f'全量下载动漫失败: {url}, 错误: {e}', exc_info=True)
-            summary.add(
-                VolumeDownloadResult(name=url, url=url, status='failed', message=str(e))
-            )
+            logger.error('全量下载动漫失败: {}, 错误: {}', url, e, exc_info=True)
+            summary.add(VolumeDownloadResult(name=url, url=url, status='failed', message=str(e)))
         return summary
 
     def download_full(self, comic: Comic) -> DownloadSummary:
@@ -239,7 +265,7 @@ class ComicSource(ABC):
             comic: 动漫对象
         """
         path = os.path.join(self.output_dir, filter_dir_name(comic.name or '未知动漫'))
-        logger.info(f'创建动漫目录: {path}')
+        logger.info('创建动漫目录: {}', path)
         os.makedirs(path, exist_ok=True)
         summary = DownloadSummary()
 
@@ -250,7 +276,7 @@ class ComicSource(ABC):
         ) as progress:
             for book in comic.books:
                 book_path = os.path.join(path, filter_dir_name(book.name or '默认章节'))
-                logger.info(f'处理章节: {book.name}')
+                logger.info('处理章节: {}', book.name)
 
                 # 创建一个针对该书的任务
                 task_id = progress.add_task(description=f'下载 {book.name}', total=len(book.vols))
@@ -260,7 +286,7 @@ class ComicSource(ABC):
                         result = self.__download_vol__(book_path, vol.name, vol.url, progress)
                     except Exception as e:
                         logger.error(
-                            f'下载卷/话失败: {vol.name} ({vol.url}), 错误: {e}', exc_info=True
+                            '下载卷/话失败: {} ({}), 错误: {}', vol.name, vol.url, e, exc_info=True
                         )
                         result = VolumeDownloadResult(
                             name=vol.name,
@@ -299,7 +325,7 @@ class ComicSource(ABC):
         path = os.path.join(
             self.output_dir, filter_dir_name(comic_name), filter_dir_name(book_name)
         )
-        logger.info(f'创建章节目录: {path} 用于下载指定卷/话')
+        logger.info('创建章节目录: {} 用于下载指定卷/话', path)
         os.makedirs(path, exist_ok=True)
         summary = DownloadSummary()
 
@@ -313,7 +339,9 @@ class ComicSource(ABC):
                 try:
                     result = self.__download_vol__(path, vol.name, vol.url, progress)
                 except Exception as e:
-                    logger.error(f'下载卷/话失败: {vol.name} ({vol.url}), 错误: {e}', exc_info=True)
+                    logger.error(
+                        '下载卷/话失败: {} ({}), 错误: {}', vol.name, vol.url, e, exc_info=True
+                    )
                     result = VolumeDownloadResult(
                         name=vol.name,
                         url=vol.url,
@@ -335,46 +363,19 @@ class ComicSource(ABC):
             url: 动漫卷/话URL地址
             parent_progress: 父级进度条对象，用于嵌套显示图片下载进度
         """
-        logger.info(f'开始下载卷/话: {vol_name} 从 {url}')
+        logger.info('开始下载卷/话: {} 从 {}', vol_name, url)
 
         # 检查文件是否已存在
-        if not self.overwrite:
-            target_zip_name = filter_dir_name(vol_name) + '.zip'
-            target_zip_path = os.path.join(path, target_zip_name)
-
-            # Check basic existence
-            if os.path.exists(target_zip_path):
-                logger.info(f'文件已存在，跳过: {target_zip_path}')
-                return VolumeDownloadResult(
-                    name=vol_name,
-                    url=url,
-                    status='skipped',
-                    archive_path=target_zip_path,
-                    message='文件已存在',
-                )
-
-            # Check padding logic
-            # 如果文件名前面是数字，可以补最多两个0，如果补0后有对应zip文件也跳过
-            base_name = filter_dir_name(vol_name)
-            match = re.match(r'^(\d+)(.*)$', base_name)
-            if match:
-                num_part = match.group(1)
-                rest_part = match.group(2)
-
-                # Try padding with 1 or 2 zeros
-                for i in range(1, 3):
-                    padded_num = num_part.zfill(len(num_part) + i)
-                    padded_name = padded_num + rest_part + '.zip'
-                    padded_path = os.path.join(path, padded_name)
-                    if os.path.exists(padded_path):
-                        logger.info(f'文件已存在(补零匹配)，跳过: {padded_path}')
-                        return VolumeDownloadResult(
-                            name=vol_name,
-                            url=url,
-                            status='skipped',
-                            archive_path=padded_path,
-                            message='文件已存在',
-                        )
+        existing_archive_path = self._find_existing_archive(path, vol_name)
+        if existing_archive_path:
+            logger.info('文件已存在，跳过: {}', existing_archive_path)
+            return VolumeDownloadResult(
+                name=vol_name,
+                url=url,
+                status='skipped',
+                archive_path=existing_archive_path,
+                message='文件已存在',
+            )
 
         # 添加解析提示任务
         parse_task_id = None
@@ -394,7 +395,7 @@ class ComicSource(ABC):
                 parse_task_id = None  # 防止在 except 块中再次移除
 
             if not imgs:
-                logger.warning(f'未解析到任何图片: {vol_name} ({url})')
+                logger.warning('未解析到任何图片: {} ({})', vol_name, url)
                 return VolumeDownloadResult(
                     name=vol_name,
                     url=url,
@@ -402,27 +403,56 @@ class ComicSource(ABC):
                     message='未解析到任何图片',
                 )
             target_path = os.path.join(path, filter_dir_name(vol_name))
-            result = self.__download_vol_images__(
-                target_path, vol_name, url, imgs, parent_progress
-            )
+            result = self.__download_vol_images__(target_path, vol_name, url, imgs, parent_progress)
             if result.ok:
-                logger.info(f'卷/话 {vol_name} 下载完成.')
+                logger.info('卷/话 {} 下载完成.', vol_name)
             else:
                 logger.warning(
-                    f'卷/话 {vol_name} 下载未完全成功: 状态={result.status}, '
-                    f'成功图片={result.downloaded_count}/{result.image_count}'
+                    '卷/话 {} 下载未完全成功: 状态={}, 成功图片={}/{}',
+                    vol_name,
+                    result.status,
+                    result.downloaded_count,
+                    result.image_count,
                 )
             return result
         except Exception as e:
             # 异常发生时也要清理任务，并确保不会重复移除
-            if parent_progress and parse_task_id is not None:
-                try:
-                    parent_progress.remove_task(parse_task_id)
-                except KeyError:
-                    pass  # 任务可能已经被移除了，忽略错误
+            self._remove_progress_task(parent_progress, parse_task_id)
 
-            logger.error(f'处理卷/话失败: {vol_name} ({url}), 错误: {e}', exc_info=True)
+            logger.error('处理卷/话失败: {} ({}), 错误: {}', vol_name, url, e, exc_info=True)
             return VolumeDownloadResult(name=vol_name, url=url, status='failed', message=str(e))
+
+    def _find_existing_archive(self, path: str, vol_name: str) -> str | None:
+        if self.overwrite:
+            return None
+
+        target_zip_name = filter_dir_name(vol_name) + '.zip'
+        target_zip_path = os.path.join(path, target_zip_name)
+        if os.path.exists(target_zip_path):
+            return target_zip_path
+
+        base_name = filter_dir_name(vol_name)
+        match = re.match(r'^(\d+)(.*)$', base_name)
+        if not match:
+            return None
+
+        num_part = match.group(1)
+        rest_part = match.group(2)
+        for i in range(1, 3):
+            padded_num = num_part.zfill(len(num_part) + i)
+            padded_path = os.path.join(path, padded_num + rest_part + '.zip')
+            if os.path.exists(padded_path):
+                logger.info('文件已存在(补零匹配)，跳过: {}', padded_path)
+                return padded_path
+        return None
+
+    def _remove_progress_task(self, progress: Progress | None, task_id) -> None:
+        if progress is None or task_id is None:
+            return
+        try:
+            progress.remove_task(task_id)
+        except KeyError:
+            logger.debug('进度任务已被移除: {task_id}', task_id=task_id)
 
     def __download_vol_images__(
         self,
@@ -433,93 +463,32 @@ class ComicSource(ABC):
         progress: Progress | None = None,
     ) -> VolumeDownloadResult:
         """下载图片"""
-        logger.info(f'开始下载图片到目录: {path} (共 {len(imgs)} 张)')
+        logger.info('开始下载图片到目录: {} (共 {} 张)', path, len(imgs))
         os.makedirs(path, exist_ok=True)
-        use_uri = hasattr(self, 'base_img_url')
+        context = ImageDownloadContext(path=path, use_base_img_url=hasattr(self, 'base_img_url'))
+        failed_images = self._run_image_downloads(context, imgs, progress, vol_name)
+        return self._finalize_volume_download(path, vol_name, source_url, len(imgs), failed_images)
+
+    def _run_image_downloads(
+        self,
+        context: ImageDownloadContext,
+        imgs: list[str],
+        progress: Progress | None,
+        vol_name: str,
+    ) -> list[ImageDownloadFailure]:
         failed_images: list[ImageDownloadFailure] = []
-        rate_lock = threading.Lock()
-        http_lock = threading.Lock()
-        last_request_at = [0.0]
-
-        def wait_for_download_slot() -> None:
-            interval = getattr(self, 'download_interval', 0)
-            if interval <= 0:
-                return
-            with rate_lock:
-                now = time.monotonic()
-                elapsed = now - last_request_at[0]
-                if last_request_at[0] > 0 and elapsed < interval:
-                    time.sleep(interval - elapsed)
-                last_request_at[0] = time.monotonic()
-
-        def build_image_url(img_url_part: str) -> str:
-            if use_uri and not img_url_part.startswith('http'):
-                if img_url_part.startswith('/'):
-                    return self.base_img_url + img_url_part
-                return self.base_img_url + '/' + img_url_part
-            return img_url_part
-
-        def download_image(args):
-            index, img_url_part = args
-            file_path = os.path.join(path, f'{index + 1:04d}.jpg')
-            tmp_path = file_path + '.tmp'
-            full_img_url = build_image_url(img_url_part)
-            retry_count = getattr(self, 'image_retry_count', 1)
-            last_error = ''
-
-            logger.debug(f'下载图片: {full_img_url} 到 {file_path}')
-            for attempt in range(1, retry_count + 2):
-                response = None
-                try:
-                    wait_for_download_slot()
-                    headers = {'referer': self.base_url}
-                    with http_lock:
-                        response = self.http.get(
-                            full_img_url,
-                            timeout=30,
-                            headers=headers,
-                            stream=True,
-                        )
-                    response.raise_for_status()
-                    with open(tmp_path, 'wb') as f:
-                        for chunk in response.iter_content(chunk_size=1024 * 64):
-                            if chunk:
-                                f.write(chunk)
-                    os.replace(tmp_path, file_path)
-                    logger.debug(f'图片 {file_path} 下载成功.')
-                    return None
-                except (requests.exceptions.RequestException, OSError) as e:
-                    last_error = str(e)
-                    if os.path.exists(tmp_path):
-                        try:
-                            os.remove(tmp_path)
-                        except OSError:
-                            logger.warning(f'清理临时文件失败: {tmp_path}', exc_info=True)
-                    if attempt <= retry_count:
-                        logger.warning(
-                            f'下载图片失败，将重试: {full_img_url}, '
-                            f'第 {attempt}/{retry_count + 1} 次, 错误: {e}'
-                        )
-                    else:
-                        logger.error(f'下载图片失败: {full_img_url}, 错误: {e}')
-                finally:
-                    if response is not None and hasattr(response, 'close'):
-                        response.close()
-            return ImageDownloadFailure(index + 1, full_img_url, file_path, last_error)
-
-        max_workers = getattr(self, 'max_download_workers', 5)
-
-        task_id = None
-        if progress:
-            task_id = progress.add_task(description=f'  [cyan]{vol_name}', total=len(imgs))
-
+        max_workers = max(1, min(getattr(self, 'max_download_workers', 5), len(imgs)))
+        task_id = (
+            progress.add_task(description=f'  [cyan]{vol_name}', total=len(imgs))
+            if progress
+            else None
+        )
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
         try:
             futures = [
-                executor.submit(download_image, (index, img_url_part))
+                executor.submit(self._download_image, context, index, img_url_part)
                 for index, img_url_part in enumerate(imgs)
             ]
-
             for future in concurrent.futures.as_completed(futures):
                 failure = future.result()
                 if failure:
@@ -530,91 +499,232 @@ class ComicSource(ABC):
         except (KeyboardInterrupt, SystemExit):
             executor.shutdown(wait=False, cancel_futures=True)
             raise
-        except:
+        except Exception:
             executor.shutdown(wait=True)
             raise
         finally:
-            if progress and task_id is not None:
-                progress.remove_task(task_id)
+            self._remove_progress_task(progress, task_id)
+        return failed_images
 
-        if os.path.exists(path) and os.listdir(
-            path
-        ):  # 仅当目录存在且非空，图片数量相同时创建压缩文件
-            # 检查实际下载的图片数量是否与预期相同
-            actual_files = sorted(os.listdir(path))
-            expected_count = len(imgs)
-            actual_count = len(actual_files)
-            downloaded_count = expected_count - len(failed_images)
+    def _download_image(
+        self, context: ImageDownloadContext, index: int, img_url_part: str
+    ) -> ImageDownloadFailure | None:
+        file_path = os.path.join(context.path, f'{index + 1:04d}.jpg')
+        tmp_path = file_path + '.tmp'
+        full_img_url = self._build_image_url(img_url_part, context.use_base_img_url)
+        retry_count = getattr(self, 'image_retry_count', 1)
+        last_error = ''
 
-            if expected_count == actual_count and not failed_images:
-                logger.info(f'开始压缩目录: {path}')
-                try:
-                    archive_path = shutil.make_archive(path, 'zip', path)
-                    logger.info(f'目录 {path} 压缩完成.')
-                    return VolumeDownloadResult(
-                        name=vol_name,
-                        url=source_url,
-                        status='downloaded',
-                        image_count=expected_count,
-                        downloaded_count=downloaded_count,
-                        archive_path=archive_path,
-                    )
-                except Exception as e:
-                    logger.error(f'压缩目录失败: {path}, 错误: {e}', exc_info=True)
-                    return VolumeDownloadResult(
-                        name=vol_name,
-                        url=source_url,
-                        status='failed',
-                        image_count=expected_count,
-                        downloaded_count=downloaded_count,
-                        failed_images=failed_images,
-                        message=f'压缩目录失败: {e}',
-                    )
-            else:
-                # 计算缺少的文件
-                missing_files = []
-                for i in range(1, expected_count + 1):
-                    expected_filename = f'{i:04d}.jpg'
-                    if expected_filename not in actual_files:
-                        missing_files.append(expected_filename)
+        if self._can_reuse_image(file_path):
+            logger.debug('图片已存在，跳过: {file_path}', file_path=file_path)
+            return None
 
-                logger.warning(
-                    f'目录 {path} 图片数量不匹配，跳过压缩. '
-                    f'预期 {expected_count} 张，实际 {actual_count} 张. '
-                    f'缺少文件: {missing_files}'
-                )
-                status = 'partial' if downloaded_count > 0 else 'failed'
-                return VolumeDownloadResult(
-                    name=vol_name,
-                    url=source_url,
-                    status=status,
-                    image_count=expected_count,
-                    downloaded_count=downloaded_count,
-                    failed_images=failed_images,
-                    message='图片数量不匹配，跳过压缩',
-                )
-        elif not os.path.exists(path):
-            logger.warning(f'目录 {path} 不存在, 跳过压缩.')
-            return VolumeDownloadResult(
-                name=vol_name,
-                url=source_url,
-                status='failed',
-                image_count=len(imgs),
-                downloaded_count=0,
-                failed_images=failed_images,
-                message='目录不存在',
+        logger.debug('下载图片: {} 到 {}', full_img_url, file_path)
+        for attempt in range(1, retry_count + 2):
+            response = None
+            try:
+                self._wait_for_download_slot(context)
+                response = self._request_image(full_img_url, context)
+                self._write_image_response(response, tmp_path, file_path)
+                logger.debug('图片 {} 下载成功.', file_path)
+                return None
+            except (requests.exceptions.RequestException, OSError) as e:
+                last_error = str(e)
+                self._handle_image_download_error(tmp_path, full_img_url, attempt, retry_count, e)
+            finally:
+                if response is not None and hasattr(response, 'close'):
+                    response.close()
+        return ImageDownloadFailure(index + 1, full_img_url, file_path, last_error)
+
+    def _can_reuse_image(self, file_path: str) -> bool:
+        return not self.overwrite and os.path.exists(file_path) and os.path.getsize(file_path) > 0
+
+    def _build_image_url(self, img_url_part: str, use_base_img_url: bool) -> str:
+        if use_base_img_url and not img_url_part.startswith('http'):
+            if img_url_part.startswith('/'):
+                return self.base_img_url + img_url_part
+            return self.base_img_url + '/' + img_url_part
+        return img_url_part
+
+    def _wait_for_download_slot(self, context: ImageDownloadContext) -> None:
+        interval = getattr(self, 'download_interval', 0)
+        if interval <= 0:
+            return
+        with context.rate_lock:
+            now = time.monotonic()
+            elapsed = now - context.last_request_at[0]
+            if context.last_request_at[0] > 0 and elapsed < interval:
+                time.sleep(interval - elapsed)
+            context.last_request_at[0] = time.monotonic()
+
+    def _request_image(self, full_img_url: str, context: ImageDownloadContext):
+        headers = {'referer': self.base_url}
+        with context.http_lock:
+            response = self.http.get(full_img_url, timeout=30, headers=headers, stream=True)
+        response.raise_for_status()
+        return response
+
+    def _write_image_response(self, response, tmp_path: str, file_path: str) -> None:
+        with open(tmp_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=1024 * 64):
+                if chunk:
+                    f.write(chunk)
+        os.replace(tmp_path, file_path)
+
+    def _handle_image_download_error(
+        self,
+        tmp_path: str,
+        full_img_url: str,
+        attempt: int,
+        retry_count: int,
+        error: Exception,
+    ) -> None:
+        self._remove_tmp_file(tmp_path)
+        if attempt <= retry_count:
+            logger.warning(
+                '下载图片失败，将重试: {}, 第 {}/{} 次, 错误: {}',
+                full_img_url,
+                attempt,
+                retry_count + 1,
+                error,
             )
         else:
-            logger.warning(f'目录 {path} 为空, 跳过压缩.')
+            logger.error('下载图片失败: {}, 错误: {}', full_img_url, error)
+
+    def _remove_tmp_file(self, tmp_path: str) -> None:
+        if not os.path.exists(tmp_path):
+            return
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            logger.warning('清理临时文件失败: {}', tmp_path, exc_info=True)
+
+    def _finalize_volume_download(
+        self,
+        path: str,
+        vol_name: str,
+        source_url: str,
+        expected_count: int,
+        failed_images: list[ImageDownloadFailure],
+    ) -> VolumeDownloadResult:
+        if not os.path.exists(path):
+            return self._failed_volume_result(
+                vol_name, source_url, expected_count, failed_images, '目录不存在'
+            )
+        if not os.listdir(path):
+            return self._failed_volume_result(
+                vol_name, source_url, expected_count, failed_images, '目录为空'
+            )
+        return self._finalize_existing_download_dir(
+            path, vol_name, source_url, expected_count, failed_images
+        )
+
+    def _finalize_existing_download_dir(
+        self,
+        path: str,
+        vol_name: str,
+        source_url: str,
+        expected_count: int,
+        failed_images: list[ImageDownloadFailure],
+    ) -> VolumeDownloadResult:
+        actual_files = sorted(os.listdir(path))
+        actual_count = len(actual_files)
+        downloaded_count = expected_count - len(failed_images)
+        if expected_count == actual_count and not failed_images:
+            return self._archive_volume(
+                path, vol_name, source_url, expected_count, downloaded_count
+            )
+        return self._partial_volume_result(
+            path,
+            vol_name,
+            source_url,
+            expected_count,
+            VolumeFileState(
+                downloaded_count=downloaded_count,
+                failed_images=failed_images,
+                actual_files=actual_files,
+                actual_count=actual_count,
+            ),
+        )
+
+    def _archive_volume(
+        self, path: str, vol_name: str, source_url: str, expected_count: int, downloaded_count: int
+    ) -> VolumeDownloadResult:
+        logger.info('开始压缩目录: {}', path)
+        try:
+            archive_path = shutil.make_archive(path, 'zip', path)
+            logger.info('目录 {} 压缩完成.', path)
+            return VolumeDownloadResult(
+                name=vol_name,
+                url=source_url,
+                status='downloaded',
+                image_count=expected_count,
+                downloaded_count=downloaded_count,
+                archive_path=archive_path,
+            )
+        except Exception as e:
+            logger.error('压缩目录失败: {}, 错误: {}', path, e, exc_info=True)
             return VolumeDownloadResult(
                 name=vol_name,
                 url=source_url,
                 status='failed',
-                image_count=len(imgs),
-                downloaded_count=0,
-                failed_images=failed_images,
-                message='目录为空',
+                image_count=expected_count,
+                downloaded_count=downloaded_count,
+                message=f'压缩目录失败: {e}',
             )
+
+    def _partial_volume_result(
+        self,
+        path: str,
+        vol_name: str,
+        source_url: str,
+        expected_count: int,
+        file_state: VolumeFileState,
+    ) -> VolumeDownloadResult:
+        missing_files = self._missing_image_files(expected_count, file_state.actual_files)
+        logger.warning(
+            '目录 {} 图片数量不匹配，跳过压缩. 预期 {} 张，实际 {} 张. 缺少文件: {}',
+            path,
+            expected_count,
+            file_state.actual_count,
+            missing_files,
+        )
+        status = 'partial' if file_state.downloaded_count > 0 else 'failed'
+        return VolumeDownloadResult(
+            name=vol_name,
+            url=source_url,
+            status=status,
+            image_count=expected_count,
+            downloaded_count=file_state.downloaded_count,
+            failed_images=file_state.failed_images,
+            message='图片数量不匹配，跳过压缩',
+        )
+
+    def _missing_image_files(self, expected_count: int, actual_files: list[str]) -> list[str]:
+        return [
+            f'{index:04d}.jpg'
+            for index in range(1, expected_count + 1)
+            if f'{index:04d}.jpg' not in actual_files
+        ]
+
+    def _failed_volume_result(
+        self,
+        vol_name: str,
+        source_url: str,
+        expected_count: int,
+        failed_images: list[ImageDownloadFailure],
+        message: str,
+    ) -> VolumeDownloadResult:
+        logger.warning('{}, 跳过压缩.', message)
+        return VolumeDownloadResult(
+            name=vol_name,
+            url=source_url,
+            status='failed',
+            image_count=expected_count,
+            downloaded_count=0,
+            failed_images=failed_images,
+            message=message,
+        )
 
     def parse_xpath_list(self, root, xpath, extract_map):
         """通用XPath列表解析方法
@@ -630,33 +740,36 @@ class ComicSource(ABC):
         results = []
         try:
             nodes = root.xpath(xpath)
-            for node in nodes:
-                item = {}
-                for key, expr in extract_map.items():
-                    try:
-                        if expr.startswith('./@'):
-                            vals = node.xpath(expr)
-                            item[key] = vals[0] if vals else None
-                        elif expr == './text()':
-                            item[key] = node.text.strip() if node.text else None
-                        else:
-                            vals = node.xpath(expr)
-                            if vals:
-                                text_node = vals[0]
-                                item[key] = (
-                                    text_node.text.strip()
-                                    if hasattr(text_node, 'text') and text_node.text
-                                    else text_node
-                                )
-                            else:
-                                item[key] = None
-                    except Exception as e:
-                        self.logger.debug(f'提取 {key} 时出错: {e}')
-                        item[key] = None
-                results.append(item)
+            results.extend(self._extract_xpath_item(node, extract_map) for node in nodes)
         except Exception as e:
-            self.logger.error(f'XPath解析失败: {xpath}, 错误: {e}')
+            self.logger.error('XPath解析失败: {xpath}, 错误: {error}', xpath=xpath, error=e)
         return results
+
+    def _extract_xpath_item(self, node, extract_map):
+        item = {}
+        for key, expr in extract_map.items():
+            item[key] = self._extract_xpath_value(node, key, expr)
+        return item
+
+    def _extract_xpath_value(self, node, key, expr):
+        try:
+            if expr.startswith('./@'):
+                vals = node.xpath(expr)
+                return vals[0] if vals else None
+            if expr == './text()':
+                return node.text.strip() if node.text else None
+            vals = node.xpath(expr)
+            if not vals:
+                return None
+            text_node = vals[0]
+            return (
+                text_node.text.strip()
+                if hasattr(text_node, 'text') and text_node.text
+                else text_node
+            )
+        except Exception as e:
+            self.logger.debug('提取 {key} 时出错: {error}', key=key, error=e)
+            return None
 
     def execute_js_safely(self, driver, js_code, fallback=None):
         """安全执行JavaScript代码
@@ -672,12 +785,11 @@ class ComicSource(ABC):
         try:
             # 简单验证JS代码，避免明显注入
             if not js_code or 'eval(' in js_code:
-                self.logger.warning(f'潜在不安全JS代码: {js_code}')
+                self.logger.warning('潜在不安全JS代码: {js_code}', js_code=js_code)
                 return fallback
-            result = driver.execute_script(js_code)
-            return result
+            return driver.execute_script(js_code)
         except Exception as e:
-            self.logger.error(f'JS执行失败: {js_code}, 错误: {e}')
+            self.logger.error('JS执行失败: {js_code}, 错误: {error}', js_code=js_code, error=e)
             return fallback
 
     def __parse_html__(self, url, method='GET', data=None, encoding='utf-8', headers=None):
@@ -693,7 +805,7 @@ class ComicSource(ABC):
         Returns:
             array: 根元素
         """
-        self.logger.debug(f'开始解析HTML: {url}, 方法: {method}')
+        self.logger.debug('开始解析HTML: {url}, 方法: {method}', url=url, method=method)
 
         request_headers = {'referer': self.base_url}
         if headers:
@@ -705,14 +817,14 @@ class ComicSource(ABC):
             elif method == 'POST':
                 r = self.http.post(url, data=data, timeout=30, headers=request_headers)  # 增加超时
             else:
-                logger.error(f'不支持的HTTP方法: {method}')
+                logger.error('不支持的HTTP方法: {}', method)
                 return None
             r.raise_for_status()  # 如果请求失败则抛出HTTPError异常
             r.encoding = encoding
             return etree.parse(StringIO(r.text), self.parser)
         except requests.exceptions.RequestException as e:
-            logger.error(f'请求HTML页面失败: {url}, 方法: {method}, 错误: {e}', exc_info=True)
+            logger.error('请求HTML页面失败: {}, 方法: {}, 错误: {}', url, method, e, exc_info=True)
             return None
         except Exception as e:
-            logger.error(f'处理HTML页面时发生未知错误: {url}, 错误: {e}', exc_info=True)
+            logger.error('处理HTML页面时发生未知错误: {}, 错误: {}', url, e, exc_info=True)
             return None

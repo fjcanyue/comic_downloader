@@ -7,14 +7,15 @@ This guide will walk you through the basic usage of the Comic Downloader.
 Open your terminal and run the following command:
 
 ```bash
-main
+comic_downloader
 ```
 
 You will be greeted with a welcome message and a prompt.
 
 ## 2. Select a source
 
-Before you can start downloading comics, you need to select a source. The tool supports multiple comic sources.
+The tool can search across the enabled sources without a manual source selection. Use `source`
+when you want to lock the session to one source before entering a direct URL.
 
 To see the available sources, type `source` and press Enter. A list of supported sources will be displayed.
 
@@ -34,10 +35,11 @@ The tool will display a list of search results with their corresponding index nu
 
 ## 4. View comic details
 
-To view more details about a comic, use the `i` command followed by the index number from the search results.
+To view more details about a comic, use the `i` command followed by the 1-based index number
+from the search results.
 
 ```bash
-i 0
+i 1
 ```
 
 This will display information about the comic, including its chapters.
@@ -48,10 +50,11 @@ There are two ways to download comics:
 
 ### Download all chapters
 
-To download all chapters of a comic, use the `d` command followed by the index number from the search results.
+To download all chapters of a comic, use the `d` command followed by the 1-based index number
+from the search results.
 
 ```bash
-d 0
+d 1
 ```
 
 ### Download a range of chapters
@@ -67,10 +70,13 @@ The `v` command has three modes:
 For example:
 
 ```bash
-v 0 5 10
+v 1 5 10
 ```
 
-This will download episodes 5 to 10 from the first chapter.
+This will download episodes 5 to 10 from the first chapter group.
+
+The browser driver is initialized only when a source needs it for search or image parsing. Basic
+startup, HTTP-only search, and info commands do not require the driver to be available.
 
 ## 6. Quit the application
 

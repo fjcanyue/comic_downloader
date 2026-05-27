@@ -6,6 +6,17 @@ from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 
 
+def is_loaded_real_image(img):
+    src = img.get_attribute('src')
+    if not src or src.endswith('load.gif'):
+        return False
+    return bool(
+        img.get_attribute('complete')
+        and img.get_attribute('naturalWidth') != '0'
+        and 'shimolife.com' in src
+    )
+
+
 def load_all_images(url):
     # 设置 Firefox 选项
     options = Options()
@@ -61,28 +72,20 @@ def load_all_images(url):
                         [
                             img
                             for img in x.find_elements(By.TAG_NAME, 'img')
-                            if img.get_attribute('src')
-                            and not img.get_attribute('src').endswith('load.gif')
-                            and img.get_attribute('complete')
+                            if is_loaded_real_image(img)
                         ]
                     )
                     > 0
                 )
-            except:
-                pass  # 继续滚动即使等待超时
+            except Exception as e:
+                print(f'等待图片加载超时，继续滚动: {e}')
 
         # 最后等待确保图片加载完成
         sleep(5)
 
         # 获取所有图片元素，使用更严格的筛选条件
         images = [
-            img
-            for img in driver.find_elements(By.TAG_NAME, 'img')
-            if img.get_attribute('src')
-            and not img.get_attribute('src').endswith('load.gif')
-            and img.get_attribute('complete')
-            and img.get_attribute('naturalWidth') != '0'
-            and 'shimolife.com' in img.get_attribute('src')
+            img for img in driver.find_elements(By.TAG_NAME, 'img') if is_loaded_real_image(img)
         ]
 
         print(f'加载完成，共找到 {len(images)} 张真实图片')

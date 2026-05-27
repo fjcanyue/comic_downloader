@@ -1,14 +1,15 @@
 import json
-import re
 from time import sleep
 from urllib.parse import urlparse
 
 import requests
-from lxml import etree
+from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 
 from downloader.comic import Comic, ComicBook, ComicSource, ComicVolume, logger
+
+METADATA_PAIR_LENGTH = 2
 
 
 class DumanwuComic(ComicSource):
@@ -16,6 +17,7 @@ class DumanwuComic(ComicSource):
     base_url = 'https://www.dumanwu.com'
     # base_img_url = 'http://imgpc.31mh.com/images/comic'
     download_interval = 5
+    download_requires_driver = True
     config_file = 'dumanwu.json'
     enable = True
 
@@ -94,11 +96,26 @@ class DumanwuComic(ComicSource):
         self.logger.info(
             '开始获取 {source_name} 动漫详细信息: {url}', source_name=self.name, url=url
         )
+        root = self.__parse_html__(url)
+        if root is None:
+            self.logger.error('获取动漫详细信息失败，无法获取或解析页面内容: {url}', url=url)
+            return None
+
+        comic = self._parse_comic_header(root, url)
+        if comic is None:
+            return None
+        self._append_metadata(root, comic)
+        self._append_books(root, comic, url)
+        self.logger.info(
+            '{source_name} 动漫详细信息获取完成: {comic_name}, 共 {count} 个章节分组.',
+            source_name=self.name,
+            comic_name=comic.name,
+            count=len(comic.books),
+        )
+        return comic
+
+    def _parse_comic_header(self, root, url):
         try:
-            root = self.__parse_html__(url)
-            if root is None:
-                self.logger.error('获取动漫详细信息失败，无法获取或解析页面内容: {url}', url=url)
-                return None
             comic = Comic()
             comic.url = url
             info_div_nodes = root.xpath('//div[contains(@class,"detinfo")]')
@@ -120,150 +137,153 @@ class DumanwuComic(ComicSource):
                 ex=e,
             )
             return None
+
+        return comic
+
+    def _append_metadata(self, root, comic):
+        info_div_nodes = root.xpath('//div[contains(@class,"detinfo")]')
+        if not info_div_nodes:
+            self.logger.warning('未找到元数据区域.')
+            return
+        info_div = info_div_nodes[0]
         meta_table = info_div.xpath('p/span')
         for meta in meta_table:
-            try:
-                if meta.text:
-                    kvs = meta.text.split('：', 1)  # 最多分割一次
-                    if len(kvs) == 2:
-                        key = kvs[0].strip()
-                        value = kvs[1].strip()
-                        if key and value:
-                            self.logger.debug('元数据: {key} - {value}', key=key, value=value)
-                            comic.metadata.append({'k': key, 'v': value})
-                        elif key:
-                            self.logger.debug("元数据项 '{key}' 的值为空.", key=key)
-                    else:
-                        self.logger.warning(
-                            '元数据格式不正确，无法分割键值对: {meta_text}', meta_text=meta.text
-                        )
-                else:
-                    self.logger.warning('空的元数据标签.')
-            except Exception as e:
-                self.logger.warning(
-                    f'解析元数据时出错: {etree.tostring(meta, encoding="unicode") if isinstance(meta, etree._Element) else meta}, 错误: {e}',
-                    exc_info=True,
-                )
-                continue
-        book_list = root.xpath('//div[contains(@class,"chapterlistload")]')
-        book_index = 0
-        for book in book_list:
-            comic_book = ComicBook()
-            comic_book.name = f'章节列表{book_index + 1}'  # 为每个章节列表赋予唯一名称
-            self.logger.debug('处理章节分组: %s', comic_book.name)
-            vol_list_nodes = book.xpath('ul/a')
-            for vol_node in vol_list_nodes:
-                vol_name = '未知卷'  # Initialize vol_name
-                try:
-                    li_node = vol_node.xpath('li')
-                    if not li_node:
-                        self.logger.warning(
-                            f'卷信息缺少<li>标签: {etree.tostring(vol_node, encoding="unicode")}'
-                        )
-                        continue
-                    vol_name = li_node[0].text.strip()
-                    vol_url_part = vol_node.attrib.get('href')
-                    if not vol_url_part:
-                        self.logger.warning(
-                            "卷 '{vol_name}' 的URL部分为空，跳过.", vol_name=vol_name
-                        )
-                        continue
-                    full_vol_url = self.base_url + vol_url_part
-                    comic_book.vols.append(ComicVolume(vol_name, full_vol_url, comic_book.name))
-                    self.logger.debug(
-                        '  找到卷 (初始列表): {vol_name} ({full_vol_url})',
-                        vol_name=vol_name,
-                        full_vol_url=full_vol_url,
-                    )
-                except Exception as e:
-                    self.logger.exception(
-                        "解析卷 '{vol_name}' 时出错: {e}", vol_name=vol_name, ex=e
-                    )
-            book_index = book_index + 1
-            # 加载更多章节的逻辑
-            try:
-                more_div = book.xpath('//div[contains(@class,"chaplist-more")]')
-                match = re.search(r'/(\d+)/?$', url) or re.search(r'/(\d+)\.html$', url)
-                if not more_div:
-                    self.logger.warning('无法从URL {url} 中提取漫画ID以加载更多章节.', url=url)
-                else:
-                    parsed_url = urlparse(url)
-                    path = parsed_url.path
-                    comic_id = path.strip('/')
-                    payload = {'id': comic_id}  # POST请求通常用data参数
-                    headers = {
-                        'Referer': url,
-                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                        'X-Requested-With': 'XMLHttpRequest',  # 模拟Ajax请求
-                    }
-                    more_chapters_url = f'{self.base_url}/morechapter'
-                    self.logger.debug(
-                        '尝试从 {more_chapters_url} 加载更多章节, ID: {comic_id}',
-                        more_chapters_url=more_chapters_url,
-                        comic_id=comic_id,
-                    )
-                    r = None  # Initialize r
-                    r = self.http.post(more_chapters_url, data=payload, headers=headers, timeout=30)
-                    r.raise_for_status()
-                    json_response = r.json()  # 直接使用 .json() 方法解析
-                    if json_response.get('code') == '200' and json_response.get('data'):
-                        self.logger.info(
-                            '成功加载了 {count} 个章节', count=len(json_response.get('data', []))
-                        )
-                        for chapter_data in json_response.get('data'):
-                            chap_name = chapter_data.get('chaptername')
-                            chap_id = chapter_data.get('chapterid')
-                            if chap_name and chap_id:
-                                # 构造章节URL，需要确认是相对路径还是需要拼接
-                                # 根据网站实际情况调整
-                                chap_url = (
-                                    f'{self.base_url}/{comic_id}/{chap_id}.html'  # 示例URL构造
-                                )
-                                # 或者如果 chapterid 是完整路径的一部分
-                                # chap_url = self.base_url + chap_id if chap_id.startswith('/') else f"{self.base_url}/{chap_id}"
-                                comic_book.vols.append(
-                                    ComicVolume(chap_name, chap_url, comic_book.name)
-                                )
-                                self.logger.debug(
-                                    '  找到卷 (更多列表): {chap_name} ({chap_url})',
-                                    chap_name=chap_name,
-                                    chap_url=chap_url,
-                                )
-                    elif json_response.get('code') != '200':
-                        self.logger.warning(
-                            '加载更多章节失败: 服务器返回代码 {code}, 消息: {msg}',
-                            code=json_response.get('code'),
-                            msg=json_response.get('msg'),
-                        )
-                    else:
-                        self.logger.info('加载更多章节未返回额外数据.')
-            except requests.exceptions.RequestException as e:
-                self.logger.exception('请求更多章节失败: {ex}', ex=e)
-            except json.JSONDecodeError as e:
-                self.logger.exception(
-                    '解析更多章节响应JSON失败: {ex}, 响应文本: {text}',
-                    ex=e,
-                    text=r.text[:200] if r else 'N/A',
-                )  # 只记录部分响应文本
-            except Exception as e:
-                self.logger.exception('处理更多章节时发生未知错误: {ex}', ex=e)
+            self._append_metadata_item(comic, meta)
 
-            # 确保章节列表是唯一的，并按某种顺序排列（例如，按URL或名称）
-            # 这里简单地反转，如果需要更复杂的排序，可以在此实现
-            comic_book.vols.reverse()  # 反转整个列表（包括初始和更多加载的）
+    def _append_metadata_item(self, comic, meta):
+        try:
+            if not meta.text:
+                self.logger.warning('空的元数据标签.')
+                return
+            kvs = meta.text.split('：', 1)
+            if len(kvs) != METADATA_PAIR_LENGTH:
+                self.logger.warning(
+                    '元数据格式不正确，无法分割键值对: {meta_text}', meta_text=meta.text
+                )
+                return
+
+            key = kvs[0].strip()
+            value = kvs[1].strip()
+            if key and value:
+                self.logger.debug('元数据: {key} - {value}', key=key, value=value)
+                comic.metadata.append({'k': key, 'v': value})
+            elif key:
+                self.logger.debug("元数据项 '{key}' 的值为空.", key=key)
+        except Exception as e:
+            self.logger.warning(
+                '解析元数据时出错: {meta}, 错误: {error}',
+                meta=etree.tostring(meta, encoding='unicode')
+                if isinstance(meta, etree._Element)
+                else meta,
+                error=e,
+                exc_info=True,
+            )
+
+    def _append_books(self, root, comic, url):
+        book_list = root.xpath('//div[contains(@class,"chapterlistload")]')
+        for book_index, book in enumerate(book_list):
+            comic_book = ComicBook()
+            comic_book.name = f'章节列表{book_index + 1}'
+            self.logger.debug('处理章节分组: %s', comic_book.name)
+            self._append_initial_volumes(book, comic_book)
+            self._append_more_chapters(book, comic_book, url)
+            comic_book.vols.reverse()
             if comic_book.vols:
                 comic.books.append(comic_book)
             else:
                 self.logger.warning(
                     "章节分组 '{book_name}' 不包含任何有效卷，已跳过.", book_name=comic_book.name
                 )
-        self.logger.info(
-            '{source_name} 动漫详细信息获取完成: {comic_name}, 共 {len} 个章节分组.',
-            source_name=self.name,
-            comic_name=comic.name,
-            len=len(comic.books),
-        )
-        return comic
+
+    def _append_initial_volumes(self, book, comic_book):
+        vol_list_nodes = book.xpath('ul/a')
+        for vol_node in vol_list_nodes:
+            vol_name = '未知卷'
+            try:
+                li_node = vol_node.xpath('li')
+                if not li_node:
+                    self.logger.warning(
+                        '卷信息缺少<li>标签: {node}',
+                        node=etree.tostring(vol_node, encoding='unicode'),
+                    )
+                    continue
+                vol_name = li_node[0].text.strip()
+                vol_url_part = vol_node.attrib.get('href')
+                if not vol_url_part:
+                    self.logger.warning("卷 '{vol_name}' 的URL部分为空，跳过.", vol_name=vol_name)
+                    continue
+                full_vol_url = self.base_url + vol_url_part
+                comic_book.vols.append(ComicVolume(vol_name, full_vol_url, comic_book.name))
+                self.logger.debug(
+                    '  找到卷 (初始列表): {vol_name} ({full_vol_url})',
+                    vol_name=vol_name,
+                    full_vol_url=full_vol_url,
+                )
+            except Exception as e:
+                self.logger.exception(
+                    "解析卷 '{vol_name}' 时出错: {error}", vol_name=vol_name, error=e
+                )
+
+    def _append_more_chapters(self, book, comic_book, url):
+        response = None
+        try:
+            more_div = book.xpath('//div[contains(@class,"chaplist-more")]')
+            if not more_div:
+                self.logger.warning('未找到加载更多章节入口: {url}', url=url)
+                return
+
+            parsed_url = urlparse(url)
+            comic_id = parsed_url.path.strip('/')
+            payload = {'id': comic_id}
+            headers = {
+                'Referer': url,
+                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                'X-Requested-With': 'XMLHttpRequest',
+            }
+            more_chapters_url = f'{self.base_url}/morechapter'
+            self.logger.debug(
+                '尝试从 {more_chapters_url} 加载更多章节, ID: {comic_id}',
+                more_chapters_url=more_chapters_url,
+                comic_id=comic_id,
+            )
+            response = self.http.post(more_chapters_url, data=payload, headers=headers, timeout=30)
+            response.raise_for_status()
+            json_response = response.json()
+            self._append_more_chapter_response(comic_book, comic_id, json_response)
+        except requests.exceptions.RequestException as e:
+            self.logger.exception('请求更多章节失败: {ex}', ex=e)
+        except json.JSONDecodeError as e:
+            self.logger.exception(
+                '解析更多章节响应JSON失败: {ex}, 响应文本: {text}',
+                ex=e,
+                text=response.text[:200] if response is not None else 'N/A',
+            )
+        except Exception as e:
+            self.logger.exception('处理更多章节时发生未知错误: {ex}', ex=e)
+
+    def _append_more_chapter_response(self, comic_book, comic_id, json_response):
+        if json_response.get('code') == '200' and json_response.get('data'):
+            chapters = json_response.get('data', [])
+            self.logger.info('成功加载了 {count} 个章节', count=len(chapters))
+            for chapter_data in chapters:
+                chap_name = chapter_data.get('chaptername')
+                chap_id = chapter_data.get('chapterid')
+                if chap_name and chap_id:
+                    chap_url = f'{self.base_url}/{comic_id}/{chap_id}.html'
+                    comic_book.vols.append(ComicVolume(chap_name, chap_url, comic_book.name))
+                    self.logger.debug(
+                        '  找到卷 (更多列表): {chap_name} ({chap_url})',
+                        chap_name=chap_name,
+                        chap_url=chap_url,
+                    )
+        elif json_response.get('code') != '200':
+            self.logger.warning(
+                '加载更多章节失败: 服务器返回代码 {code}, 消息: {msg}',
+                code=json_response.get('code'),
+                msg=json_response.get('msg'),
+            )
+        else:
+            self.logger.info('加载更多章节未返回额外数据.')
 
     def __parse_imgs__(self, url):
         logger.info(
@@ -339,7 +359,7 @@ class DumanwuComic(ComicSource):
                         )
                         > 0
                     )
-                except:
+                except Exception:
                     self.logger.debug('图片加载未完成，继续滚动.')
                     # 继续滚动即使等待超时
 
@@ -367,7 +387,7 @@ class DumanwuComic(ComicSource):
                 logger.info('成功从 {url} 解析到 {len} 张图片.', url=url, len=len(img_urls))
             else:
                 logger.warning(
-                    f'未能从 {url} 解析到任何有效图片链接. 请检查页面结构和懒加载机制.', url=url
+                    '未能从 {} 解析到任何有效图片链接. 请检查页面结构和懒加载机制.', url, url=url
                 )
 
         except Exception as e:
