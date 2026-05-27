@@ -29,7 +29,7 @@ def test_context_ensure_driver_initializes_once(monkeypatch, tmp_path):
     driver = object()
     calls = []
 
-    def fake_init_driver(self):
+    def fake_init_driver(self, source_or_class=None):
         calls.append(True)
         self.driver = driver
         return True
@@ -43,6 +43,42 @@ def test_context_ensure_driver_initializes_once(monkeypatch, tmp_path):
     assert context.ensure_driver() is True
     assert context.driver is driver
     assert calls == [True]
+
+
+class CloakBackedSource(ComicSource):
+    browser_mode = 'cloakbrowser'
+    browser_headless = False
+
+    def search(self, keyword):
+        return []
+
+    def info(self, url):
+        return None
+
+    def __parse_imgs__(self, url):
+        return []
+
+
+def test_context_caches_drivers_by_source_mode(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_init_driver(self, source_or_class=None):
+        driver = object()
+        calls.append(source_or_class)
+        self.driver = driver
+        return True
+
+    monkeypatch.setattr(Context, 'init_driver', fake_init_driver)
+
+    context = Context(quiet_console())
+    context.create(str(tmp_path))
+
+    assert context.ensure_driver(CloakBackedSource) is True
+    first_driver = context.driver
+    assert context.ensure_driver(CloakBackedSource) is True
+
+    assert context.driver is first_driver
+    assert calls == [CloakBackedSource]
 
 
 def test_shell_uses_plain_stdin_for_interactive_prompt():
@@ -74,7 +110,7 @@ def test_shell_attaches_lazy_driver_to_current_source(monkeypatch, tmp_path):
     )
     cast(Any, shell.context).source = source
 
-    def fake_ensure_driver():
+    def fake_ensure_driver(source_or_class=None):
         shell.context.driver = driver
         return True
 

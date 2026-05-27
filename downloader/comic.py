@@ -16,7 +16,18 @@ import requests
 from loguru import logger
 from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
 from rich.progress import BarColumn, Progress, TextColumn
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
 from seleniumbase import SB
+
+from downloader.browser_modes import (
+    CLOAKBROWSER_MODE,
+    REQUESTS_MODE,
+    SELENIUMBASE_MODE,
+    BrowserModeName,
+    is_driver_backed_browser_mode,
+    normalize_browser_mode,
+)
 
 
 class ComicVolume:
@@ -65,6 +76,13 @@ class VolumeFileState:
     failed_images: list[ImageDownloadFailure]
     actual_files: list[str]
     actual_count: int
+
+
+@dataclass(frozen=True)
+class HtmlParseOptions:
+    browser_mode: BrowserModeName
+    http_method: str
+    encoding: str
 
 
 @dataclass
@@ -117,6 +135,28 @@ class DownloadSummary:
 
 filter_dir_re = re.compile(r'[\/:*?"<>|]')
 
+SOURCE_CONFIG_ATTRIBUTE_KEYS = (
+    'base_url',
+    'base_img_url',
+    'download_interval',
+    'browser_mode',
+    'browser_wait_selector',
+    'browser_wait_seconds',
+    'browser_headless',
+    'seleniumbase_wait_selector',
+    'seleniumbase_wait_seconds',
+    'seleniumbase_headless',
+    'cloakbrowser_humanize',
+    'cloakbrowser_options',
+)
+
+HTML_METHODS = {'GET', 'POST'}
+HTML_MODE_METHODS: dict[str, BrowserModeName] = {
+    REQUESTS_MODE.upper(): REQUESTS_MODE,
+    SELENIUMBASE_MODE.upper(): SELENIUMBASE_MODE,
+    CLOAKBROWSER_MODE.upper(): CLOAKBROWSER_MODE,
+}
+
 
 def filter_dir_name(name: str) -> str:
     return re.sub(filter_dir_re, '-', name)
@@ -125,6 +165,12 @@ def filter_dir_name(name: str) -> str:
 class ComicSource(ABC):
     base_url: str = ''
     base_img_url: str = ''
+    browser_mode: BrowserModeName = REQUESTS_MODE
+    browser_wait_selector: str | None = None
+    browser_wait_seconds: float | None = None
+    browser_headless: bool | None = None
+    cloakbrowser_humanize: bool = True
+    cloakbrowser_options: dict[str, Any] | None = None
     config_file: str | None = None
     download_interval: float = 0
     download_requires_driver: bool = False
@@ -134,6 +180,43 @@ class ComicSource(ABC):
     seleniumbase_headless: bool | None = None
     seleniumbase_wait_selector: str | None = None
     seleniumbase_wait_seconds: float = 20.0
+
+    @classmethod
+    def configured_browser_mode(cls) -> BrowserModeName:
+        config_mode = cls._configured_browser_mode_from_file()
+        return normalize_browser_mode(config_mode or getattr(cls, 'browser_mode', REQUESTS_MODE))
+
+    @classmethod
+    def _configured_browser_mode_from_file(cls) -> str | None:
+        config_file = getattr(cls, 'config_file', None)
+        if not config_file:
+            return None
+        base_path = Path(__file__).parent.parent
+        config_path = base_path / 'configs' / config_file
+        try:
+            with open(config_path, encoding='utf-8') as f:
+                config = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            return None
+        browser_mode = config.get('browser_mode')
+        return str(browser_mode) if browser_mode else None
+
+    @classmethod
+    def browser_mode_uses_driver(cls) -> bool:
+        return is_driver_backed_browser_mode(cls.configured_browser_mode())
+
+    @classmethod
+    def uses_driver_for_search(cls) -> bool:
+        return bool(getattr(cls, 'search_requires_driver', False)) or cls.browser_mode_uses_driver()
+
+    @classmethod
+    def uses_driver_for_download(cls) -> bool:
+        return (
+            bool(getattr(cls, 'download_requires_driver', False)) or cls.browser_mode_uses_driver()
+        )
+
+    def current_browser_mode_uses_driver(self) -> bool:
+        return is_driver_backed_browser_mode(self._source_browser_mode())
 
     def __init__(
         self, output_dir: str, http: requests.Session, driver: Any, overwrite: bool = True
@@ -188,6 +271,7 @@ class ComicSource(ABC):
         try:
             with open(config_path, encoding='utf-8') as f:
                 self.config = json.load(f)
+            self._apply_source_config()
             self.logger.debug('Loaded config from {config_path}', config_path=config_path)
         except FileNotFoundError:
             self.logger.error('Config file not found: {config_path}', config_path=config_path)
@@ -206,6 +290,12 @@ class ComicSource(ABC):
                 error=e,
             )
             self.config = {}
+
+    def _apply_source_config(self) -> None:
+        for key in SOURCE_CONFIG_ATTRIBUTE_KEYS:
+            if key in self.config:
+                setattr(self, key, self.config[key])
+        self.browser_mode = normalize_browser_mode(getattr(self, 'browser_mode', REQUESTS_MODE))
 
     @abstractmethod
     def search(self, keyword: str) -> list[Comic]:
@@ -796,32 +886,119 @@ class ComicSource(ABC):
             self.logger.error('JS执行失败: {js_code}, 错误: {error}', js_code=js_code, error=e)
             return fallback
 
+    def _source_browser_mode(self) -> BrowserModeName:
+        return normalize_browser_mode(getattr(self, 'browser_mode', REQUESTS_MODE))
+
+    def _browser_wait_selector(self) -> str | None:
+        return self.browser_wait_selector or self.seleniumbase_wait_selector
+
+    def _browser_wait_seconds(self) -> float:
+        return float(self.browser_wait_seconds or self.seleniumbase_wait_seconds or 0)
+
+    def _browser_headless(self, default: bool = True) -> bool:
+        if self.browser_headless is not None:
+            return bool(self.browser_headless)
+        if self.seleniumbase_headless is not None:
+            return bool(self.seleniumbase_headless)
+        return default
+
     def _seleniumbase_context(self):
+        headless = self._browser_headless(default=False)
         kwargs = {
-            "uc": True,
-            "test": True,
-            "locale": "zh-CN",
-            "headed": True,
+            'uc': True,
+            'test': True,
+            'locale': 'zh-CN',
         }
+        if headless:
+            kwargs['headless'] = True
+        else:
+            kwargs['headed'] = True
         return SB(**kwargs)
 
     def _wait_for_seleniumbase_html(self, sb):
-        if self.seleniumbase_wait_selector:
+        wait_selector = self._browser_wait_selector()
+        wait_seconds = self._browser_wait_seconds()
+        if wait_selector:
             try:
                 sb.cdp.find(
-                    self.seleniumbase_wait_selector,
-                    timeout=self.seleniumbase_wait_seconds,
+                    wait_selector,
+                    timeout=wait_seconds,
                 )
             except Exception as e:
                 self.logger.debug(
                     'SeleniumBase 等待选择器超时: {selector}, 错误: {error}',
-                    selector=self.seleniumbase_wait_selector,
+                    selector=wait_selector,
                     error=e,
                 )
             return
 
-        if self.seleniumbase_wait_seconds > 0:
-            sb.cdp.sleep(self.seleniumbase_wait_seconds)
+        if wait_seconds > 0:
+            sb.cdp.sleep(wait_seconds)
+
+    def _wait_for_webdriver_html(self, driver) -> None:
+        wait_selector = self._browser_wait_selector()
+        wait_seconds = self._browser_wait_seconds()
+        if wait_selector:
+            try:
+                if hasattr(driver, 'wait_for_selector'):
+                    driver.wait_for_selector(wait_selector, timeout=wait_seconds)
+                else:
+                    WebDriverWait(driver, wait_seconds).until(
+                        lambda current_driver: current_driver.find_elements(
+                            By.CSS_SELECTOR, wait_selector
+                        )
+                    )
+            except Exception as e:
+                self.logger.debug(
+                    'Browser wait selector timed out: {selector}, error: {error}',
+                    selector=wait_selector,
+                    error=e,
+                )
+            return
+
+        if wait_seconds > 0:
+            time.sleep(wait_seconds)
+
+    def _parse_html_with_webdriver(self, url, mode_name: str):
+        if self.driver is None:
+            logger.error(
+                '{mode_name} HTML parsing requires an initialized browser driver: {url}',
+                mode_name=mode_name,
+                url=url,
+            )
+            return None
+
+        try:
+            self.driver.get(url)
+            self._wait_for_webdriver_html(self.driver)
+            html = self._get_driver_page_source()
+            if not html:
+                logger.error(
+                    '{mode_name} returned empty HTML: {url}',
+                    mode_name=mode_name,
+                    url=url,
+                )
+                return None
+            return etree.parse(StringIO(html), self.parser)
+        except Exception as e:
+            logger.error(
+                '{mode_name} HTML parsing failed: {url}, error: {error}',
+                mode_name=mode_name,
+                url=url,
+                error=e,
+                exc_info=True,
+            )
+            return None
+
+    def _get_driver_page_source(self) -> str | None:
+        page_source = getattr(self.driver, 'page_source', None)
+        if isinstance(page_source, str):
+            return page_source
+        get_page_source = getattr(self.driver, 'get_page_source', None)
+        if callable(get_page_source):
+            html = get_page_source()
+            return html if isinstance(html, str) else None
+        return None
 
     def _parse_html_with_seleniumbase(self, url, method='GET'):
         if method.upper() != 'GET':
@@ -833,9 +1010,7 @@ class ComicSource(ABC):
                 sb.activate_cdp_mode(url)
                 sb.sleep(10)
                 sb.solve_captcha()
-                # sb.wait_for_element_absent("input[disabled]")
-                sb.sleep(10)
-                self._wait_for_seleniumbase_html(sb)
+                sb.sleep(5)
                 html = sb.cdp.get_page_source()
                 return etree.parse(StringIO(html), self.parser)
         except Exception as e:
@@ -845,6 +1020,45 @@ class ComicSource(ABC):
                 e,
                 exc_info=True,
             )
+            return None
+
+    def _resolve_html_parse_options(self, method, data, encoding: str) -> HtmlParseOptions | None:
+        method_name = str(method).upper()
+        forced_mode = HTML_MODE_METHODS.get(method_name)
+        if forced_mode:
+            return HtmlParseOptions(forced_mode, 'GET', encoding)
+        if method_name in HTML_METHODS:
+            return HtmlParseOptions(self._source_browser_mode(), method_name, encoding)
+        if data is None and encoding == 'utf-8':
+            return HtmlParseOptions(self._source_browser_mode(), 'GET', str(method))
+
+        logger.error('Unsupported HTTP method: {}', method)
+        return None
+
+    def _parse_html_with_requests(self, url, method, data, encoding, headers):
+        request_headers = {'referer': self.base_url}
+        if headers:
+            request_headers.update(headers)
+
+        try:
+            if method == 'GET':
+                r = self.http.get(url, timeout=30, headers=request_headers)
+            else:
+                r = self.http.post(url, data=data, timeout=30, headers=request_headers)
+            r.raise_for_status()
+            r.encoding = encoding
+            return etree.parse(StringIO(r.text), self.parser)
+        except requests.exceptions.RequestException as e:
+            logger.error(
+                'HTML request failed: {}, method: {}, error: {}',
+                url,
+                method,
+                e,
+                exc_info=True,
+            )
+            return None
+        except Exception as e:
+            logger.error('HTML parsing failed: {}, error: {}', url, e, exc_info=True)
             return None
 
     def __parse_html__(
@@ -869,28 +1083,25 @@ class ComicSource(ABC):
         """
         self.logger.debug('开始解析HTML: {url}, 方法: {method}', url=url, method=method)
 
-        method_name = method.upper()
-        if method_name == 'SELENIUMBASE':
-            return self._parse_html_with_seleniumbase(url)
+        options = self._resolve_html_parse_options(method, data, encoding)
+        if options is None:
+            return None
 
-        request_headers = {'referer': self.base_url}
-        if headers:
-            request_headers.update(headers)
-
-        try:
-            if method_name == 'GET':
-                r = self.http.get(url, timeout=30, headers=request_headers)  # 增加超时
-            elif method_name == 'POST':
-                r = self.http.post(url, data=data, timeout=30, headers=request_headers)  # 增加超时
-            else:
-                logger.error('不支持的HTTP方法: {}', method)
+        if options.browser_mode == SELENIUMBASE_MODE:
+            return self._parse_html_with_seleniumbase(url, options.http_method)
+        if options.browser_mode == CLOAKBROWSER_MODE:
+            if options.http_method != 'GET':
+                logger.error(
+                    'CloakBrowser HTML parsing only supports GET requests: {}',
+                    options.http_method,
+                )
                 return None
-            r.raise_for_status()  # 如果请求失败则抛出HTTPError异常
-            r.encoding = encoding
-            return etree.parse(StringIO(r.text), self.parser)
-        except requests.exceptions.RequestException as e:
-            logger.error('请求HTML页面失败: {}, 方法: {}, 错误: {}', url, method, e, exc_info=True)
-            return None
-        except Exception as e:
-            logger.error('处理HTML页面时发生未知错误: {}, 错误: {}', url, e, exc_info=True)
-            return None
+            return self._parse_html_with_webdriver(url, 'CloakBrowser')
+
+        return self._parse_html_with_requests(
+            url,
+            options.http_method,
+            data,
+            options.encoding,
+            headers,
+        )

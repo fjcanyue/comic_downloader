@@ -3,8 +3,9 @@ from __future__ import annotations
 from io import StringIO
 from typing import Any, cast
 
-from lxml import etree
+from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
 
+from downloader.browser_modes import CLOAKBROWSER_MODE
 from downloader.comic import ComicSource
 from downloader.morui import MoruiComic
 
@@ -56,6 +57,29 @@ class FakeSeleniumBase:
     def activate_cdp_mode(self, url):
         self.activated_url = url
 
+    def sleep(self, seconds):
+        pass
+
+    def solve_captcha(self):
+        pass
+
+
+class FakeCloakDriver:
+    def __init__(self, html):
+        self.html = html
+        self.visited_urls = []
+        self.wait_calls = []
+
+    def get(self, url):
+        self.visited_urls.append(url)
+
+    def wait_for_selector(self, selector, timeout=None):
+        self.wait_calls.append((selector, timeout))
+
+    @property
+    def page_source(self):
+        return self.html
+
 
 def html_root(html):
     return etree.parse(StringIO(html), etree.HTMLParser())
@@ -80,6 +104,23 @@ def test_parse_html_can_use_seleniumbase_cdp(monkeypatch, tmp_path):
     assert fake_sb.cdp.find_calls == [('.page-main', 7.0)]
     assert root is not None
     assert root.xpath('string(//h1)') == 'Rendered'
+
+
+def test_parse_html_uses_source_configured_cloakbrowser_driver(tmp_path):
+    html = '<html><body><main class="page-main"><h1>Cloaked</h1></main></body></html>'
+    fake_driver = FakeCloakDriver(html)
+
+    source = BrowserHtmlSource(str(tmp_path), cast(Any, DummyHttp()), fake_driver)
+    source.browser_mode = CLOAKBROWSER_MODE
+    source.browser_wait_selector = '.page-main'
+    source.browser_wait_seconds = 9.0
+
+    root = source.__parse_html__('https://example.test/search')
+
+    assert fake_driver.visited_urls == ['https://example.test/search']
+    assert fake_driver.wait_calls == [('.page-main', 9.0)]
+    assert root is not None
+    assert root.xpath('string(//h1)') == 'Cloaked'
 
 
 def test_morui_search_uses_seleniumbase_html(monkeypatch, tmp_path):
@@ -116,7 +157,7 @@ def test_morui_search_uses_seleniumbase_html(monkeypatch, tmp_path):
     assert calls == [
         (
             'https://www.morui.com/search/?keywords=test',
-            ('SELENIUMBASE',),
+            (),
             {},
         )
     ]

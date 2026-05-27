@@ -1,5 +1,6 @@
 from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
 
+from downloader.browser_modes import CLOAKBROWSER_MODE
 from downloader.comic import Comic, ComicBook, ComicSource, ComicVolume, logger
 
 
@@ -7,6 +8,10 @@ class MoruiComic(ComicSource):
     name = '摩锐漫画'
     base_url = 'https://www.morui.com'
     base_img_url = 'http://lao.haotu90.top'
+    browser_mode = CLOAKBROWSER_MODE
+    browser_wait_selector = '.page-main'
+    browser_wait_seconds = 60.0
+    browser_headless = False
     download_interval = 5
     download_requires_driver = True
     seleniumbase_wait_selector = '.page-main'
@@ -23,7 +28,7 @@ class MoruiComic(ComicSource):
         search_url = f'{self.base_url}/search/?keywords={keyword}'
         arr = []
         try:
-            root = self.__parse_html__(search_url, 'SELENIUMBASE')
+            root = self.__parse_html__(search_url)
             if root is None:
                 logger.error("搜索 '{}' 失败，无法获取或解析页面: {}", keyword, search_url)
                 return arr

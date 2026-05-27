@@ -20,6 +20,8 @@ from selenium.webdriver.edge.options import Options as EdgeOptions
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from urllib3.util.retry import Retry
 
+from downloader.browser_drivers import CloakBrowserDriver
+from downloader.browser_modes import CLOAKBROWSER_MODE, normalize_browser_mode
 from downloader.comic import Comic, ComicSource
 from downloader.sources import load_source_classes
 
@@ -60,6 +62,7 @@ def parse_volume_slice(args: list[str], book_count: int, vol_count: int) -> tupl
 @dataclass(frozen=True)
 class SearchTask:
     source_name: str
+    source_class: type[ComicSource]
     search_func: Callable[[str], list]
     uses_driver: bool
     display_name: str
@@ -194,24 +197,39 @@ class Shell(cmd.Cmd):
             self.console.print(f'Failed to load comic sources: {e}', style='bold red')
             return {}
 
-    def _ensure_driver(self) -> bool:
-        """按需初始化浏览器驱动，并同步给已创建的源实例。"""
-        if not self.context.ensure_driver():
+    def _ensure_driver(
+        self, source_or_class: ComicSource | type[ComicSource] | None = None
+    ) -> bool:
+        """按需初始化当前漫画源需要的浏览器驱动。"""
+        target = source_or_class or self.context.source
+        if not self.context.ensure_driver(target):
             return False
-        for source in self.sources.values():
-            source.driver = self.context.driver
+        if isinstance(target, ComicSource):
+            target.driver = self.context.driver
         return True
 
     def _ensure_source_download_ready(self) -> bool:
         if self.context.source is None:
             self.console.print('当前没有选中的动漫源！')
             return False
-        if not getattr(self.context.source, 'download_requires_driver', False):
+        if not self.context.source.uses_driver_for_download():
             return True
-        if self._ensure_driver():
+        if self._ensure_driver(self.context.source):
             self.context.source.driver = self.context.driver
             return True
         self.console.print('当前动漫源下载需要浏览器驱动，无法继续下载。', style='bold red')
+        return False
+
+    def _ensure_source_page_ready(self) -> bool:
+        if self.context.source is None:
+            self.console.print('当前没有选中的动漫源！')
+            return False
+        if not self.context.source.current_browser_mode_uses_driver():
+            return True
+        if self._ensure_driver(self.context.source):
+            self.context.source.driver = self.context.driver
+            return True
+        self.console.print('当前动漫源页面解析需要浏览器驱动，无法继续。', style='bold red')
         return False
 
     def _match_source_for_url(self, url: str) -> str | None:
@@ -259,7 +277,7 @@ class Shell(cmd.Cmd):
             self.sources[source_name] = source_class(
                 self.context.output_path,
                 self.context.http,
-                self.context.driver,
+                self.context.get_driver(source_class),
                 overwrite=self.overwrite,
             )
 
@@ -269,13 +287,16 @@ class Shell(cmd.Cmd):
 
     def _build_search_func(self, source_class, uses_driver: bool) -> Callable[[str], list]:
         def _search(keyword: str) -> list:
-            if uses_driver and self.context.driver is None:
-                raise RuntimeError('浏览器驱动未初始化')
+            driver = None
+            if uses_driver:
+                if not self.context.ensure_driver(source_class):
+                    raise RuntimeError('浏览器驱动未初始化')
+                driver = self.context.driver
             http = self.context.create_http_session()
             source = source_class(
                 self.context.output_path,
                 http,
-                self.context.driver,
+                driver,
                 overwrite=self.overwrite,
             )
             return source.search(keyword)
@@ -286,10 +307,11 @@ class Shell(cmd.Cmd):
         tasks = []
         for source_name in self.source_options:
             source_class = self.source_map[source_name]
-            uses_driver = bool(getattr(source_class, 'search_requires_driver', False))
+            uses_driver = source_class.uses_driver_for_search()
             tasks.append(
                 SearchTask(
                     source_name=source_name,
+                    source_class=source_class,
                     search_func=self._build_search_func(source_class, uses_driver),
                     uses_driver=uses_driver,
                     display_name=getattr(source_class, 'name', source_name),
@@ -300,20 +322,26 @@ class Shell(cmd.Cmd):
                 self.sources[source_name] = source_class(
                     self.context.output_path,
                     self.context.http,
-                    self.context.driver,
+                    self.context.get_driver(source_class),
                     overwrite=self.overwrite,
                 )
         return tasks
 
     def _filter_ready_search_tasks(self, tasks: list[SearchTask]) -> list[SearchTask]:
-        if not any(task.uses_driver for task in tasks) or self._ensure_driver():
-            return tasks
-        skipped_sources = {task.source_name for task in tasks if task.uses_driver}
+        ready_tasks = []
+        skipped_sources = set()
+        for task in tasks:
+            if not task.uses_driver or self.context.ensure_driver(task.source_class):
+                ready_tasks.append(task)
+            else:
+                skipped_sources.add(task.source_name)
+        if not skipped_sources:
+            return ready_tasks
         self.console.print(
             f'已跳过需要浏览器驱动的搜索源: {", ".join(sorted(skipped_sources))}',
             style='bold yellow',
         )
-        return [task for task in tasks if not task.uses_driver]
+        return ready_tasks
 
     def _merge_search_outcomes(self, outcomes: list[SearchOutcome]) -> None:
         outcomes_by_source = {outcome.source_name: outcome for outcome in outcomes}
@@ -400,6 +428,8 @@ class Shell(cmd.Cmd):
 
         if not self.context.source:
             self.console.print('无法确定该动漫所属的源，请先搜索或手动选择源。')
+            return
+        if not self._ensure_source_page_ready():
             return
 
         with self.console.status('正在获取详情...', spinner='dots'):
@@ -629,6 +659,7 @@ class Context:
         self.source: ComicSource | None = None
         '动漫网站源'
         self.driver: Any | None = None
+        self.drivers: dict[tuple[str, bool], Any] = {}
         '网页驱动'
         self.console = console
         self.reset()
@@ -655,14 +686,30 @@ class Context:
         http.mount('http://', adapter)
         return http
 
-    def ensure_driver(self) -> bool:
-        if self.driver:
+    def ensure_driver(self, source_or_class: ComicSource | type[ComicSource] | None = None) -> bool:
+        cache_key = self._driver_cache_key(source_or_class)
+        driver = self.drivers.get(cache_key)
+        if driver:
+            self.driver = driver
             return True
-        self.console.print('正在初始化浏览器驱动...', style='dim')
-        return self.init_driver()
 
-    def init_driver(self) -> bool:
-        """尝试初始化 WebDriver，支持 Firefox, Chrome, Edge"""
+        self.console.print('正在初始化浏览器驱动...', style='dim')
+        if not self.init_driver(source_or_class):
+            return False
+        self.drivers[cache_key] = self.driver
+        return True
+
+    def get_driver(self, source_or_class: ComicSource | type[ComicSource] | None = None):
+        return self.drivers.get(self._driver_cache_key(source_or_class))
+
+    def init_driver(self, source_or_class: ComicSource | type[ComicSource] | None = None) -> bool:
+        """Initialize a browser driver for the source's configured browser mode."""
+        driver_mode = self._driver_mode_for_source(source_or_class)
+        if driver_mode == CLOAKBROWSER_MODE:
+            return self._try_init_cloakbrowser_driver(source_or_class)
+        return self._try_init_selenium_driver()
+
+    def _try_init_selenium_driver(self) -> bool:
         drivers = [
             ('Chrome', webdriver.Chrome, ChromeOptions),
             ('Firefox', webdriver.Firefox, FirefoxOptions),
@@ -696,14 +743,85 @@ class Context:
             logger.debug('初始化 {driver_name} 驱动失败: {error}', driver_name=name, error=e)
             return False
 
+    def _try_init_cloakbrowser_driver(
+        self, source_or_class: ComicSource | type[ComicSource] | None
+    ) -> bool:
+        try:
+            self.driver = CloakBrowserDriver(
+                headless=self._source_browser_headless(source_or_class),
+                humanize=self._source_cloakbrowser_humanize(source_or_class),
+                timeout_seconds=self._source_browser_wait_seconds(source_or_class),
+                launch_options=self._source_cloakbrowser_options(source_or_class),
+            )
+            self.console.print('已初始化 CloakBrowser 浏览器驱动', style='green')
+            return True
+        except Exception as e:
+            logger.debug('初始化 CloakBrowser 驱动失败: {error}', error=e, exc_info=True)
+            self.console.print(f'CloakBrowser 浏览器驱动初始化失败: {e}', style='bold red')
+            return False
+
+    def _driver_cache_key(
+        self, source_or_class: ComicSource | type[ComicSource] | None = None
+    ) -> tuple[str, bool]:
+        driver_mode = self._driver_mode_for_source(source_or_class)
+        if driver_mode == CLOAKBROWSER_MODE:
+            return (driver_mode, self._source_browser_headless(source_or_class))
+        return (driver_mode, True)
+
+    def _driver_mode_for_source(
+        self, source_or_class: ComicSource | type[ComicSource] | None = None
+    ) -> str:
+        if isinstance(source_or_class, type) and issubclass(source_or_class, ComicSource):
+            browser_mode = source_or_class.configured_browser_mode()
+        elif isinstance(source_or_class, ComicSource):
+            browser_mode = source_or_class._source_browser_mode()
+        else:
+            browser_mode = normalize_browser_mode(None)
+        if browser_mode == CLOAKBROWSER_MODE:
+            return CLOAKBROWSER_MODE
+        return 'selenium'
+
+    def _source_browser_headless(
+        self, source_or_class: ComicSource | type[ComicSource] | None = None
+    ) -> bool:
+        browser_headless = getattr(source_or_class, 'browser_headless', None)
+        if browser_headless is not None:
+            return bool(browser_headless)
+        seleniumbase_headless = getattr(source_or_class, 'seleniumbase_headless', None)
+        if seleniumbase_headless is not None:
+            return bool(seleniumbase_headless)
+        return True
+
+    def _source_browser_wait_seconds(
+        self, source_or_class: ComicSource | type[ComicSource] | None = None
+    ) -> float:
+        wait_seconds = getattr(source_or_class, 'browser_wait_seconds', None)
+        if wait_seconds is None:
+            wait_seconds = getattr(source_or_class, 'seleniumbase_wait_seconds', 30.0)
+        return float(30.0 if wait_seconds is None else wait_seconds)
+
+    def _source_cloakbrowser_humanize(
+        self, source_or_class: ComicSource | type[ComicSource] | None = None
+    ) -> bool:
+        return bool(getattr(source_or_class, 'cloakbrowser_humanize', True))
+
+    def _source_cloakbrowser_options(
+        self, source_or_class: ComicSource | type[ComicSource] | None = None
+    ) -> dict[str, Any] | None:
+        options = getattr(source_or_class, 'cloakbrowser_options', None)
+        return dict(options) if isinstance(options, dict) else None
+
+    def _quit_driver(self, driver) -> None:
+        try:
+            driver.quit()
+        except Exception as e:
+            logger.debug('关闭浏览器驱动失败: {error}', error=e)
+
     def destroy(self):
-        if self.driver:
-            try:
-                self.driver.quit()
-            except Exception as e:
-                logger.debug('关闭浏览器驱动失败: {error}', error=e)
-            finally:
-                self.driver = None
+        for driver in set(self.drivers.values()):
+            self._quit_driver(driver)
+        self.drivers.clear()
+        self.driver = None
 
     def reset(self):
         self.source = None
