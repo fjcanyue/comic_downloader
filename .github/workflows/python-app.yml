@@ -27,16 +27,16 @@ jobs:
     steps:
     
     - name: Checkout
-      uses: actions/checkout@v6
+      uses: actions/checkout@v6.0.2
       
     - name: Install uv
-      uses: astral-sh/setup-uv@v8
+      uses: astral-sh/setup-uv@v8.1.0
       with:
         enable-cache: true
         cache-dependency-glob: "uv.lock"
 
     - name: Set up Python
-      uses: actions/setup-python@v6
+      uses: actions/setup-python@v6.2.0
       with:
         python-version: "3.14"
 
@@ -54,7 +54,7 @@ jobs:
          mv dist/${{ matrix.executable_name }} dist/${{ matrix.final_name }}
 
     - name: Upload a Build Artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7.0.1
       with:
         name: ${{ matrix.artifact_name }}
         path: dist/${{ matrix.final_name }}
@@ -69,7 +69,7 @@ jobs:
         echo "TAG_NAME=$(date +'%Y.%m.%d-%H%M')" >> $GITHUB_ENV
 
     - name: Download all artifacts
-      uses: actions/download-artifact@v8
+      uses: actions/download-artifact@v8.0.1
       with:
         path: artifacts
 
@@ -77,7 +77,7 @@ jobs:
       run: ls -R artifacts
 
     - name: Draft Release
-      uses: release-drafter/release-drafter@v6
+      uses: release-drafter/release-drafter@v6.0.0
       with:
         name: '${{ env.TAG_NAME }} 🌈'
         tag: '${{ env.TAG_NAME }}'
@@ -87,7 +87,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Upload artifact to release
-      uses: softprops/action-gh-release@v3
+      uses: softprops/action-gh-release@v3.0.0
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
