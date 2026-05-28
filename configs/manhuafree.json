@@ -1,0 +1,18 @@
+{
+  "base_url": "https://manhuafree.com",
+  "api_base_url": "https://api-get-v3.mgsearcher.com",
+  "img_base_host": "https://t40-1-4.g-mh.online",
+  "download_interval": 2,
+  "search_xpath": "//a[.//h3[@class='cardtitle']]",
+  "search_extract": {
+    "name": ".//h3[@class='cardtitle']",
+    "url": "./@href"
+  },
+  "info_mid_attr": "//body//@data-mid",
+  "info_from_api": {
+    "name": "title",
+    "status_map": {"0": "完结", "1": "连载", "2": "暂停"},
+    "description": "desc",
+    "chapters": "chapters"
+  }
+}

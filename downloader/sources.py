@@ -18,6 +18,7 @@ SOURCE_DEFINITIONS = (
     SourceDefinition('boya', 'BoyaComic', enabled=False, deprecated=True),
     SourceDefinition('dmzj', 'DmzjComic', enabled=False, deprecated=True),
     SourceDefinition('dumanwu', 'DumanwuComic'),
+    SourceDefinition('manhuafree', 'ManhuafreeComic'),
     SourceDefinition('manhuagui', 'ManhuaguiComic'),
     SourceDefinition('manhuazhan', 'ManhuazhanComic'),
     SourceDefinition('maofly', 'MaoflyComic', enabled=False, deprecated=True),
