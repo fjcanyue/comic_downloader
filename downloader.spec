@@ -34,11 +34,13 @@ a = Analysis(
         'downloader.boya',
         'downloader.dmzj',
         'downloader.dumanwu',
+        'downloader.manhuafree',
         'downloader.manhuagui',
         'downloader.manhuazhan',
         'downloader.maofly',
         'downloader.morui',
-        'downloader.thmh'
+        'downloader.thmh',
+        'downloader.tuku'
     ] + runtime_hiddenimports,
     hookspath=[],
     hooksconfig={},
