@@ -11,6 +11,8 @@
 | [漫画柜/看漫画](https://www.manhuagui.com) | ✅ 可用 （境外） | requests |
 | [漫画站](https://www.manhuazhan.org) | ✅ 可用 | requests |
 | [31漫画](https://www.thmh.com) | ✅ 可用 | requests |
+| [图库漫画](https://www.tuku.cc) | ✅ 可用 | requests |
+| [GoDa漫画](https://manhuafree.com) | ✅ 可用 | requests |
 
 [![asciicast](https://asciinema.org/a/H7hsCmPz1v9mqpxF4t40oLomM.svg)](https://asciinema.org/a/H7hsCmPz1v9mqpxF4t40oLomM)
 
