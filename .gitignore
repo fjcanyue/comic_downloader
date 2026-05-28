@@ -21,6 +21,8 @@ site/
 .coverage
 htmlcov/
 
+downloaded_files/
+seleniumbase_diagnostics/
 **/geckodriver.log
 **/comic_downloader.log
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 from io import StringIO
@@ -375,6 +376,150 @@ def test_parse_html_reuses_seleniumbase_driver(monkeypatch, tmp_path):
     assert fake_driver.cdp.find_calls == [('.page-main', 3.0)]
     assert root is not None
     assert root.xpath('string(//h1)') == 'Reused'
+
+
+def test_seleniumbase_html_retry_records_diagnostics_before_success(monkeypatch, tmp_path):
+    html = '<html><body><main class="page-main"><h1>Recovered</h1></main></body></html>'
+    failed_html = '<html><body><h1>Bad Gateway</h1></body></html>'
+    contexts = []
+    sleep_calls = []
+
+    class RetryFakeCdp:
+        def __init__(self, page_html):
+            self.html = page_html
+            self.find_calls = []
+
+        def find(self, selector, timeout=None):
+            self.find_calls.append((selector, timeout))
+
+        def get_page_source(self):
+            return self.html
+
+    class RetryFakeSeleniumBase:
+        def __init__(self, *, should_fail):
+            self.should_fail = should_fail
+            self.cdp = RetryFakeCdp(failed_html if should_fail else html)
+            self.activated_urls = []
+            self.current_url = None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def activate_cdp_mode(self, url):
+            self.activated_urls.append(url)
+            self.current_url = url + '#gateway'
+            if self.should_fail:
+                raise RuntimeError('Bad Gateway')
+
+        def sleep(self, seconds):
+            pass
+
+        def solve_captcha(self):
+            pass
+
+        def save_screenshot(self, name, folder=None, selector=None):
+            screenshot_path = os.path.join(folder or '', name)
+            with open(screenshot_path, 'wb') as f:
+                f.write(b'fake-png')
+
+    def fake_context(self):
+        should_fail = len(contexts) == 0
+        context = RetryFakeSeleniumBase(should_fail=should_fail)
+        contexts.append(context)
+        return context
+
+    monkeypatch.setattr(BrowserHtmlSource, '_seleniumbase_context', fake_context)
+    monkeypatch.setattr(comic_module.time, 'sleep', lambda seconds: sleep_calls.append(seconds))
+
+    source = BrowserHtmlSource(str(tmp_path), cast(Any, DummyHttp()), None)
+    source.browser_mode = SELENIUMBASE_MODE
+    source.browser_wait_selector = '.page-main'
+    source.browser_wait_seconds = 2.0
+
+    root = source.__parse_html__('https://example.test/search')
+
+    assert root is not None
+    assert root.xpath('string(//h1)') == 'Recovered'
+    assert [context.activated_urls for context in contexts] == [
+        ['https://example.test/search'],
+        ['https://example.test/search'],
+    ]
+    assert sleep_calls == [3.0]
+
+    diagnostic_dir = tmp_path / 'seleniumbase_diagnostics'
+    html_paths = list(diagnostic_dir.glob('*.html'))
+    screenshot_paths = list(diagnostic_dir.glob('*.png'))
+    metadata_paths = list(diagnostic_dir.glob('*.json'))
+
+    assert len(html_paths) == 1
+    assert len(screenshot_paths) == 1
+    assert len(metadata_paths) == 1
+    assert 'Bad Gateway' in html_paths[0].read_text(encoding='utf-8')
+
+    metadata = json.loads(metadata_paths[0].read_text(encoding='utf-8'))
+    assert metadata['original_url'] == 'https://example.test/search'
+    assert metadata['final_url'] == 'https://example.test/search#gateway'
+    assert metadata['attempt'] == 1
+    assert metadata['error'] == "RuntimeError('Bad Gateway')"
+
+
+def test_seleniumbase_context_enter_failure_records_metadata_diagnostics(monkeypatch, tmp_path):
+    contexts = []
+    sleep_calls = []
+
+    class FailingEnterSeleniumBase:
+        def __enter__(self):
+            contexts.append(self)
+            raise RuntimeError('Bad Gateway')
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    def fake_context(self):
+        return FailingEnterSeleniumBase()
+
+    monkeypatch.setattr(BrowserHtmlSource, '_seleniumbase_context', fake_context)
+    monkeypatch.setattr(comic_module.time, 'sleep', lambda seconds: sleep_calls.append(seconds))
+    monkeypatch.setenv('HTTPS_PROXY', 'http://user:secret@example.proxy:8080')
+
+    source = BrowserHtmlSource(str(tmp_path), cast(Any, DummyHttp()), None)
+    source.browser_mode = SELENIUMBASE_MODE
+
+    root = source.__parse_html__('https://example.test/search')
+
+    assert root is None
+    assert len(contexts) == 2
+    assert sleep_calls == [3.0]
+
+    diagnostic_dir = tmp_path / 'seleniumbase_diagnostics'
+    html_paths = list(diagnostic_dir.glob('*.html'))
+    screenshot_paths = list(diagnostic_dir.glob('*.png'))
+    metadata_paths = sorted(diagnostic_dir.glob('*.json'))
+
+    assert html_paths == []
+    assert screenshot_paths == []
+    assert len(metadata_paths) == 2
+
+    metadata = json.loads(metadata_paths[0].read_text(encoding='utf-8'))
+    assert metadata['original_url'] == 'https://example.test/search'
+    assert metadata['final_url'] is None
+    assert metadata['attempt'] == 1
+    assert metadata['error'] == "RuntimeError('Bad Gateway')"
+    assert metadata['error_type'] == 'RuntimeError'
+    assert metadata['error_module'] == 'builtins'
+    assert metadata['error_message'] == 'Bad Gateway'
+    assert metadata['error_args'] == ['Bad Gateway']
+    assert metadata['error_chain'][0]['type'] == 'RuntimeError'
+    assert metadata['error_chain'][0]['message'] == 'Bad Gateway'
+    assert metadata['proxy_environment']['HTTPS_PROXY'] == {
+        'set': True,
+        'value': 'http://<credentials>@example.proxy:8080',
+    }
+    assert metadata['html_path'] is None
+    assert metadata['screenshot_path'] is None
 
 
 def test_parse_html_uses_source_configured_cloakbrowser_driver(tmp_path):
