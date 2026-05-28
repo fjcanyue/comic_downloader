@@ -23,6 +23,7 @@ SOURCE_DEFINITIONS = (
     SourceDefinition('maofly', 'MaoflyComic', enabled=False, deprecated=True),
     SourceDefinition('morui', 'MoruiComic'),
     SourceDefinition('thmh', 'TmhComic'),
+    SourceDefinition('tuku', 'TukuComic'),
 )
 
 

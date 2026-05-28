@@ -1,0 +1,19 @@
+{
+  "base_url": "https://www.tuku.cc",
+  "download_interval": 2,
+  "search_xpath": "//div[contains(@class,'swiper-card-item')]",
+  "search_extract": {
+    "name": ".//h3/a/@title",
+    "url": ".//h3/a/@href"
+  },
+  "info_name_xpath": "//div[contains(@class,'manga-info-card')]//h1",
+  "info_author_xpath": "//div[contains(@class,'manga-info-card')]//p[span[contains(text(),'作者')]]/a",
+  "info_status_xpath": "//div[contains(@class,'manga-info-card')]//p[span[contains(text(),'状态')]]",
+  "info_genre_xpath": "//div[contains(@class,'manga-info-card')]//h2/a",
+  "info_chapters_xpath": "//div[contains(@class,'manga-chapter-wrap')]/a[contains(@class,'manga-chapter-item')]",
+  "info_chapter_extract": {
+    "name": ".//span[contains(@class,'i-b')]",
+    "url": "./@href"
+  },
+  "imgs_xpath": "//div[contains(@class,'swiper-item')]//img/@data-original"
+}
