@@ -1,0 +1,44 @@
+{
+  "sources": {
+    "boya": {
+      "enabled": false,
+      "browser_mode": "requests"
+    },
+    "dmzj": {
+      "enabled": false,
+      "browser_mode": "requests"
+    },
+    "dumanwu": {
+      "enabled": true,
+      "browser_mode": "requests"
+    },
+    "manhuafree": {
+      "enabled": true,
+      "browser_mode": "requests"
+    },
+    "manhuagui": {
+      "enabled": true,
+      "browser_mode": "requests"
+    },
+    "manhuazhan": {
+      "enabled": true,
+      "browser_mode": "requests"
+    },
+    "maofly": {
+      "enabled": false,
+      "browser_mode": "requests"
+    },
+    "morui": {
+      "enabled": true,
+      "browser_mode": "seleniumbase"
+    },
+    "thmh": {
+      "enabled": true,
+      "browser_mode": "requests"
+    },
+    "tuku": {
+      "enabled": true,
+      "browser_mode": "requests"
+    }
+  }
+}

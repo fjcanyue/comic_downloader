@@ -119,3 +119,29 @@ q
 - **CloakBrowser**: 基于 Playwright 的反爬浏览器，支持指纹伪装和代理。需要额外安装 `cloakbrowser` 包。
 
 源可能配置自动回退（requests → SeleniumBase），在请求被屏蔽时无缝切换。
+
+## 8. 运行配置文件
+
+启动时可以用 `-c` 或 `--config` 指定运行配置文件：
+
+```bash
+comic_downloader --config configs/runtime.sample.json
+```
+
+配置文件可以覆盖启用的动漫源和单站点的 `browser_mode`。示例文件见
+`configs/runtime.sample.json`：
+
+```json
+{
+  "sources": {
+    "morui": {
+      "enabled": true,
+      "browser_mode": "seleniumbase"
+    },
+    "maofly": {
+      "enabled": false,
+      "browser_mode": "requests"
+    }
+  }
+}
+```

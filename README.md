@@ -94,8 +94,13 @@ comic_downloader download_vols <URL> <章节序号> [起始] [截止]
 | 选项 | 说明 |
 |------|------|
 | `-d`, `--debug` | 输出调试日志到终端 |
+| `-c <文件>`, `--config <文件>` | 指定运行配置文件，可覆盖启用源和源的 `browser_mode` |
 | `--overwrite` | 覆盖已存在的下载文件 |
 | `-h`, `--help` | 显示帮助 |
+
+运行配置示例见 `configs/runtime.sample.json`。配置中的 `sources.<源名>.enabled`
+会覆盖 `downloader/sources.py` 中的默认启用状态；`sources.<源名>.browser_mode`
+会覆盖单站点 `configs/*.json` 中的 `browser_mode`。
 
 ## 要求
 

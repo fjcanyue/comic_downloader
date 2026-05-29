@@ -190,6 +190,7 @@ class ComicSource(ABC):
     base_url: str = ''
     base_img_url: str = ''
     browser_mode: BrowserModeName = REQUESTS_MODE
+    _runtime_browser_mode_override: BrowserModeName | None = None
     browser_wait_selector: str | None = None
     browser_wait_seconds: float | None = None
     browser_headless: bool | None = None
@@ -207,6 +208,9 @@ class ComicSource(ABC):
 
     @classmethod
     def configured_browser_mode(cls) -> BrowserModeName:
+        runtime_mode = getattr(cls, '_runtime_browser_mode_override', None)
+        if runtime_mode:
+            return normalize_browser_mode(runtime_mode)
         config_mode = cls._configured_browser_mode_from_file()
         return normalize_browser_mode(config_mode or getattr(cls, 'browser_mode', REQUESTS_MODE))
 
@@ -319,6 +323,9 @@ class ComicSource(ABC):
         for key in SOURCE_CONFIG_ATTRIBUTE_KEYS:
             if key in self.config:
                 setattr(self, key, self.config[key])
+        runtime_mode = getattr(type(self), '_runtime_browser_mode_override', None)
+        if runtime_mode:
+            self.browser_mode = runtime_mode
         self.browser_mode = normalize_browser_mode(getattr(self, 'browser_mode', REQUESTS_MODE))
 
     @abstractmethod

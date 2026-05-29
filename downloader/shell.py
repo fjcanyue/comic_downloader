@@ -23,6 +23,7 @@ from urllib3.util.retry import Retry
 from downloader.browser_drivers import CloakBrowserDriver, SeleniumBaseDriver
 from downloader.browser_modes import CLOAKBROWSER_MODE, SELENIUMBASE_MODE, normalize_browser_mode
 from downloader.comic import Comic, ComicSource
+from downloader.runtime_config import RuntimeConfig
 from downloader.sources import load_source_classes
 
 FULL_VOLUME_ARG_COUNT = 1
@@ -166,12 +167,18 @@ class Shell(cmd.Cmd):
     prefix = '动漫下载器> '
     prompt = prefix
 
-    def __init__(self, output_path, overwrite=False):
+    def __init__(
+        self,
+        output_path,
+        overwrite=False,
+        runtime_config: RuntimeConfig | None = None,
+    ):
         super().__init__()
         self.console = Console()
         self.context = Context(self.console)
         self.context.create(output_path)
         self.overwrite = overwrite
+        self.runtime_config = runtime_config
         self.search_driver_lock = threading.Lock()
         self.current_source_name = None
 
@@ -192,7 +199,10 @@ class Shell(cmd.Cmd):
     def _discover_sources(self, include_deprecated: bool = False):
         """加载已声明的 ComicSource 实现。"""
         try:
-            return load_source_classes(include_deprecated=include_deprecated)
+            return load_source_classes(
+                include_deprecated=include_deprecated,
+                runtime_config=self.runtime_config,
+            )
         except Exception as e:
             self.console.print(f'Failed to load comic sources: {e}', style='bold red')
             return {}
