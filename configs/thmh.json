@@ -1,3 +1,18 @@
 {
+    "search_xpath": "//li[contains(@class,'list-comic')]",
+    "search_extract": {
+        "name": "./a/@title",
+        "url": "./a/@href",
+        "author": "./p[contains(@class,'auth')]/text()"
+    },
+    "info_name_xpath": "//div[contains(@class,'comic_deCon')]/h1",
+    "info_meta_xpath": "//ul[contains(@class,'comic_deCon_liO')]/li",
+    "info_books_xpath": "//div[contains(@class,'zj_list')]",
+    "info_book_name_xpath": "div[contains(@class,'zj_list_head')]/h2",
+    "info_vols_xpath": "div[contains(@class,'zj_list_con')]/ul/li",
+    "info_vol_extract": {
+        "name": "./a/span[contains(@class,'list_con_zj')]",
+        "url": "./a/@href"
+    },
     "imgs_js": "return typeof chapterImages !== \"undefined\" ? chapterImages : [];"
 }

@@ -17,6 +17,9 @@ class DumanwuComic(ComicSource):
     base_url = 'https://www.dumanwu.com'
     # base_img_url = 'http://imgpc.31mh.com/images/comic'
     download_interval = 5
+    page_load_wait_seconds = 5
+    scroll_wait_seconds = 3
+    max_scroll_attempts = 5
     download_requires_driver = True
     config_file = 'dumanwu.json'
     enable = True
@@ -292,9 +295,14 @@ class DumanwuComic(ComicSource):
         img_urls = []
         try:
             self.driver.get(url)
+            page_load_wait_seconds = self._page_load_wait_seconds_value(
+                default=self.download_interval
+            )
+            scroll_wait_seconds = self._scroll_wait_seconds_value(default=3)
+            max_attempts = self._max_scroll_attempts_value(default=5)
             self.logger.debug(
-                '页面加载完成, 等待 {download_interval} 秒以确保页面完全加载',
-                download_interval=self.download_interval,
+                '页面加载完成, 等待 {page_load_wait_seconds} 秒以确保页面完全加载',
+                page_load_wait_seconds=page_load_wait_seconds,
             )
 
             # 等待页面初始加载完成的标志，例如某个关键元素出现
@@ -302,14 +310,12 @@ class DumanwuComic(ComicSource):
             #     EC.presence_of_element_located((By.ID, "mhimg0")) # 假设第一张图片ID是mhimg0
             # )
             # 或者简单等待一段时间
-            sleep(self.download_interval)  # 使用配置的下载间隔作为初始等待
+            sleep(page_load_wait_seconds)
 
             last_height = self.driver.execute_script('return document.body.scrollHeight')
             self.logger.debug('初始页面高度: {last_height}', last_height=last_height)
 
             scroll_attempts = 0
-            max_attempts = 5  # 最大滚动尝试次数
-
             while scroll_attempts < max_attempts:
                 # 滚动到页面底部
                 self.driver.execute_script('window.scrollTo(0, document.body.scrollHeight);')
@@ -320,7 +326,7 @@ class DumanwuComic(ComicSource):
                 )
 
                 # 等待页面加载，增加等待时间
-                sleep(3)
+                sleep(scroll_wait_seconds)
 
                 # 检查懒加载的图片是否已加载
                 self.driver.execute_script("""
@@ -364,7 +370,7 @@ class DumanwuComic(ComicSource):
                     # 继续滚动即使等待超时
 
             # 最后等待确保图片加载完成
-            sleep(5)
+            sleep(page_load_wait_seconds)
 
             # 获取所有图片元素，使用更严格的筛选条件
             image_elements = [

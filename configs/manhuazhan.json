@@ -1,3 +1,12 @@
 {
+    "info_name_xpath": "//div[contains(@class,'d-name')]/div/h1",
+    "info_meta_xpath": "//div[contains(@class,'d-vod-type')]/p",
+    "info_books_xpath": "//div[contains(@class,'d-play-list')]",
+    "info_book_name_xpath": "div[contains(@class,'d-title')]/h2/text()",
+    "info_vols_xpath": "div[contains(@class,'d-play-box')]/div[contains(@class,'d-player-list')]/a",
+    "info_vol_extract": {
+        "name": "./text()",
+        "url": "./@href"
+    },
     "imgs_js": "return typeof newImgs !== \"undefined\" ? newImgs : [];"
 }

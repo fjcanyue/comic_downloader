@@ -1,0 +1,18 @@
+SOURCE_CONFIG_ATTRIBUTE_KEYS = (
+    'base_url',
+    'base_img_url',
+    'download_interval',
+    'image_request_interval',
+    'page_load_wait_seconds',
+    'scroll_wait_seconds',
+    'max_scroll_attempts',
+    'browser_mode',
+    'browser_wait_selector',
+    'browser_wait_seconds',
+    'browser_headless',
+    'seleniumbase_wait_selector',
+    'seleniumbase_wait_seconds',
+    'seleniumbase_headless',
+    'cloakbrowser_humanize',
+    'cloakbrowser_options',
+)

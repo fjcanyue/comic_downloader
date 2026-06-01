@@ -1,3 +1,6 @@
 {
+    "page_load_wait_seconds": 5,
+    "scroll_wait_seconds": 3,
+    "max_scroll_attempts": 5,
     "imgs_js": null
 }

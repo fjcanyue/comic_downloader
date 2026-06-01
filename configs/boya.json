@@ -1,5 +1,10 @@
 {
     "search_xpath": "//ul[contains(@class,'cartoon-block-box')]/li",
+    "search_extract": {
+        "name": "./div/div/p/a",
+        "url": "./div/a/@href",
+        "author": "./div/a/span"
+    },
     "info_name_xpath": "//div[contains(@class,'article-info-item')]/h1",
     "info_meta_xpath": "//div[contains(@class,'info-item-bottom')]/p",
     "info_books_xpath": "//div[contains(@class,'article-chapter-list')]",
