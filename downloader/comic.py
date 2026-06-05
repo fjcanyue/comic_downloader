@@ -34,6 +34,11 @@ from downloader.models import (
     filter_dir_name,
 )
 from downloader.source_config import SOURCE_CONFIG_ATTRIBUTE_KEYS
+from downloader.source_profiles import (
+    PROFILE_MIRROR_ATTRIBUTE_KEYS,
+    SourceProfile,
+    mutable_site_config,
+)
 
 __all__ = [
     'Comic',
@@ -57,7 +62,6 @@ class ComicSource(ImageDownloadMixin, ArchiveMixin, HtmlParsingMixin, ABC):
     base_url: str = ''
     base_img_url: str = ''
     browser_mode: BrowserModeName = REQUESTS_MODE
-    _runtime_browser_mode_override: BrowserModeName | None = None
     browser_wait_selector: str | None = None
     browser_wait_seconds: float | None = None
     browser_headless: bool | None = None
@@ -79,9 +83,6 @@ class ComicSource(ImageDownloadMixin, ArchiveMixin, HtmlParsingMixin, ABC):
 
     @classmethod
     def configured_browser_mode(cls) -> BrowserModeName:
-        runtime_mode = getattr(cls, '_runtime_browser_mode_override', None)
-        if runtime_mode:
-            return normalize_browser_mode(runtime_mode)
         config_mode = cls._configured_browser_mode_from_file()
         return normalize_browser_mode(config_mode or getattr(cls, 'browser_mode', REQUESTS_MODE))
 
@@ -136,7 +137,13 @@ class ComicSource(ImageDownloadMixin, ArchiveMixin, HtmlParsingMixin, ABC):
         return max(1, int(configured))
 
     def __init__(
-        self, output_dir: str, http: requests.Session, driver: Any, overwrite: bool = True
+        self,
+        output_dir: str,
+        http: requests.Session,
+        driver: Any,
+        overwrite: bool = True,
+        *,
+        profile: SourceProfile | None = None,
     ) -> None:
         """动漫源构造函数
 
@@ -154,18 +161,27 @@ class ComicSource(ImageDownloadMixin, ArchiveMixin, HtmlParsingMixin, ABC):
         """Selenium 网页驱动对象"""
         self.overwrite: bool = overwrite
         """是否覆盖已存在的文件"""
+        self.profile: SourceProfile | None = profile
 
         self.parser: etree.HTMLParser = etree.HTMLParser()
         self.logger = logger
 
         # Load configuration if config_file is specified
-        if hasattr(self, 'config_file') and self.config_file:
+        if profile is not None:
+            self.config = mutable_site_config(profile)
+            self._apply_source_profile(profile)
+        elif hasattr(self, 'config_file') and self.config_file:
             self.load_config()
         elif hasattr(self, 'config') and self.config:
             # Already has config (maybe hardcoded), do nothing or validate
             pass
         else:
             self.config = {}
+
+    def _apply_source_profile(self, profile: SourceProfile) -> None:
+        for key in PROFILE_MIRROR_ATTRIBUTE_KEYS:
+            setattr(self, key, getattr(profile, key))
+        self.browser_mode = normalize_browser_mode(profile.browser_mode)
 
     def load_config(self):
         """Load configuration from the configs directory."""
@@ -212,9 +228,6 @@ class ComicSource(ImageDownloadMixin, ArchiveMixin, HtmlParsingMixin, ABC):
         for key in SOURCE_CONFIG_ATTRIBUTE_KEYS:
             if key in self.config:
                 setattr(self, key, self.config[key])
-        runtime_mode = getattr(type(self), '_runtime_browser_mode_override', None)
-        if runtime_mode:
-            self.browser_mode = runtime_mode
         self.browser_mode = normalize_browser_mode(getattr(self, 'browser_mode', REQUESTS_MODE))
 
     @abstractmethod

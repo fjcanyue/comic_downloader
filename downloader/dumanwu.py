@@ -24,8 +24,8 @@ class DumanwuComic(ComicSource):
     config_file = 'dumanwu.json'
     enable = True
 
-    def __init__(self, output_dir, http, driver, overwrite=True):
-        super().__init__(output_dir, http, driver, overwrite)
+    def __init__(self, output_dir, http, driver, overwrite=True, *, profile=None):
+        super().__init__(output_dir, http, driver, overwrite, profile=profile)
 
     def search(self, keyword):
         self.logger.info(

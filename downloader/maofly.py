@@ -21,8 +21,8 @@ class MaoflyComic(ComicSource):
     config_file = 'maofly.json'
     enable = False
 
-    def __init__(self, output_dir, http, driver, overwrite=True):
-        super().__init__(output_dir, http, driver, overwrite)
+    def __init__(self, output_dir, http, driver, overwrite=True, *, profile=None):
+        super().__init__(output_dir, http, driver, overwrite, profile=profile)
         js_url = f'{self.base_url}/static/js/string.min.js'
         try:
             logger.info('正在为 {} 初始化JS解码器...', self.name)

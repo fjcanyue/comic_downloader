@@ -28,8 +28,8 @@ class ManhuafreeComic(ComicSource):
     config_file = 'manhuafree.json'
     enable = True
 
-    def __init__(self, output_dir, http, driver, overwrite=True):
-        super().__init__(output_dir, http, driver, overwrite)
+    def __init__(self, output_dir, http, driver, overwrite=True, *, profile=None):
+        super().__init__(output_dir, http, driver, overwrite, profile=profile)
 
     def _api_get(self, path, params=None):
         """调用 API 并返回 JSON 数据，失败返回 None"""

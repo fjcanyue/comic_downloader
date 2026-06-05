@@ -19,6 +19,7 @@ from downloader import (
 from downloader.browser_modes import CLOAKBROWSER_MODE, REQUESTS_MODE, SELENIUMBASE_MODE
 from downloader.comic import ComicSource
 from downloader.morui import MoruiComic
+from downloader.source_profiles import SourceProfile
 
 
 class DummyHttp:
@@ -356,6 +357,47 @@ def test_requests_html_block_status_switches_to_seleniumbase(monkeypatch, tmp_pa
     assert source.browser_mode == REQUESTS_MODE
     assert source.last_page_load_result.browser_mode == SELENIUMBASE_MODE
     assert fake_sb.activated_url == 'https://example.test/search'
+    assert fake_sb.cdp.find_calls == [('.page-main', 5.0)]
+    assert root is not None
+    assert root.xpath('string(//h1)') == 'Fallback'
+
+
+def test_profiled_parse_html_uses_profile_base_url_and_keeps_fallback_non_sticky(
+    monkeypatch, tmp_path
+):
+    html = '<html><body><main class="page-main"><h1>Fallback</h1></main></body></html>'
+    fake_sb = FakeSeleniumBase(html)
+
+    def fake_context(self):
+        return fake_sb
+
+    monkeypatch.setattr(BrowserHtmlSource, '_seleniumbase_context', fake_context)
+
+    http = StatusHttp(403)
+    profile = SourceProfile(
+        source_name='browser-html',
+        class_name='BrowserHtmlSource',
+        enabled=True,
+        deprecated=False,
+        base_url='https://profile.example',
+        browser_mode=REQUESTS_MODE,
+        browser_wait_selector='.page-main',
+        browser_wait_seconds=5.0,
+    )
+    source = BrowserHtmlSource(str(tmp_path), cast(Any, http), None, profile=profile)
+
+    root = source.__parse_html__('https://example.test/search')
+
+    assert http.get_calls == [
+        (
+            'https://example.test/search',
+            {'timeout': 30, 'headers': {'referer': 'https://profile.example'}},
+        )
+    ]
+    assert source.profile is profile
+    assert profile.browser_mode == REQUESTS_MODE
+    assert source.browser_mode == REQUESTS_MODE
+    assert source.last_page_load_result.browser_mode == SELENIUMBASE_MODE
     assert fake_sb.cdp.find_calls == [('.page-main', 5.0)]
     assert root is not None
     assert root.xpath('string(//h1)') == 'Fallback'

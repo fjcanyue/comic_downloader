@@ -37,7 +37,7 @@ class ImageDownloadMixin:
         os.makedirs(path, exist_ok=True)
         context = ImageDownloadContext(
             path=path,
-            use_base_img_url=bool(getattr(self, 'base_img_url', '')),
+            use_base_img_url=bool(self._source_base_img_url()),
             session_factory=self._create_image_http_session,
         )
         failed_images = self._run_image_downloads(context, imgs, progress, vol_name)
@@ -51,7 +51,7 @@ class ImageDownloadMixin:
         vol_name: str,
     ) -> list[ImageDownloadFailure]:
         failed_images: list[ImageDownloadFailure] = []
-        max_workers = max(1, min(getattr(self, 'max_download_workers', 5), len(imgs)))
+        max_workers = max(1, min(self._source_max_download_workers(), len(imgs)))
         task_id = (
             progress.add_task(description=f'  [cyan]{vol_name}', total=len(imgs))
             if progress
@@ -127,8 +127,8 @@ class ImageDownloadMixin:
         )
         adapter = HTTPAdapter(
             max_retries=retry_strategy,
-            pool_connections=max(1, int(getattr(self, 'max_download_workers', 5))),
-            pool_maxsize=max(1, int(getattr(self, 'max_download_workers', 5))),
+            pool_connections=self._source_max_download_workers(),
+            pool_maxsize=self._source_max_download_workers(),
         )
         session = requests.Session()
         source_headers = getattr(self.http, 'headers', None)
@@ -170,7 +170,7 @@ class ImageDownloadMixin:
         file_path = os.path.join(context.path, f'{index + 1:04d}.jpg')
         tmp_path = file_path + '.tmp'
         full_img_url = self._build_image_url(img_url_part, context.use_base_img_url)
-        retry_count = getattr(self, 'image_retry_count', 1)
+        retry_count = int(self._source_profile_value('image_retry_count', 1) or 1)
         last_error = ''
 
         self._raise_if_image_download_cancelled(context)
@@ -208,8 +208,23 @@ class ImageDownloadMixin:
 
     def _build_image_url(self, img_url_part: str, use_base_img_url: bool) -> str:
         if use_base_img_url and not img_url_part.startswith('http'):
-            return urljoin(self.base_img_url.rstrip('/') + '/', img_url_part)
+            return urljoin(self._source_base_img_url().rstrip('/') + '/', img_url_part)
         return img_url_part
+
+    def _source_profile_value(self, key: str, default=None):
+        profile = getattr(self, 'profile', None)
+        if profile is not None:
+            return getattr(profile, key)
+        return getattr(self, key, default)
+
+    def _source_base_url(self) -> str:
+        return str(self._source_profile_value('base_url', ''))
+
+    def _source_base_img_url(self) -> str:
+        return str(self._source_profile_value('base_img_url', ''))
+
+    def _source_max_download_workers(self) -> int:
+        return max(1, int(self._source_profile_value('max_download_workers', 5) or 5))
 
     def _wait_for_download_slot(self, context: ImageDownloadContext) -> None:
         self._raise_if_image_download_cancelled(context)
@@ -231,7 +246,7 @@ class ImageDownloadMixin:
             context.rate_lock.release()
 
     def _request_image(self, full_img_url: str, context: ImageDownloadContext):
-        headers = {'referer': self.base_url}
+        headers = {'referer': self._source_base_url()}
         self._raise_if_image_download_cancelled(context)
         session = self._image_http_session(context)
         self._raise_if_image_download_cancelled(context)
@@ -252,7 +267,7 @@ class ImageDownloadMixin:
         self._acquire_download_lock(context.http_lock, context)
         try:
             self._raise_if_image_download_cancelled(context)
-            download_to_file(full_img_url, tmp_path, referer=self.base_url)
+            download_to_file(full_img_url, tmp_path, referer=self._source_base_url())
         finally:
             context.http_lock.release()
         self._raise_if_image_download_cancelled(context)
@@ -300,7 +315,7 @@ class ImageDownloadMixin:
             logger.warning('清理临时文件失败: {}', tmp_path, exc_info=True)
 
     def _image_request_interval_seconds(self) -> float:
-        configured = getattr(self, 'image_request_interval', None)
+        configured = self._source_profile_value('image_request_interval', None)
         if configured is None:
-            configured = getattr(self, 'download_interval', 0)
+            configured = self._source_profile_value('download_interval', 0)
         return float(configured or 0)

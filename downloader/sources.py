@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from downloader.comic import ComicSource
 from downloader.runtime_config import RuntimeConfig
+from downloader.source_profiles import SourceBinding, resolve_source_profile, source_is_enabled
 
 
 @dataclass(frozen=True)
@@ -36,45 +37,46 @@ def get_source_definitions(
     return [
         definition
         for definition in SOURCE_DEFINITIONS
-        if _source_is_enabled(definition, include_deprecated, runtime_config)
+        if source_is_enabled(definition, include_deprecated, runtime_config)
     ]
+
+
+def load_source_bindings(
+    include_deprecated: bool = False, runtime_config: RuntimeConfig | None = None
+) -> dict[str, SourceBinding]:
+    validate_runtime_config_sources(runtime_config)
+    bindings: dict[str, SourceBinding] = {}
+    for definition in SOURCE_DEFINITIONS:
+        module = importlib.import_module(f'downloader.{definition.module_name}')
+        source_class = getattr(module, definition.class_name)
+        if not issubclass(source_class, ComicSource):
+            raise TypeError(f'{definition.class_name} is not a ComicSource')
+        profile = resolve_source_profile(
+            definition,
+            source_class,
+            include_deprecated=include_deprecated,
+            runtime_config=runtime_config,
+        )
+        if not profile.enabled:
+            continue
+        bindings[definition.module_name] = SourceBinding(
+            source_name=definition.module_name,
+            source_class=source_class,
+            profile=profile,
+        )
+    return bindings
 
 
 def load_source_classes(
     include_deprecated: bool = False, runtime_config: RuntimeConfig | None = None
 ) -> dict[str, type[ComicSource]]:
-    sources: dict[str, type[ComicSource]] = {}
-    for definition in get_source_definitions(
-        include_deprecated=include_deprecated, runtime_config=runtime_config
-    ):
-        module = importlib.import_module(f'downloader.{definition.module_name}')
-        source_class = getattr(module, definition.class_name)
-        if not issubclass(source_class, ComicSource):
-            raise TypeError(f'{definition.class_name} is not a ComicSource')
-        _apply_runtime_source_config(source_class, definition.module_name, runtime_config)
-        sources[definition.module_name] = source_class
-    return sources
-
-
-def _source_is_enabled(
-    definition: SourceDefinition,
-    include_deprecated: bool,
-    runtime_config: RuntimeConfig | None,
-) -> bool:
-    if runtime_config:
-        enabled = runtime_config.enabled_override(definition.module_name)
-        if enabled is not None:
-            return enabled
-    return definition.enabled and (include_deprecated or not definition.deprecated)
-
-
-def _apply_runtime_source_config(
-    source_class: type[ComicSource],
-    source_name: str,
-    runtime_config: RuntimeConfig | None,
-) -> None:
-    browser_mode = runtime_config.browser_mode_override(source_name) if runtime_config else None
-    source_class._runtime_browser_mode_override = browser_mode
+    return {
+        source_name: binding.source_class
+        for source_name, binding in load_source_bindings(
+            include_deprecated=include_deprecated,
+            runtime_config=runtime_config,
+        ).items()
+    }
 
 
 def validate_runtime_config_sources(runtime_config: RuntimeConfig | None) -> None:

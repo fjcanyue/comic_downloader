@@ -129,19 +129,35 @@ class HtmlParsingMixin:
             return fallback
 
     def _source_browser_mode(self) -> BrowserModeName:
-        return normalize_browser_mode(getattr(self, 'browser_mode', REQUESTS_MODE))
+        return normalize_browser_mode(self._source_profile_value('browser_mode', REQUESTS_MODE))
+
+    def _source_profile_value(self, key: str, default: Any = None) -> Any:
+        profile = getattr(self, 'profile', None)
+        if profile is not None:
+            return getattr(profile, key)
+        return getattr(self, key, default)
+
+    def _source_base_url(self) -> str:
+        return str(self._source_profile_value('base_url', ''))
 
     def _browser_wait_selector(self) -> str | None:
-        return self.browser_wait_selector or self.seleniumbase_wait_selector
+        return self._source_profile_value(
+            'browser_wait_selector', None
+        ) or self._source_profile_value('seleniumbase_wait_selector', None)
 
     def _browser_wait_seconds(self) -> float:
-        return float(self.browser_wait_seconds or self.seleniumbase_wait_seconds or 0)
+        wait_seconds = self._source_profile_value('browser_wait_seconds', None)
+        if wait_seconds is None:
+            wait_seconds = self._source_profile_value('seleniumbase_wait_seconds', 0)
+        return float(wait_seconds or 0)
 
     def _browser_headless(self, default: bool = True) -> bool:
-        if self.browser_headless is not None:
-            return bool(self.browser_headless)
-        if self.seleniumbase_headless is not None:
-            return bool(self.seleniumbase_headless)
+        browser_headless = self._source_profile_value('browser_headless', None)
+        if browser_headless is not None:
+            return bool(browser_headless)
+        seleniumbase_headless = self._source_profile_value('seleniumbase_headless', None)
+        if seleniumbase_headless is not None:
+            return bool(seleniumbase_headless)
         return default
 
     def _seleniumbase_context(self):
@@ -559,7 +575,7 @@ class HtmlParsingMixin:
         return None
 
     def _parse_html_with_requests(self, url, method, data, encoding, headers):
-        request_headers = {'referer': self.base_url}
+        request_headers = {'referer': self._source_base_url()}
         if headers:
             request_headers.update(headers)
 
@@ -607,9 +623,8 @@ class HtmlParsingMixin:
             return None
 
     def _switch_requests_html_to_seleniumbase(self, url, method, status_code: int):
-        self.browser_mode = SELENIUMBASE_MODE
         logger.warning(
-            'Requests mode returned HTTP {}; switching source to SeleniumBase mode: {}',
+            'Requests mode returned HTTP {}; retrying with temporary SeleniumBase mode: {}',
             status_code,
             url,
         )
@@ -643,7 +658,7 @@ class HtmlParsingMixin:
 
         request = PageLoadRequest(
             url=url,
-            base_url=self.base_url,
+            base_url=self._source_base_url(),
             browser_mode=options.browser_mode,
             method=options.http_method,
             data=data,

@@ -4,7 +4,7 @@ import pytest
 import requests
 
 from downloader.runtime_config import RuntimeConfig, SourceRuntimeConfig
-from downloader.sources import load_source_classes
+from downloader.sources import load_source_bindings, load_source_classes
 
 
 def test_default_sources_include_cloakbrowser_morui():
@@ -35,17 +35,52 @@ def test_runtime_config_overrides_enabled_sources():
     assert 'morui' not in sources
 
 
-def test_runtime_config_browser_mode_overrides_site_config(tmp_path):
+def test_runtime_config_browser_mode_overrides_profile_without_mutating_class(tmp_path):
     runtime_config = RuntimeConfig(
         sources={'morui': SourceRuntimeConfig(browser_mode='requests')}
     )
 
-    sources = load_source_classes(runtime_config=runtime_config)
-    source_class = sources['morui']
-    source = source_class(str(tmp_path), requests.Session(), None)
+    bindings = load_source_bindings(runtime_config=runtime_config)
+    binding = bindings['morui']
+    source = binding.source_class(
+        str(tmp_path),
+        requests.Session(),
+        None,
+        profile=binding.profile,
+    )
 
-    assert source_class.configured_browser_mode() == 'requests'
+    assert binding.profile.browser_mode == 'requests'
+    assert binding.source_class.configured_browser_mode() == 'seleniumbase'
+    assert binding.source_class.browser_mode == 'cloakbrowser'
     assert source.browser_mode == 'requests'
+
+
+def test_load_source_classes_does_not_leak_runtime_browser_mode():
+    runtime_config = RuntimeConfig(
+        sources={'morui': SourceRuntimeConfig(browser_mode='requests')}
+    )
+
+    load_source_classes(runtime_config=runtime_config)
+    default_sources = load_source_classes()
+
+    assert default_sources['morui'].configured_browser_mode() == 'seleniumbase'
+
+
+def test_profiled_source_keeps_parser_config_and_mirrors_profile(tmp_path):
+    bindings = load_source_bindings()
+    binding = bindings['morui']
+
+    source = binding.source_class(
+        str(tmp_path),
+        requests.Session(),
+        None,
+        profile=binding.profile,
+    )
+
+    assert source.profile is binding.profile
+    assert source.browser_mode == binding.profile.browser_mode
+    assert source.base_url == binding.profile.base_url
+    assert source.config['search_xpath'] == "//li[contains(@class,'item-lg')]"
 
 
 def test_runtime_config_rejects_unknown_sources():

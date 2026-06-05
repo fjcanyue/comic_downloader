@@ -24,7 +24,8 @@ from downloader.browser_drivers import CloakBrowserDriver, SeleniumBaseDriver
 from downloader.browser_modes import CLOAKBROWSER_MODE, SELENIUMBASE_MODE, normalize_browser_mode
 from downloader.comic import Comic, ComicSource
 from downloader.runtime_config import RuntimeConfig
-from downloader.sources import load_source_classes
+from downloader.source_profiles import SourceBinding, SourceProfile
+from downloader.sources import load_source_bindings
 
 FULL_VOLUME_ARG_COUNT = 1
 VOLUME_TO_ARG_COUNT = 2
@@ -64,6 +65,7 @@ def parse_volume_slice(args: list[str], book_count: int, vol_count: int) -> tupl
 class SearchTask:
     source_name: str
     source_class: type[ComicSource]
+    profile: SourceProfile
     search_func: Callable[[str], list]
     uses_driver: bool
     display_name: str
@@ -183,9 +185,17 @@ class Shell(cmd.Cmd):
         self.current_source_name = None
 
         # 默认源排除 deprecated 站点；完整源用于直接 URL 匹配。
-        self.all_source_map = self._discover_sources(include_deprecated=True)
-        self.source_map = self._discover_sources()
-        self.source_options = list(self.source_map.keys())  # 存储源名称列表，方便按索引访问
+        self.all_source_bindings = self._discover_source_bindings(include_deprecated=True)
+        self.source_bindings = self._discover_source_bindings()
+        self.all_source_map = {
+            source_name: binding.source_class
+            for source_name, binding in self.all_source_bindings.items()
+        }
+        self.source_map = {
+            source_name: binding.source_class
+            for source_name, binding in self.source_bindings.items()
+        }
+        self.source_options = list(self.source_bindings.keys())  # 存储源名称列表，方便按索引访问
         self.sources = {}
 
     def _read_prompt_line(self, prompt: str) -> str:
@@ -196,10 +206,10 @@ class Shell(cmd.Cmd):
             raise EOFError
         return line.rstrip('\r\n')
 
-    def _discover_sources(self, include_deprecated: bool = False):
+    def _discover_source_bindings(self, include_deprecated: bool = False):
         """加载已声明的 ComicSource 实现。"""
         try:
-            return load_source_classes(
+            return load_source_bindings(
                 include_deprecated=include_deprecated,
                 runtime_config=self.runtime_config,
             )
@@ -208,7 +218,7 @@ class Shell(cmd.Cmd):
             return {}
 
     def _ensure_driver(
-        self, source_or_class: ComicSource | type[ComicSource] | None = None
+        self, source_or_class: SourceProfile | ComicSource | type[ComicSource] | None = None
     ) -> bool:
         """按需初始化当前漫画源需要的浏览器驱动。"""
         target = source_or_class or self.context.source
@@ -222,7 +232,13 @@ class Shell(cmd.Cmd):
         if self.context.source is None:
             self.console.print('当前没有选中的动漫源！')
             return False
-        if not self.context.source.uses_driver_for_download():
+        profile = getattr(self.context.source, 'profile', None)
+        uses_driver = (
+            profile.uses_driver_for_download()
+            if isinstance(profile, SourceProfile)
+            else self.context.source.uses_driver_for_download()
+        )
+        if not uses_driver:
             return True
         if self._ensure_driver(self.context.source):
             self.context.source.driver = self.context.driver
@@ -243,8 +259,9 @@ class Shell(cmd.Cmd):
         return False
 
     def _match_source_for_url(self, url: str) -> str | None:
-        for source_name, source_class in self.all_source_map.items():
-            if hasattr(source_class, 'base_url') and url.startswith(source_class.base_url):
+        for source_name, binding in self.all_source_bindings.items():
+            base_url = binding.profile.base_url
+            if base_url and url.startswith(base_url):
                 return source_name
         return None
 
@@ -283,31 +300,36 @@ class Shell(cmd.Cmd):
         self.console.print(f'正在切换到{source_name}动漫下载网站源...')
 
         if source_name not in self.sources:
-            source_class = self.source_map.get(source_name) or self.all_source_map[source_name]
+            binding = self.source_bindings.get(source_name) or self.all_source_bindings[source_name]
+            source_class = binding.source_class
             self.sources[source_name] = source_class(
                 self.context.output_path,
                 self.context.http,
-                self.context.get_driver(source_class),
+                self.context.get_driver(binding.profile),
                 overwrite=self.overwrite,
+                profile=binding.profile,
             )
 
         self.context.source = self.sources[source_name]
         self.current_source_name = source_name
         # self.prompt = self.prefix + self.context.source.name + '> '
 
-    def _build_search_func(self, source_class, uses_driver: bool) -> Callable[[str], list]:
+    def _build_search_func(
+        self, binding: SourceBinding, uses_driver: bool
+    ) -> Callable[[str], list]:
         def _search(keyword: str) -> list:
             driver = None
             if uses_driver:
-                if not self.context.ensure_driver(source_class):
-                    raise RuntimeError('浏览器驱动未初始化')
+                if not self.context.ensure_driver(binding.profile):
+                    raise RuntimeError('Browser driver was not initialized')
                 driver = self.context.driver
             http = self.context.create_http_session()
-            source = source_class(
+            source = binding.source_class(
                 self.context.output_path,
                 http,
                 driver,
                 overwrite=self.overwrite,
+                profile=binding.profile,
             )
             return source.search(keyword)
 
@@ -316,13 +338,15 @@ class Shell(cmd.Cmd):
     def _build_search_tasks(self) -> list[SearchTask]:
         tasks = []
         for source_name in self.source_options:
-            source_class = self.source_map[source_name]
-            uses_driver = source_class.uses_driver_for_search()
+            binding = self.source_bindings[source_name]
+            source_class = binding.source_class
+            uses_driver = binding.profile.uses_driver_for_search()
             tasks.append(
                 SearchTask(
                     source_name=source_name,
                     source_class=source_class,
-                    search_func=self._build_search_func(source_class, uses_driver),
+                    profile=binding.profile,
+                    search_func=self._build_search_func(binding, uses_driver),
                     uses_driver=uses_driver,
                     display_name=getattr(source_class, 'name', source_name),
                 )
@@ -332,8 +356,9 @@ class Shell(cmd.Cmd):
                 self.sources[source_name] = source_class(
                     self.context.output_path,
                     self.context.http,
-                    self.context.get_driver(source_class),
+                    self.context.get_driver(binding.profile),
                     overwrite=self.overwrite,
+                    profile=binding.profile,
                 )
         return tasks
 
@@ -341,7 +366,7 @@ class Shell(cmd.Cmd):
         ready_tasks = []
         skipped_sources = set()
         for task in tasks:
-            if not task.uses_driver or self.context.ensure_driver(task.source_class):
+            if not task.uses_driver or self.context.ensure_driver(task.profile):
                 ready_tasks.append(task)
             else:
                 skipped_sources.add(task.source_name)
@@ -699,7 +724,9 @@ class Context:
         http.mount('http://', adapter)
         return http
 
-    def ensure_driver(self, source_or_class: ComicSource | type[ComicSource] | None = None) -> bool:
+    def ensure_driver(
+        self, source_or_class: SourceProfile | ComicSource | type[ComicSource] | None = None
+    ) -> bool:
         cache_key = self._driver_cache_key(source_or_class)
         driver = self.drivers.get(cache_key)
         if driver:
@@ -712,10 +739,14 @@ class Context:
         self.drivers[cache_key] = self.driver
         return True
 
-    def get_driver(self, source_or_class: ComicSource | type[ComicSource] | None = None):
+    def get_driver(
+        self, source_or_class: SourceProfile | ComicSource | type[ComicSource] | None = None
+    ):
         return self.drivers.get(self._driver_cache_key(source_or_class))
 
-    def init_driver(self, source_or_class: ComicSource | type[ComicSource] | None = None) -> bool:
+    def init_driver(
+        self, source_or_class: SourceProfile | ComicSource | type[ComicSource] | None = None
+    ) -> bool:
         """Initialize a browser driver for the source's configured browser mode."""
         driver_mode = self._driver_mode_for_source(source_or_class)
         if driver_mode == CLOAKBROWSER_MODE:
@@ -759,7 +790,7 @@ class Context:
             return False
 
     def _try_init_cloakbrowser_driver(
-        self, source_or_class: ComicSource | type[ComicSource] | None
+        self, source_or_class: SourceProfile | ComicSource | type[ComicSource] | None
     ) -> bool:
         try:
             self.driver = CloakBrowserDriver(
@@ -776,7 +807,7 @@ class Context:
             return False
 
     def _try_init_seleniumbase_driver(
-        self, source_or_class: ComicSource | type[ComicSource] | None
+        self, source_or_class: SourceProfile | ComicSource | type[ComicSource] | None
     ) -> bool:
         try:
             self.driver = SeleniumBaseDriver(
@@ -791,7 +822,7 @@ class Context:
             return False
 
     def _driver_cache_key(
-        self, source_or_class: ComicSource | type[ComicSource] | None = None
+        self, source_or_class: SourceProfile | ComicSource | type[ComicSource] | None = None
     ) -> tuple[str, bool]:
         driver_mode = self._driver_mode_for_source(source_or_class)
         if driver_mode in {CLOAKBROWSER_MODE, SELENIUMBASE_MODE}:
@@ -799,9 +830,12 @@ class Context:
         return (driver_mode, True)
 
     def _driver_mode_for_source(
-        self, source_or_class: ComicSource | type[ComicSource] | None = None
+        self, source_or_class: SourceProfile | ComicSource | type[ComicSource] | None = None
     ) -> str:
-        if isinstance(source_or_class, type) and issubclass(source_or_class, ComicSource):
+        profile = self._profile_for_source(source_or_class)
+        if profile is not None:
+            browser_mode = profile.browser_mode
+        elif isinstance(source_or_class, type) and issubclass(source_or_class, ComicSource):
             browser_mode = source_or_class.configured_browser_mode()
         elif isinstance(source_or_class, ComicSource):
             browser_mode = source_or_class._source_browser_mode()
@@ -811,9 +845,24 @@ class Context:
             return browser_mode
         return 'selenium'
 
+    def _profile_for_source(
+        self, source_or_class: SourceProfile | ComicSource | type[ComicSource] | None
+    ) -> SourceProfile | None:
+        if isinstance(source_or_class, SourceProfile):
+            return source_or_class
+        profile = getattr(source_or_class, 'profile', None)
+        return profile if isinstance(profile, SourceProfile) else None
+
     def _source_browser_headless(
-        self, source_or_class: ComicSource | type[ComicSource] | None = None
+        self, source_or_class: SourceProfile | ComicSource | type[ComicSource] | None = None
     ) -> bool:
+        profile = self._profile_for_source(source_or_class)
+        if profile is not None:
+            if profile.browser_headless is not None:
+                return bool(profile.browser_headless)
+            if profile.seleniumbase_headless is not None:
+                return bool(profile.seleniumbase_headless)
+            return True
         browser_headless = getattr(source_or_class, 'browser_headless', None)
         if browser_headless is not None:
             return bool(browser_headless)
@@ -823,21 +872,34 @@ class Context:
         return True
 
     def _source_browser_wait_seconds(
-        self, source_or_class: ComicSource | type[ComicSource] | None = None
+        self, source_or_class: SourceProfile | ComicSource | type[ComicSource] | None = None
     ) -> float:
+        profile = self._profile_for_source(source_or_class)
+        if profile is not None:
+            wait_seconds = profile.browser_wait_seconds
+            if wait_seconds is None:
+                wait_seconds = profile.seleniumbase_wait_seconds
+            return float(30.0 if wait_seconds is None else wait_seconds)
         wait_seconds = getattr(source_or_class, 'browser_wait_seconds', None)
         if wait_seconds is None:
             wait_seconds = getattr(source_or_class, 'seleniumbase_wait_seconds', 30.0)
         return float(30.0 if wait_seconds is None else wait_seconds)
 
     def _source_cloakbrowser_humanize(
-        self, source_or_class: ComicSource | type[ComicSource] | None = None
+        self, source_or_class: SourceProfile | ComicSource | type[ComicSource] | None = None
     ) -> bool:
+        profile = self._profile_for_source(source_or_class)
+        if profile is not None:
+            return bool(profile.cloakbrowser_humanize)
         return bool(getattr(source_or_class, 'cloakbrowser_humanize', True))
 
     def _source_cloakbrowser_options(
-        self, source_or_class: ComicSource | type[ComicSource] | None = None
+        self, source_or_class: SourceProfile | ComicSource | type[ComicSource] | None = None
     ) -> dict[str, Any] | None:
+        profile = self._profile_for_source(source_or_class)
+        if profile is not None:
+            options = profile.cloakbrowser_options
+            return dict(options) if isinstance(options, dict) else None
         options = getattr(source_or_class, 'cloakbrowser_options', None)
         return dict(options) if isinstance(options, dict) else None
 

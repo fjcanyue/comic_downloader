@@ -7,7 +7,9 @@ from requests.adapters import HTTPAdapter
 from rich.console import Console
 
 from downloader.comic import ComicSource
+from downloader.runtime_config import RuntimeConfig, SourceRuntimeConfig
 from downloader.shell import Context, Shell
+from downloader.source_profiles import SourceProfile
 
 
 def quiet_console() -> Console:
@@ -129,6 +131,21 @@ def test_context_initializes_seleniumbase_for_seleniumbase_mode(monkeypatch, tmp
     assert calls == [SeleniumBaseBackedSource]
 
 
+def test_context_driver_mode_uses_profile_browser_mode(tmp_path):
+    profile = SourceProfile(
+        source_name='profiled',
+        class_name='ProfiledSource',
+        enabled=True,
+        deprecated=False,
+        browser_mode='cloakbrowser',
+        browser_headless=False,
+    )
+    context = Context(quiet_console())
+    context.create(str(tmp_path))
+
+    assert context._driver_cache_key(profile) == ('cloakbrowser', False)
+
+
 def test_shell_uses_plain_stdin_for_interactive_prompt():
     assert Shell.use_rawinput is False
 
@@ -167,6 +184,22 @@ def test_shell_attaches_lazy_driver_to_current_source(monkeypatch, tmp_path):
     try:
         assert shell._ensure_source_download_ready() is True
         assert source.driver is driver
+    finally:
+        shell.context.destroy()
+
+
+def test_shell_source_instances_receive_profiles(tmp_path):
+    runtime_config = RuntimeConfig(
+        sources={'morui': SourceRuntimeConfig(browser_mode='requests')}
+    )
+    shell = Shell(str(tmp_path), runtime_config=runtime_config)
+    try:
+        cast(Any, shell)._Shell__switch_source('morui')
+        source = shell.sources['morui']
+
+        assert source.profile is not None
+        assert source.profile.browser_mode == 'requests'
+        assert source.browser_mode == 'requests'
     finally:
         shell.context.destroy()
 
