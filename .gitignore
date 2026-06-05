@@ -18,6 +18,9 @@ site/
 .nox
 .cache
 .pytest_cache/
+.pytest-agent-tmp/
+.pytest-tmp-run/
+.agent-test-temp/
 .coverage
 htmlcov/
 
