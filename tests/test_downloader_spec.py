@@ -4,7 +4,7 @@ import runpy
 import site
 from importlib import machinery
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from PyInstaller.utils import hooks
 
@@ -24,12 +24,12 @@ def test_pyinstaller_spec_collects_dynamic_runtime_dependencies(monkeypatch, tmp
         return collected_modules.get(package, [])
 
     class FakeAnalysis:
-        pure: list[Any] = []
-        zipped_data: list[Any] = []
-        scripts: list[Any] = []
-        binaries: list[Any] = []
-        zipfiles: list[Any] = []
-        datas: list[Any] = []
+        pure: ClassVar[list[Any]] = []
+        zipped_data: ClassVar[list[Any]] = []
+        scripts: ClassVar[list[Any]] = []
+        binaries: ClassVar[list[Any]] = []
+        zipfiles: ClassVar[list[Any]] = []
+        datas: ClassVar[list[Any]] = []
 
     def fake_analysis(*args, **kwargs):
         analysis_kwargs.update(kwargs)

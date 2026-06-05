@@ -11,7 +11,11 @@ import requests
 from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
 from seleniumbase.core import browser_launcher
 
-from downloader import browser_drivers, comic as comic_module
+from downloader import (
+    browser_drivers,
+    html_parser as html_parser_module,
+    page_loading as page_loading_module,
+)
 from downloader.browser_modes import CLOAKBROWSER_MODE, REQUESTS_MODE, SELENIUMBASE_MODE
 from downloader.comic import ComicSource
 from downloader.morui import MoruiComic
@@ -202,7 +206,7 @@ def test_source_seleniumbase_context_uses_persistent_driver_dir_when_frozen(monk
         created_kwargs.append(kwargs)
         return FakeContext()
 
-    monkeypatch.setattr(comic_module, 'SB', fake_sb_factory)
+    monkeypatch.setattr(html_parser_module, 'SB', fake_sb_factory)
     monkeypatch.setattr(sys, 'frozen', True, raising=False)
     monkeypatch.setattr(sys, '_MEIPASS', str(meipass_dir), raising=False)
     monkeypatch.setenv('LOCALAPPDATA', str(local_app_data))
@@ -349,7 +353,8 @@ def test_requests_html_block_status_switches_to_seleniumbase(monkeypatch, tmp_pa
             {'timeout': 30, 'headers': {'referer': 'https://example.test'}},
         )
     ]
-    assert source.browser_mode == SELENIUMBASE_MODE
+    assert source.browser_mode == REQUESTS_MODE
+    assert source.last_page_load_result.browser_mode == SELENIUMBASE_MODE
     assert fake_sb.activated_url == 'https://example.test/search'
     assert fake_sb.cdp.find_calls == [('.page-main', 5.0)]
     assert root is not None
@@ -432,7 +437,7 @@ def test_seleniumbase_html_retry_records_diagnostics_before_success(monkeypatch,
         return context
 
     monkeypatch.setattr(BrowserHtmlSource, '_seleniumbase_context', fake_context)
-    monkeypatch.setattr(comic_module.time, 'sleep', lambda seconds: sleep_calls.append(seconds))
+    monkeypatch.setattr(page_loading_module.time, 'sleep', lambda seconds: sleep_calls.append(seconds))
 
     source = BrowserHtmlSource(str(tmp_path), cast(Any, DummyHttp()), None)
     source.browser_mode = SELENIUMBASE_MODE
@@ -482,7 +487,7 @@ def test_seleniumbase_context_enter_failure_records_metadata_diagnostics(monkeyp
         return FailingEnterSeleniumBase()
 
     monkeypatch.setattr(BrowserHtmlSource, '_seleniumbase_context', fake_context)
-    monkeypatch.setattr(comic_module.time, 'sleep', lambda seconds: sleep_calls.append(seconds))
+    monkeypatch.setattr(page_loading_module.time, 'sleep', lambda seconds: sleep_calls.append(seconds))
     monkeypatch.setenv('HTTPS_PROXY', 'http://user:secret@example.proxy:8080')
 
     source = BrowserHtmlSource(str(tmp_path), cast(Any, DummyHttp()), None)

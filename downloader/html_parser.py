@@ -6,6 +6,7 @@ import os
 import re
 import time
 from contextlib import ExitStack
+from dataclasses import replace
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,7 @@ from downloader.browser_modes import (
     normalize_browser_mode,
 )
 from downloader.models import HtmlParseOptions
+from downloader.page_loading import PageLoadAdapters, PageLoader, PageLoadRequest, PageLoadResult
 
 HTML_METHODS = {'GET', 'POST'}
 HTML_MODE_METHODS: dict[str, BrowserModeName] = {
@@ -639,21 +641,76 @@ class HtmlParsingMixin:
         if options is None:
             return None
 
-        if options.browser_mode == SELENIUMBASE_MODE:
-            return self._parse_html_with_seleniumbase(url, options.http_method)
-        if options.browser_mode == CLOAKBROWSER_MODE:
-            if options.http_method != 'GET':
-                logger.error(
-                    'CloakBrowser HTML parsing only supports GET requests: {}',
-                    options.http_method,
-                )
-                return None
-            return self._parse_html_with_webdriver(url, 'CloakBrowser')
-
-        return self._parse_html_with_requests(
-            url,
-            options.http_method,
-            data,
-            options.encoding,
-            headers,
+        request = PageLoadRequest(
+            url=url,
+            base_url=self.base_url,
+            browser_mode=options.browser_mode,
+            method=options.http_method,
+            data=data,
+            encoding=options.encoding,
+            headers=headers,
+            wait_selector=self._browser_wait_selector(),
+            wait_seconds=self._browser_wait_seconds(),
+            diagnostics_dir=Path(self.output_dir or '.') / SELENIUMBASE_DIAGNOSTIC_DIR,
         )
+        result = self._load_page_for_legacy_parse_html(request)
+        self.last_page_load_result = result
+        return result.root if result.ok else None
+
+    def _load_page_for_legacy_parse_html(self, request: PageLoadRequest) -> PageLoadResult:
+        loader = getattr(self, 'page_loader', None)
+        if loader is None:
+            loader = PageLoader()
+            self.page_loader = loader
+
+        adapters = self._page_load_adapters()
+        result = loader.load(request, adapters)
+        if result.failure_reason != 'browser_adapter_required':
+            return result
+        if result.required_browser_mode != SELENIUMBASE_MODE:
+            return result
+        return self._load_with_temporary_seleniumbase_context(request, loader)
+
+    def _load_with_temporary_seleniumbase_context(
+        self, request: PageLoadRequest, loader: PageLoader
+    ) -> PageLoadResult:
+        retry_request = replace(request, browser_mode=SELENIUMBASE_MODE)
+        last_result = PageLoadResult(
+            failure_reason='browser_adapter_required',
+            required_browser_mode=SELENIUMBASE_MODE,
+            recoverable=True,
+        )
+
+        for attempt in range(1, SELENIUMBASE_HTML_MAX_ATTEMPTS + 1):
+            context = self._seleniumbase_context()
+            with ExitStack() as stack:
+                try:
+                    seleniumbase_browser = stack.enter_context(context)
+                except Exception as e:
+                    last_result = loader.browser_failure_result(
+                        retry_request,
+                        context,
+                        e,
+                        SELENIUMBASE_MODE,
+                        attempt=attempt,
+                    )
+                else:
+                    retry_adapters = self._page_load_adapters()
+                    retry_adapters.browsers[SELENIUMBASE_MODE] = seleniumbase_browser
+                    last_result = loader.load(retry_request, retry_adapters)
+
+            if last_result.ok:
+                return last_result
+            if attempt < SELENIUMBASE_HTML_MAX_ATTEMPTS:
+                time.sleep(SELENIUMBASE_RETRY_BACKOFF_SECONDS)
+
+        return last_result
+
+    def _page_load_adapters(self) -> PageLoadAdapters:
+        browsers = {}
+        if self.driver is not None:
+            if getattr(self.driver, 'is_seleniumbase_driver', False):
+                browsers[SELENIUMBASE_MODE] = self.driver
+            elif self._source_browser_mode() == CLOAKBROWSER_MODE:
+                browsers[CLOAKBROWSER_MODE] = self.driver
+        return PageLoadAdapters(http=self.http, browsers=browsers)
