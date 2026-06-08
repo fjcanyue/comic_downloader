@@ -39,6 +39,7 @@ from downloader.source_profiles import (
     SourceProfile,
     mutable_site_config,
 )
+from downloader.volume_downloader import download_volume
 
 __all__ = [
     'Comic',
@@ -339,6 +340,9 @@ class ComicSource(ImageDownloadMixin, ArchiveMixin, HtmlParsingMixin, ABC):
             array: 图片URL地址数组
         """
 
+    def parse_images(self, url: str) -> list[str]:
+        return self.__parse_imgs__(url)
+
     def download_vols(
         self, comic_name: str, book_name: str, vols: list[ComicVolume]
     ) -> DownloadSummary:
@@ -390,61 +394,4 @@ class ComicSource(ImageDownloadMixin, ArchiveMixin, HtmlParsingMixin, ABC):
             url: 动漫卷/话URL地址
             parent_progress: 父级进度条对象，用于嵌套显示图片下载进度
         """
-        logger.info('开始下载卷/话: {} 从 {}', vol_name, url)
-
-        # 检查文件是否已存在
-        existing_archive_path = self._find_existing_archive(path, vol_name)
-        if existing_archive_path:
-            logger.info('文件已存在，跳过: {}', existing_archive_path)
-            return VolumeDownloadResult(
-                name=vol_name,
-                url=url,
-                status='skipped',
-                archive_path=existing_archive_path,
-                message='文件已存在',
-            )
-
-        # 添加解析提示任务
-        parse_task_id = None
-        if parent_progress:
-            parse_task_id = parent_progress.add_task(
-                description=f'[yellow]正在解析 {vol_name} 图片...', total=None
-            )
-        else:
-            print(f'正在解析 {vol_name} 图片...')
-
-        try:
-            imgs = self.__parse_imgs__(url)
-
-            # 解析完成后移除解析任务
-            if parent_progress and parse_task_id is not None:
-                parent_progress.remove_task(parse_task_id)
-                parse_task_id = None  # 防止在 except 块中再次移除
-
-            if not imgs:
-                logger.warning('未解析到任何图片: {} ({})', vol_name, url)
-                return VolumeDownloadResult(
-                    name=vol_name,
-                    url=url,
-                    status='failed',
-                    message='未解析到任何图片',
-                )
-            target_path = os.path.join(path, filter_dir_name(vol_name))
-            result = self.__download_vol_images__(target_path, vol_name, url, imgs, parent_progress)
-            if result.ok:
-                logger.info('卷/话 {} 下载完成.', vol_name)
-            else:
-                logger.warning(
-                    '卷/话 {} 下载未完全成功: 状态={}, 成功图片={}/{}',
-                    vol_name,
-                    result.status,
-                    result.downloaded_count,
-                    result.image_count,
-                )
-            return result
-        except Exception as e:
-            # 异常发生时也要清理任务，并确保不会重复移除
-            self._remove_progress_task(parent_progress, parse_task_id)
-
-            logger.error('处理卷/话失败: {} ({}), 错误: {}', vol_name, url, e, exc_info=True)
-            return VolumeDownloadResult(name=vol_name, url=url, status='failed', message=str(e))
+        return download_volume(self, path, vol_name, url, parent_progress)
