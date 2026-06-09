@@ -38,14 +38,14 @@ For SeleniumBase/CloakBrowser modes, add:
 }
 ```
 
-## Source Module Template (`downloader/{name}.py`)
+## Source Module Template (`downloader/sources/adapters/{name}.py`)
 
 ```python
 from urllib.parse import quote
 
 from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
 
-from downloader.browser_modes import REQUESTS_MODE
+from downloader.browser.modes import REQUESTS_MODE
 from downloader.comic import Comic, ComicBook, ComicSource, ComicVolume, logger
 
 
@@ -209,7 +209,7 @@ def __parse_imgs__(self, url):
 
 ## Registration
 
-### `downloader/sources.py`
+### `downloader/sources/registry.py`
 
 Add to `SOURCE_DEFINITIONS` tuple:
 
@@ -221,16 +221,13 @@ Optional fields: `enabled=False`, `deprecated=True`.
 
 ### `downloader.spec`
 
-Add `'downloader.{name}'` to the `hiddenimports` list so PyInstaller bundles the new source module:
+No manual hidden import is needed for a new source adapter. The spec collects the full adapter package:
 
 ```python
-hiddenimports=[
-    'downloader.boya',
-    ...
-    'downloader.{name}',
-    ...
-] + runtime_hiddenimports,
+source_adapter_hiddenimports = collect_submodules('downloader.sources.adapters')
 ```
+
+After adding the adapter, run the PyInstaller spec test and build check to confirm it is bundled.
 
 ## Live XPath Test Script
 

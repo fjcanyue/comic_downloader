@@ -99,7 +99,7 @@ comic_downloader download_vols <URL> <章节序号> [起始] [截止]
 | `-h`, `--help` | 显示帮助 |
 
 运行配置示例见 `configs/runtime.sample.json`。配置中的 `sources.<源名>.enabled`
-会覆盖 `downloader/sources.py` 中的默认启用状态；`sources.<源名>.browser_mode`
+会覆盖 `downloader/sources/registry.py` 中的默认启用状态；`sources.<源名>.browser_mode`
 会写入该源的 `SourceProfile`，优先级高于单站点 `configs/*.json` 中的
 `browser_mode`，但不会修改源类本身。
 
