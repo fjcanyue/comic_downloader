@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from downloader.browser_modes import BrowserModeName, normalize_browser_mode
+from downloader.browser.modes import BrowserModeName, normalize_browser_mode
 
 
 @dataclass(frozen=True)

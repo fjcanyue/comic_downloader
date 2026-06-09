@@ -1,8 +1,8 @@
 from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
 
-from downloader.browser_modes import CLOAKBROWSER_MODE
+from downloader.browser.modes import CLOAKBROWSER_MODE
 from downloader.comic import ComicSource, logger
-from downloader.source_templates import (
+from downloader.sources.templates import (
     ConfigurableSearchMixin,
     GroupedChapterInfoMixin,
     JsImageSourceMixin,

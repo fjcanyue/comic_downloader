@@ -5,7 +5,7 @@ from urllib.parse import quote
 
 from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
 
-from downloader.browser_modes import REQUESTS_MODE
+from downloader.browser.modes import REQUESTS_MODE
 from downloader.comic import Comic, ComicBook, ComicSource, ComicVolume, logger
 
 # 漫画状态码映射

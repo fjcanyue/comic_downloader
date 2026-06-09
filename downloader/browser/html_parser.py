@@ -19,16 +19,21 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from seleniumbase import SB
 
-from downloader.browser_drivers import configure_seleniumbase_driver_cache
-from downloader.browser_modes import (
+from downloader.browser.drivers import configure_seleniumbase_driver_cache
+from downloader.browser.modes import (
     CLOAKBROWSER_MODE,
     REQUESTS_MODE,
     SELENIUMBASE_MODE,
     BrowserModeName,
     normalize_browser_mode,
 )
+from downloader.browser.page_loading import (
+    PageLoadAdapters,
+    PageLoader,
+    PageLoadRequest,
+    PageLoadResult,
+)
 from downloader.models import HtmlParseOptions
-from downloader.page_loading import PageLoadAdapters, PageLoader, PageLoadRequest, PageLoadResult
 
 HTML_METHODS = {'GET', 'POST'}
 HTML_MODE_METHODS: dict[str, BrowserModeName] = {

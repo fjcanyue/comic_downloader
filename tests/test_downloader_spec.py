@@ -13,6 +13,10 @@ def test_pyinstaller_spec_collects_dynamic_runtime_dependencies(monkeypatch, tmp
     mypyc_module = '81d243bd2c585b0f4821__mypyc'
     (tmp_path / f'{mypyc_module}.cp314-win_amd64.pyd').touch()
     collected_modules = {
+        'downloader.sources.adapters': [
+            'downloader.sources.adapters.morui',
+            'downloader.sources.adapters.tuku',
+        ],
         'rich._unicode_data': ['rich._unicode_data.unicode17-0-0'],
         'charset_normalizer': ['charset_normalizer', 'charset_normalizer.md'],
     }
@@ -54,8 +58,12 @@ def test_pyinstaller_spec_collects_dynamic_runtime_dependencies(monkeypatch, tmp
         },
     )
 
+    assert 'downloader.sources.adapters' in collect_calls
     assert 'rich._unicode_data' in collect_calls
     assert 'charset_normalizer' in collect_calls
+    assert 'downloader.sources.adapters.morui' in analysis_kwargs['hiddenimports']
+    assert 'downloader.sources.adapters.tuku' in analysis_kwargs['hiddenimports']
+    assert 'downloader.' + 'morui' not in analysis_kwargs['hiddenimports']
     assert 'rich._unicode_data.unicode17-0-0' in analysis_kwargs['hiddenimports']
     assert 'charset_normalizer.md' in analysis_kwargs['hiddenimports']
     assert mypyc_module in analysis_kwargs['hiddenimports']

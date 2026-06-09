@@ -11,15 +11,16 @@ from loguru import logger
 from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
 from rich.progress import BarColumn, Progress, TextColumn
 
-from downloader.archive import ArchiveMixin
-from downloader.browser_modes import (
+from downloader.browser.html_parser import HtmlParsingMixin
+from downloader.browser.modes import (
     REQUESTS_MODE,
     BrowserModeName,
     is_driver_backed_browser_mode,
     normalize_browser_mode,
 )
-from downloader.html_parser import HtmlParsingMixin
-from downloader.image_downloader import ImageDownloadMixin
+from downloader.download.archive import ArchiveMixin
+from downloader.download.images import ImageDownloadMixin
+from downloader.download.volume import download_volume
 from downloader.models import (
     Comic,
     ComicBook,
@@ -33,13 +34,12 @@ from downloader.models import (
     VolumeFileState,
     filter_dir_name,
 )
-from downloader.source_config import SOURCE_CONFIG_ATTRIBUTE_KEYS
-from downloader.source_profiles import (
+from downloader.sources.config_keys import SOURCE_CONFIG_ATTRIBUTE_KEYS
+from downloader.sources.profiles import (
     PROFILE_MIRROR_ATTRIBUTE_KEYS,
     SourceProfile,
     mutable_site_config,
 )
-from downloader.volume_downloader import download_volume
 
 __all__ = [
     'Comic',

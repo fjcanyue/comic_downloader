@@ -12,7 +12,7 @@ from requests.adapters import HTTPAdapter
 from rich.progress import Progress
 from urllib3.util.retry import Retry
 
-from downloader.browser_modes import SELENIUMBASE_MODE
+from downloader.browser.modes import SELENIUMBASE_MODE
 from downloader.models import (
     ImageDownloadCancelledError,
     ImageDownloadContext,

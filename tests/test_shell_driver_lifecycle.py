@@ -9,7 +9,7 @@ from rich.console import Console
 from downloader.comic import ComicSource
 from downloader.runtime_config import RuntimeConfig, SourceRuntimeConfig
 from downloader.shell import Context, Shell
-from downloader.source_profiles import SourceProfile
+from downloader.sources.profiles import SourceProfile
 
 
 def quiet_console() -> Console:
@@ -189,9 +189,7 @@ def test_shell_attaches_lazy_driver_to_current_source(monkeypatch, tmp_path):
 
 
 def test_shell_source_instances_receive_profiles(tmp_path):
-    runtime_config = RuntimeConfig(
-        sources={'morui': SourceRuntimeConfig(browser_mode='requests')}
-    )
+    runtime_config = RuntimeConfig(sources={'morui': SourceRuntimeConfig(browser_mode='requests')})
     shell = Shell(str(tmp_path), runtime_config=runtime_config)
     try:
         cast(Any, shell)._Shell__switch_source('morui')

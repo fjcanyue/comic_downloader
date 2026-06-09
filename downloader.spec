@@ -23,6 +23,7 @@ runtime_hiddenimports = (
     + collect_submodules('charset_normalizer')
     + collect_mypyc_support_modules()
 )
+source_adapter_hiddenimports = collect_submodules('downloader.sources.adapters')
 
 
 a = Analysis(
@@ -30,18 +31,7 @@ a = Analysis(
     pathex=['downloader'],
     binaries=[],
     datas=[('configs', 'configs')],
-    hiddenimports=[
-        'downloader.boya',
-        'downloader.dmzj',
-        'downloader.dumanwu',
-        'downloader.manhuafree',
-        'downloader.manhuagui',
-        'downloader.manhuazhan',
-        'downloader.maofly',
-        'downloader.morui',
-        'downloader.thmh',
-        'downloader.tuku'
-    ] + runtime_hiddenimports,
+    hiddenimports=source_adapter_hiddenimports + runtime_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

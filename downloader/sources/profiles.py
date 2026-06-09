@@ -9,14 +9,14 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
-from downloader.browser_modes import (
+from downloader.browser.modes import (
     REQUESTS_MODE,
     BrowserModeName,
     is_driver_backed_browser_mode,
     normalize_browser_mode,
 )
 from downloader.runtime_config import RuntimeConfig
-from downloader.source_config import SOURCE_CONFIG_ATTRIBUTE_KEYS
+from downloader.sources.config_keys import SOURCE_CONFIG_ATTRIBUTE_KEYS
 
 PROFILE_ATTRIBUTE_DEFAULTS: dict[str, Any] = {
     'base_url': '',
@@ -155,7 +155,7 @@ def source_config_base_path() -> Path:
         meipass = getattr(sys, '_MEIPASS', None)
         if meipass:
             return Path(meipass)
-    return Path(__file__).parent.parent
+    return Path(__file__).resolve().parents[2]
 
 
 def mutable_site_config(profile: SourceProfile) -> dict[str, Any]:
@@ -192,12 +192,8 @@ def _normalize_profile_values(values: Mapping[str, Any]) -> dict[str, Any]:
     normalized = dict(values)
     normalized['browser_mode'] = normalize_browser_mode(normalized.get('browser_mode'))
     normalized['download_interval'] = float(normalized.get('download_interval') or 0)
-    normalized['image_request_interval'] = _optional_float(
-        normalized.get('image_request_interval')
-    )
-    normalized['page_load_wait_seconds'] = _optional_float(
-        normalized.get('page_load_wait_seconds')
-    )
+    normalized['image_request_interval'] = _optional_float(normalized.get('image_request_interval'))
+    normalized['page_load_wait_seconds'] = _optional_float(normalized.get('page_load_wait_seconds'))
     normalized['scroll_wait_seconds'] = _optional_float(normalized.get('scroll_wait_seconds'))
     normalized['max_scroll_attempts'] = _optional_int(normalized.get('max_scroll_attempts'))
     normalized['image_retry_count'] = int(normalized.get('image_retry_count') or 1)

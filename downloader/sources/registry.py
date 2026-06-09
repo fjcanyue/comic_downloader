@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from downloader.comic import ComicSource
 from downloader.runtime_config import RuntimeConfig
-from downloader.source_profiles import SourceBinding, resolve_source_profile, source_is_enabled
+from downloader.sources.profiles import SourceBinding, resolve_source_profile, source_is_enabled
 
 
 @dataclass(frozen=True)
@@ -47,7 +47,7 @@ def load_source_bindings(
     validate_runtime_config_sources(runtime_config)
     bindings: dict[str, SourceBinding] = {}
     for definition in SOURCE_DEFINITIONS:
-        module = importlib.import_module(f'downloader.{definition.module_name}')
+        module = importlib.import_module(f'downloader.sources.adapters.{definition.module_name}')
         source_class = getattr(module, definition.class_name)
         if not issubclass(source_class, ComicSource):
             raise TypeError(f'{definition.class_name} is not a ComicSource')

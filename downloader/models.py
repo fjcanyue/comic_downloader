@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from downloader.browser_modes import BrowserModeName
+from downloader.browser.modes import BrowserModeName
 
 
 class ComicVolume:

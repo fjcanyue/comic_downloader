@@ -13,7 +13,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
 
-from downloader.browser_modes import CLOAKBROWSER_MODE, SELENIUMBASE_MODE, BrowserModeName
+from downloader.browser.modes import CLOAKBROWSER_MODE, SELENIUMBASE_MODE, BrowserModeName
 
 BLOCK_FALLBACK_STATUS_CODES = {403, 429}
 ERROR_CHAIN_LIMIT = 5
@@ -187,7 +187,9 @@ class PageLoader:
         *,
         attempt: int = 1,
     ) -> PageLoadResult:
-        diagnostic_paths = self._record_browser_failure_diagnostics(browser, request, error, attempt)
+        diagnostic_paths = self._record_browser_failure_diagnostics(
+            browser, request, error, attempt
+        )
         return PageLoadResult(
             failure_reason='browser_load_failed',
             error_message=str(error),
@@ -299,7 +301,9 @@ class PageLoader:
 
     def _write_metadata_diagnostic(self, base_path: Path, metadata: dict[str, Any]) -> str:
         metadata_path = base_path.with_suffix('.json')
-        metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding='utf-8')
+        metadata_path.write_text(
+            json.dumps(metadata, ensure_ascii=False, indent=2), encoding='utf-8'
+        )
         return str(metadata_path)
 
     def _browser_current_url(self, browser: Any) -> str | None:
@@ -326,7 +330,10 @@ class PageLoader:
             if value is None:
                 metadata[key] = {'set': False}
             else:
-                metadata[key] = {'set': True, 'value': self._sanitize_proxy_environment_value(value)}
+                metadata[key] = {
+                    'set': True,
+                    'value': self._sanitize_proxy_environment_value(value),
+                }
         return metadata
 
     def _sanitize_proxy_environment_value(self, value: str) -> str:
@@ -358,7 +365,9 @@ class PageLoader:
         current: BaseException | None = error
         relation = 'error'
         seen_ids: set[int] = set()
-        while current is not None and id(current) not in seen_ids and len(chain) < ERROR_CHAIN_LIMIT:
+        while (
+            current is not None and id(current) not in seen_ids and len(chain) < ERROR_CHAIN_LIMIT
+        ):
             seen_ids.add(id(current))
             chain.append(
                 {

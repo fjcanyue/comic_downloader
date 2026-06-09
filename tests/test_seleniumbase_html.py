@@ -11,15 +11,15 @@ import requests
 from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
 from seleniumbase.core import browser_launcher
 
-from downloader import (
-    browser_drivers,
+from downloader.browser import (
+    drivers as browser_drivers,
     html_parser as html_parser_module,
     page_loading as page_loading_module,
 )
-from downloader.browser_modes import CLOAKBROWSER_MODE, REQUESTS_MODE, SELENIUMBASE_MODE
+from downloader.browser.modes import CLOAKBROWSER_MODE, REQUESTS_MODE, SELENIUMBASE_MODE
 from downloader.comic import ComicSource
-from downloader.morui import MoruiComic
-from downloader.source_profiles import SourceProfile
+from downloader.sources.adapters.morui import MoruiComic
+from downloader.sources.profiles import SourceProfile
 
 
 class DummyHttp:
@@ -479,7 +479,9 @@ def test_seleniumbase_html_retry_records_diagnostics_before_success(monkeypatch,
         return context
 
     monkeypatch.setattr(BrowserHtmlSource, '_seleniumbase_context', fake_context)
-    monkeypatch.setattr(page_loading_module.time, 'sleep', lambda seconds: sleep_calls.append(seconds))
+    monkeypatch.setattr(
+        page_loading_module.time, 'sleep', lambda seconds: sleep_calls.append(seconds)
+    )
 
     source = BrowserHtmlSource(str(tmp_path), cast(Any, DummyHttp()), None)
     source.browser_mode = SELENIUMBASE_MODE
@@ -529,7 +531,9 @@ def test_seleniumbase_context_enter_failure_records_metadata_diagnostics(monkeyp
         return FailingEnterSeleniumBase()
 
     monkeypatch.setattr(BrowserHtmlSource, '_seleniumbase_context', fake_context)
-    monkeypatch.setattr(page_loading_module.time, 'sleep', lambda seconds: sleep_calls.append(seconds))
+    monkeypatch.setattr(
+        page_loading_module.time, 'sleep', lambda seconds: sleep_calls.append(seconds)
+    )
     monkeypatch.setenv('HTTPS_PROXY', 'http://user:secret@example.proxy:8080')
 
     source = BrowserHtmlSource(str(tmp_path), cast(Any, DummyHttp()), None)

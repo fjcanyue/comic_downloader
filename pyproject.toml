@@ -66,8 +66,8 @@ sort_inline_arrays = true
 spaces_before_inline_comment = 4
 spaces_indent_inline_array = 4
 
-[tool.setuptools]
-packages = ["downloader"]
+[tool.setuptools.packages.find]
+include = ["downloader*"]
 
 [tool.bumpversion]
 current_version = "0.0.1"

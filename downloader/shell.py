@@ -20,12 +20,12 @@ from selenium.webdriver.edge.options import Options as EdgeOptions
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from urllib3.util.retry import Retry
 
-from downloader.browser_drivers import CloakBrowserDriver, SeleniumBaseDriver
-from downloader.browser_modes import CLOAKBROWSER_MODE, SELENIUMBASE_MODE, normalize_browser_mode
+from downloader.browser.drivers import CloakBrowserDriver, SeleniumBaseDriver
+from downloader.browser.modes import CLOAKBROWSER_MODE, SELENIUMBASE_MODE, normalize_browser_mode
 from downloader.comic import Comic, ComicSource
 from downloader.runtime_config import RuntimeConfig
-from downloader.source_profiles import SourceBinding, SourceProfile
 from downloader.sources import load_source_bindings
+from downloader.sources.profiles import SourceBinding, SourceProfile
 
 FULL_VOLUME_ARG_COUNT = 1
 VOLUME_TO_ARG_COUNT = 2

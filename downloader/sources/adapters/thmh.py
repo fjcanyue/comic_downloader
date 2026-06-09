@@ -1,7 +1,7 @@
 from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
 
 from downloader.comic import ComicSource, logger
-from downloader.source_templates import (
+from downloader.sources.templates import (
     ConfigurableSearchMixin,
     GroupedChapterInfoMixin,
     JsImageSourceMixin,

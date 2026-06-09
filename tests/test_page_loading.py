@@ -4,9 +4,9 @@ import json
 from pathlib import Path
 from uuid import uuid4
 
-from downloader.browser_modes import CLOAKBROWSER_MODE, REQUESTS_MODE, SELENIUMBASE_MODE
+from downloader.browser.modes import CLOAKBROWSER_MODE, REQUESTS_MODE, SELENIUMBASE_MODE
+from downloader.browser.page_loading import PageLoadAdapters, PageLoader, PageLoadRequest
 from downloader.comic import ComicSource
-from downloader.page_loading import PageLoadAdapters, PageLoader, PageLoadRequest
 
 
 class FakeResponse:
@@ -232,7 +232,9 @@ def test_seleniumbase_failure_records_diagnostics(monkeypatch):
             browser_mode=SELENIUMBASE_MODE,
             diagnostics_dir=diagnostics_dir,
         ),
-        PageLoadAdapters(http=FakeHttp(FakeResponse(200, '')), browsers={SELENIUMBASE_MODE: browser}),
+        PageLoadAdapters(
+            http=FakeHttp(FakeResponse(200, '')), browsers={SELENIUMBASE_MODE: browser}
+        ),
     )
 
     assert result.ok is False

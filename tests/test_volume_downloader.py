@@ -5,8 +5,8 @@ from typing import Any, cast
 
 from downloader import comic as comic_module
 from downloader.comic import ComicSource
+from downloader.download.volume import download_volume
 from downloader.models import VolumeDownloadResult
-from downloader.volume_downloader import download_volume
 
 
 class PipelineSource:

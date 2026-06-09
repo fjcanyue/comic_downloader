@@ -1,17 +1,15 @@
 from __future__ import annotations
 
-from downloader.boya import BoyaComic
-from downloader.morui import MoruiComic
 from downloader.runtime_config import RuntimeConfig, SourceRuntimeConfig
-from downloader.source_profiles import resolve_source_profile
 from downloader.sources import SOURCE_DEFINITIONS
+from downloader.sources.adapters.boya import BoyaComic
+from downloader.sources.adapters.morui import MoruiComic
+from downloader.sources.profiles import resolve_source_profile
 
 
 def _definition(source_name: str):
     return next(
-        definition
-        for definition in SOURCE_DEFINITIONS
-        if definition.module_name == source_name
+        definition for definition in SOURCE_DEFINITIONS if definition.module_name == source_name
     )
 
 
@@ -26,9 +24,7 @@ def test_site_json_generic_keys_override_class_defaults():
 
 
 def test_runtime_browser_mode_override_resolves_without_class_mutation():
-    runtime_config = RuntimeConfig(
-        sources={'morui': SourceRuntimeConfig(browser_mode='requests')}
-    )
+    runtime_config = RuntimeConfig(sources={'morui': SourceRuntimeConfig(browser_mode='requests')})
 
     profile = resolve_source_profile(
         _definition('morui'),

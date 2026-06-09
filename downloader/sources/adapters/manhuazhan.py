@@ -1,7 +1,7 @@
 from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
 
 from downloader.comic import ComicSource, logger
-from downloader.source_templates import GroupedChapterInfoMixin, JsDictImageSourceMixin
+from downloader.sources.templates import GroupedChapterInfoMixin, JsDictImageSourceMixin
 
 
 class ManhuazhanComic(GroupedChapterInfoMixin, JsDictImageSourceMixin, ComicSource):
