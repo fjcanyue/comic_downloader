@@ -6,6 +6,7 @@ from typing import Any, cast
 from requests.adapters import HTTPAdapter
 from rich.console import Console
 
+from downloader.browser.manager import DriverManager
 from downloader.comic import ComicSource
 from downloader.runtime_config import RuntimeConfig, SourceRuntimeConfig
 from downloader.shell import Context, Shell
@@ -43,10 +44,10 @@ def test_context_ensure_driver_initializes_once(monkeypatch, tmp_path):
 
     def fake_init_driver(self, source_or_class=None):
         calls.append(True)
-        self.driver = driver
+        self.current_driver = driver
         return True
 
-    monkeypatch.setattr(Context, 'init_driver', fake_init_driver)
+    monkeypatch.setattr(DriverManager, 'init_driver', fake_init_driver)
 
     context = Context(quiet_console())
     context.create(str(tmp_path))
@@ -77,10 +78,10 @@ def test_context_caches_drivers_by_source_mode(monkeypatch, tmp_path):
     def fake_init_driver(self, source_or_class=None):
         driver = object()
         calls.append(source_or_class)
-        self.driver = driver
+        self.current_driver = driver
         return True
 
-    monkeypatch.setattr(Context, 'init_driver', fake_init_driver)
+    monkeypatch.setattr(DriverManager, 'init_driver', fake_init_driver)
 
     context = Context(quiet_console())
     context.create(str(tmp_path))
@@ -113,14 +114,16 @@ def test_context_initializes_seleniumbase_for_seleniumbase_mode(monkeypatch, tmp
 
     def fake_init_seleniumbase_driver(self, source_or_class=None):
         calls.append(source_or_class)
-        self.driver = driver
+        self.current_driver = driver
         return True
 
     def fail_init_selenium_driver(self):
         raise AssertionError('raw Selenium driver should not be initialized')
 
-    monkeypatch.setattr(Context, '_try_init_seleniumbase_driver', fake_init_seleniumbase_driver)
-    monkeypatch.setattr(Context, '_try_init_selenium_driver', fail_init_selenium_driver)
+    monkeypatch.setattr(
+        DriverManager, '_try_init_seleniumbase_driver', fake_init_seleniumbase_driver
+    )
+    monkeypatch.setattr(DriverManager, '_try_init_selenium_driver', fail_init_selenium_driver)
 
     context = Context(quiet_console())
     context.create(str(tmp_path))
@@ -144,6 +147,63 @@ def test_context_driver_mode_uses_profile_browser_mode(tmp_path):
     context.create(str(tmp_path))
 
     assert context._driver_cache_key(profile) == ('cloakbrowser', False)
+
+
+def test_context_driver_methods_delegate_to_driver_manager(tmp_path):
+    class FakeDriverManager:
+        def __init__(self):
+            self.current_driver = None
+            self.drivers = {('selenium', True): object()}
+            self.ensure_calls = []
+            self.get_calls = []
+            self.init_calls = []
+            self.cache_key_calls = []
+            self.destroy_calls = 0
+
+        def ensure_driver(self, source_or_class=None):
+            self.ensure_calls.append(source_or_class)
+            self.current_driver = object()
+            return True
+
+        def get_driver(self, source_or_class=None):
+            self.get_calls.append(source_or_class)
+            return self.drivers[('selenium', True)]
+
+        def init_driver(self, source_or_class=None):
+            self.init_calls.append(source_or_class)
+            return True
+
+        def driver_cache_key(self, source_or_class=None):
+            self.cache_key_calls.append(source_or_class)
+            return ('selenium', True)
+
+        def destroy(self):
+            self.destroy_calls += 1
+            self.current_driver = None
+            self.drivers.clear()
+
+    context = Context(quiet_console())
+    context.create(str(tmp_path))
+    fake_driver_manager = FakeDriverManager()
+    context.driver_manager = fake_driver_manager
+    source_marker = object()
+
+    assert context.ensure_driver(source_marker) is True
+    assert context.get_driver(source_marker) is fake_driver_manager.drivers[('selenium', True)]
+    assert context.init_driver(source_marker) is True
+    assert context._driver_cache_key(source_marker) == ('selenium', True)
+    assert context.driver is fake_driver_manager.current_driver
+    assert context.drivers is fake_driver_manager.drivers
+
+    context.destroy()
+
+    assert fake_driver_manager.ensure_calls == [source_marker]
+    assert fake_driver_manager.get_calls == [source_marker]
+    assert fake_driver_manager.init_calls == [source_marker]
+    assert fake_driver_manager.cache_key_calls == [source_marker]
+    assert fake_driver_manager.destroy_calls == 1
+    assert context.driver is None
+    assert context.drivers == {}
 
 
 def test_shell_uses_plain_stdin_for_interactive_prompt():
