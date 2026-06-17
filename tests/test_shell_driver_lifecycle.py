@@ -202,6 +202,16 @@ def test_shell_source_instances_receive_profiles(tmp_path):
         shell.context.destroy()
 
 
+def test_shell_prompt_updates_when_source_switches(tmp_path):
+    shell = Shell(str(tmp_path))
+    try:
+        cast(Any, shell)._Shell__switch_source('morui')
+
+        assert shell.prompt == '动漫下载器[morui]> '
+    finally:
+        shell.context.destroy()
+
+
 def test_context_destroy_suppresses_driver_cleanup_interrupt():
     class InterruptingDriver:
         def __init__(self):

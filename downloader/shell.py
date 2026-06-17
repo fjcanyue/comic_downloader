@@ -11,9 +11,6 @@ from typing import Any
 import requests
 from loguru import logger
 from requests.adapters import HTTPAdapter
-from rich.console import Console
-from rich.markdown import Markdown
-from rich.table import Table
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.edge.options import Options as EdgeOptions
@@ -26,6 +23,7 @@ from downloader.comic import Comic, ComicSource
 from downloader.runtime_config import RuntimeConfig
 from downloader.sources import load_source_bindings
 from downloader.sources.profiles import SourceBinding, SourceProfile
+from downloader.tui import TerminalPresenter
 
 FULL_VOLUME_ARG_COUNT = 1
 VOLUME_TO_ARG_COUNT = 2
@@ -176,13 +174,15 @@ class Shell(cmd.Cmd):
         runtime_config: RuntimeConfig | None = None,
     ):
         super().__init__()
-        self.console = Console()
-        self.context = Context(self.console)
+        self.presenter = TerminalPresenter()
+        self.console = self.presenter.console
+        self.context = Context(self.presenter)
         self.context.create(output_path)
         self.overwrite = overwrite
         self.runtime_config = runtime_config
         self.search_driver_lock = threading.Lock()
         self.current_source_name = None
+        self.prompt = self.presenter.prompt(self.current_source_name)
 
         # 默认源排除 deprecated 站点；完整源用于直接 URL 匹配。
         self.all_source_bindings = self._discover_source_bindings(include_deprecated=True)
@@ -214,7 +214,7 @@ class Shell(cmd.Cmd):
                 runtime_config=self.runtime_config,
             )
         except Exception as e:
-            self.console.print(f'Failed to load comic sources: {e}', style='bold red')
+            self.presenter.print(f'Failed to load comic sources: {e}', style='bold red')
             return {}
 
     def _ensure_driver(
@@ -230,7 +230,7 @@ class Shell(cmd.Cmd):
 
     def _ensure_source_download_ready(self) -> bool:
         if self.context.source is None:
-            self.console.print('当前没有选中的动漫源！')
+            self.presenter.print('当前没有选中的动漫源！')
             return False
         profile = getattr(self.context.source, 'profile', None)
         uses_driver = (
@@ -243,19 +243,19 @@ class Shell(cmd.Cmd):
         if self._ensure_driver(self.context.source):
             self.context.source.driver = self.context.driver
             return True
-        self.console.print('当前动漫源下载需要浏览器驱动，无法继续下载。', style='bold red')
+        self.presenter.print('当前动漫源下载需要浏览器驱动，无法继续下载。', style='bold red')
         return False
 
     def _ensure_source_page_ready(self) -> bool:
         if self.context.source is None:
-            self.console.print('当前没有选中的动漫源！')
+            self.presenter.print('当前没有选中的动漫源！')
             return False
         if not self.context.source.current_browser_mode_uses_driver():
             return True
         if self._ensure_driver(self.context.source):
             self.context.source.driver = self.context.driver
             return True
-        self.console.print('当前动漫源页面解析需要浏览器驱动，无法继续。', style='bold red')
+        self.presenter.print('当前动漫源页面解析需要浏览器驱动，无法继续。', style='bold red')
         return False
 
     def _match_source_for_url(self, url: str) -> str | None:
@@ -267,37 +267,33 @@ class Shell(cmd.Cmd):
 
     def do_source(self, arg):
         """选择动漫下载网站源。输入 source  后，根据提示选择源序号。"""
-        self.console.print('请选择动漫下载网站源:')
-        for index, source_name in enumerate(self.source_options):
-            self.console.print(f'{index + 1}. {source_name}')
+        self.presenter.source_options(self.source_options)
 
         while True:
             try:
                 source_index_str = self._read_prompt_line('请输入网站源序号: ')
                 if not source_index_str:  # 用户直接回车，重新显示列表
-                    self.console.print('请选择动漫下载网站源:')
-                    for index, source_name in enumerate(self.source_options):
-                        self.console.print(f'{index + 1}. {source_name}')
+                    self.presenter.source_options(self.source_options)
                     continue  # 继续下一次循环，等待用户输入
                 source_index = int(source_index_str) - 1  # 序号从1开始，索引从0开始
                 if 0 <= source_index < len(self.source_options):
                     source_name = self.source_options[source_index]
                     self.__switch_source(source_name)
                     break  # 选择成功，退出循环
-                self.console.print(
+                self.presenter.print(
                     f'无效的序号，请输入 1 到 {len(self.source_options)} 之间的序号。'
                 )
             except EOFError:
-                self.console.print()
+                self.presenter.print()
                 return
             except ValueError:
-                self.console.print('请输入有效的数字序号。')
+                self.presenter.print('请输入有效的数字序号。')
 
     def __switch_source(self, source_name):
         """切换动漫源"""
         if self.current_source_name == source_name:
             return
-        self.console.print(f'正在切换到{source_name}动漫下载网站源...')
+        self.presenter.source_switching(source_name)
 
         if source_name not in self.sources:
             binding = self.source_bindings.get(source_name) or self.all_source_bindings[source_name]
@@ -312,7 +308,7 @@ class Shell(cmd.Cmd):
 
         self.context.source = self.sources[source_name]
         self.current_source_name = source_name
-        # self.prompt = self.prefix + self.context.source.name + '> '
+        self.prompt = self.presenter.prompt(self.current_source_name)
 
     def _build_search_func(
         self, binding: SourceBinding, uses_driver: bool
@@ -372,7 +368,7 @@ class Shell(cmd.Cmd):
                 skipped_sources.add(task.source_name)
         if not skipped_sources:
             return ready_tasks
-        self.console.print(
+        self.presenter.print(
             f'已跳过需要浏览器驱动的搜索源: {", ".join(sorted(skipped_sources))}',
             style='bold yellow',
         )
@@ -385,42 +381,27 @@ class Shell(cmd.Cmd):
             if not outcome:
                 continue
             if outcome.error_message:
-                self.console.print(
+                self.presenter.print(
                     f'在 {source_name} 中搜索失败: {outcome.error_message}', style='bold red'
                 )
             self.context.searched_results.extend(outcome.results)
 
     def _print_search_table(self, keyword: str, search_duration: float) -> None:
-        if not self.context.searched_results:
-            self.console.print(f'未找到与 "{keyword}" 相关的结果。', style='bold yellow')
-            return
-
-        table = Table(
-            title=f'搜索结果 ({len(self.context.searched_results)} 条，用时 {search_duration:.1f}s)'
+        source_display_names = {
+            source_name: getattr(source_obj, 'name', source_name)
+            for source_name, source_obj in self.sources.items()
+        }
+        self.presenter.search_results(
+            keyword,
+            self.context.searched_results,
+            source_display_names,
+            search_duration,
         )
-        table.add_column('序号', justify='right', no_wrap=True)
-        table.add_column('动漫源')
-        table.add_column('作者')
-        table.add_column('名称')
-        table.add_column('URL', style='#75D7EC')
-
-        for index, comic in enumerate(self.context.searched_results):
-            source_obj = self.sources.get(comic.source)
-            source_display = getattr(source_obj, 'name', comic.source)
-            table.add_row(
-                str(index + 1),
-                source_display,
-                comic.author if comic.author else 'N/A',
-                comic.name if comic.name else 'N/A',
-                comic.url if comic.url else 'N/A',
-            )
-
-        self.console.print(table)
 
     def do_s(self, arg):
         """搜索动漫，输入s <搜索关键字>，例如：s 猎人"""
         if not arg:
-            self.console.print('请输入搜索关键字！')
+            self.presenter.print('请输入搜索关键字！')
             return
 
         self.context.reset_comic()
@@ -428,7 +409,7 @@ class Shell(cmd.Cmd):
         tasks = self._filter_ready_search_tasks(self._build_search_tasks())
 
         task_lookup = {task.source_name: task for task in tasks}
-        console_status = self.console.status('正在搜索...', spinner='dots')
+        console_status = self.presenter.status('正在搜索...', spinner='dots')
         search_start = time.perf_counter()
         with console_status:
             outcomes = _run_search_parallel(
@@ -454,7 +435,7 @@ class Shell(cmd.Cmd):
     def do_i(self, arg):
         """查看动漫详情，输入i <搜索结果序号/动漫URL地址>，例如：d 12，或者d https://www.maofly.com/manga/13954.html"""
         if not arg:
-            self.console.print('请输入动漫URL地址或者搜索结果序号！')
+            self.presenter.print('请输入动漫URL地址或者搜索结果序号！')
             return
 
         url = self._resolve_info_url(arg)
@@ -462,16 +443,16 @@ class Shell(cmd.Cmd):
             return
 
         if not self.context.source:
-            self.console.print('无法确定该动漫所属的源，请先搜索或手动选择源。')
+            self.presenter.print('无法确定该动漫所属的源，请先搜索或手动选择源。')
             return
         if not self._ensure_source_page_ready():
             return
 
-        with self.console.status('正在获取详情...', spinner='dots'):
+        with self.presenter.status('正在获取详情...', spinner='dots'):
             self.context.comic = self.context.source.info(url)
 
         if self.context.comic is None:
-            self.console.print('未能获取动漫详情，请检查输入的地址或稍后重试。', style='bold red')
+            self.presenter.print('未能获取动漫详情，请检查输入的地址或稍后重试。', style='bold red')
             return
 
         self._print_comic_info(self.context.comic)
@@ -485,10 +466,10 @@ class Shell(cmd.Cmd):
         try:
             idx = parse_1_based_index(arg, len(self.context.searched_results), '搜索结果')
         except ValueError:
-            self.console.print('请先搜索动漫，或输入正确的搜索结果序号！')
+            self.presenter.print('请先搜索动漫，或输入正确的搜索结果序号！')
             return None
         if not self.context.searched_results:
-            self.console.print('请先搜索动漫，或输入正确的搜索结果序号！')
+            self.presenter.print('请先搜索动漫，或输入正确的搜索结果序号！')
             return None
 
         comic = self.context.searched_results[idx]
@@ -507,58 +488,29 @@ class Shell(cmd.Cmd):
             and url.startswith(self.context.source.base_url)
         ):
             return url
-        self.console.print('请输入完整的动漫地址，且确保该地址属于支持的动漫源！')
+        self.presenter.print('请输入完整的动漫地址，且确保该地址属于支持的动漫源！')
         return None
 
     def _print_comic_info(self, comic: Comic) -> None:
-        md_content = f'# {comic.name}\n\n'
-
-        if comic.metadata:
-            md_content += '## Metadata\n'
-            for meta in comic.metadata:
-                md_content += f'- **{meta["k"]}**: {meta["v"]}\n'
-
-        self.console.print(Markdown(md_content))
-        self._print_chapter_tables(comic)
+        self.presenter.comic_info(comic)
 
     def _print_chapter_tables(self, comic: Comic) -> None:
         for book_index, book in enumerate(comic.books):
-            self.console.print(self._build_chapter_table(book_index, book))
+            self.presenter.print(self._build_chapter_table(book_index, book))
 
-    def _build_chapter_table(self, book_index: int, book) -> Table:
-        table = Table(
-            title=f'{book_index + 1}: {book.name}', show_header=False, box=None, padding=(0, 2)
-        )
-
-        columns = 3
-        for _ in range(columns):
-            table.add_column('Index', justify='right', style='cyan')
-            table.add_column('Name', style='white')
-
-        row_buffer = []
-        for index, vol in enumerate(book.vols):
-            row_buffer.extend([str(index + 1), vol.name])
-            if len(row_buffer) == columns * 2:
-                table.add_row(*row_buffer)
-                row_buffer = []
-
-        if row_buffer:
-            while len(row_buffer) < columns * 2:
-                row_buffer.extend(['', ''])
-            table.add_row(*row_buffer)
-
-        return table
+    def _build_chapter_table(self, book_index: int, book):
+        return self.presenter.chapter_table(book_index, book)
 
     def do_v(self, arg):
         """下载动漫，输入v <章节序号> <起始序号> <截止序号>，例如：v 1 11 12"""
         if not self.context.source:
-            self.console.print('请您先选择动漫下载网站源！')
+            self.presenter.print('请您先选择动漫下载网站源！')
             return
         if not arg:
-            self.console.print('请输入动漫章节序号！')
+            self.presenter.print('请输入动漫章节序号！')
             return
         if self.context.comic is None:
-            self.console.print('请先查看动漫详情！')
+            self.presenter.print('请先查看动漫详情！')
             return
 
         args = arg.split()
@@ -567,7 +519,7 @@ class Shell(cmd.Cmd):
             book = self.context.comic.books[book_index]
             _, vol_slice = parse_volume_slice(args, len(self.context.comic.books), len(book.vols))
         except ValueError as e:
-            self.console.print(str(e))
+            self.presenter.print(str(e))
             return
         vols = book.vols[vol_slice]
         if not self._ensure_source_download_ready():
@@ -584,10 +536,10 @@ class Shell(cmd.Cmd):
 
     def _download_loaded_comic(self):
         if self.context.comic is None:
-            self.console.print('请先查看动漫详情！')
+            self.presenter.print('请先查看动漫详情！')
             return None
         if not self.context.source:
-            self.console.print('当前没有选中的动漫源！')
+            self.presenter.print('当前没有选中的动漫源！')
             return None
         if not self._ensure_source_download_ready():
             return None
@@ -600,7 +552,7 @@ class Shell(cmd.Cmd):
         if comic.source:
             self.__switch_source(comic.source)
         if not comic.url:
-            self.console.print('搜索结果缺少下载地址，无法下载。')
+            self.presenter.print('搜索结果缺少下载地址，无法下载。')
             return None
         return self._download_current_source_url(comic.url)
 
@@ -608,17 +560,17 @@ class Shell(cmd.Cmd):
         try:
             idx = parse_1_based_index(arg, len(self.context.searched_results), '搜索结果')
         except ValueError:
-            self.console.print('请先搜索动漫，或输入正确的搜索结果序号！')
+            self.presenter.print('请先搜索动漫，或输入正确的搜索结果序号！')
             return None
         if not self.context.searched_results:
-            self.console.print('请先搜索动漫，或输入正确的搜索结果序号！')
+            self.presenter.print('请先搜索动漫，或输入正确的搜索结果序号！')
             return None
 
         return self.context.searched_results[idx]
 
     def _download_current_source_url(self, url: str):
         if not self.context.source:
-            self.console.print('无法确定源，无法下载。')
+            self.presenter.print('无法确定源，无法下载。')
             return None
         if not self._ensure_source_download_ready():
             return None
@@ -639,7 +591,7 @@ class Shell(cmd.Cmd):
         ):
             pass
         else:
-            self.console.print('请输入完整的动漫地址，且确保该地址属于支持的动漫源！')
+            self.presenter.print('请输入完整的动漫地址，且确保该地址属于支持的动漫源！')
             return None
 
         return self._download_current_source_url(arg)
@@ -658,22 +610,12 @@ class Shell(cmd.Cmd):
             self.__print_download_summary(summary)
 
     def __print_download_summary(self, summary):
-        if summary.ok:
-            self.console.print(
-                f'下载完成：成功 {summary.downloaded}，跳过 {summary.skipped}',
-                style='bold green',
-            )
-            return
-        self.console.print(
-            f'下载完成，但存在失败：成功 {summary.downloaded}，跳过 {summary.skipped}，'
-            f'失败 {summary.failed}，部分失败 {summary.partial}',
-            style='bold yellow',
-        )
+        self.presenter.download_summary(summary)
 
     def do_q(self, arg):
         """退出动漫下载器"""
         self.context.destroy()
-        self.console.print('感谢使用，再会！')
+        self.presenter.print('感谢使用，再会！')
         return True
 
 
@@ -682,7 +624,7 @@ class Context:
     命令行上下文类。
     """
 
-    def __init__(self, console):
+    def __init__(self, presenter_or_console):
         self.output_path: str = ''
         '本机存储路径'
         self.http: requests.Session = self.create_http_session()
@@ -696,12 +638,16 @@ class Context:
         self.driver: Any | None = None
         self.drivers: dict[tuple[str, bool], Any] = {}
         '网页驱动'
-        self.console = console
+        if isinstance(presenter_or_console, TerminalPresenter):
+            self.presenter = presenter_or_console
+        else:
+            self.presenter = TerminalPresenter(presenter_or_console)
+        self.console = self.presenter.console
         self.reset()
 
     def create(self, output_path):
         self.output_path = output_path
-        self.console.print(f'动漫文件本机存储路径为: {output_path}')
+        self.presenter.output_path(output_path)
         self.http = self.create_http_session()
 
     def create_http_session(self):
@@ -733,7 +679,7 @@ class Context:
             self.driver = driver
             return True
 
-        self.console.print('正在初始化浏览器驱动...', style='dim')
+        self.presenter.print('正在初始化浏览器驱动...', style='dim')
         if not self.init_driver(source_or_class):
             return False
         self.drivers[cache_key] = self.driver
@@ -766,7 +712,7 @@ class Context:
             if self._try_init_driver(name, driver_cls, options_cls):
                 return True
 
-        self.console.print(
+        self.presenter.print(
             '所有浏览器驱动初始化失败，请确保已安装 Firefox/Chrome/Edge 及其对应驱动。',
             style='bold red',
         )
@@ -783,7 +729,7 @@ class Context:
                 options.add_argument('--disable-dev-shm-usage')
 
             self.driver = driver_cls(options=options)
-            self.console.print(f'已初始化 {name} 浏览器驱动', style='green')
+            self.presenter.print(f'已初始化 {name} 浏览器驱动', style='green')
             return True
         except Exception as e:
             logger.debug('初始化 {driver_name} 驱动失败: {error}', driver_name=name, error=e)
@@ -799,11 +745,11 @@ class Context:
                 timeout_seconds=self._source_browser_wait_seconds(source_or_class),
                 launch_options=self._source_cloakbrowser_options(source_or_class),
             )
-            self.console.print('已初始化 CloakBrowser 浏览器驱动', style='green')
+            self.presenter.print('已初始化 CloakBrowser 浏览器驱动', style='green')
             return True
         except Exception as e:
             logger.debug('初始化 CloakBrowser 驱动失败: {error}', error=e, exc_info=True)
-            self.console.print(f'CloakBrowser 浏览器驱动初始化失败: {e}', style='bold red')
+            self.presenter.print(f'CloakBrowser 浏览器驱动初始化失败: {e}', style='bold red')
             return False
 
     def _try_init_seleniumbase_driver(
@@ -814,11 +760,11 @@ class Context:
                 headless=self._source_browser_headless(source_or_class),
                 timeout_seconds=self._source_browser_wait_seconds(source_or_class),
             )
-            self.console.print('已初始化 SeleniumBase 浏览器会话', style='green')
+            self.presenter.print('已初始化 SeleniumBase 浏览器会话', style='green')
             return True
         except Exception as e:
             logger.debug('初始化 SeleniumBase 驱动失败: {error}', error=e, exc_info=True)
-            self.console.print(f'SeleniumBase 浏览器会话初始化失败: {e}', style='bold red')
+            self.presenter.print(f'SeleniumBase 浏览器会话初始化失败: {e}', style='bold red')
             return False
 
     def _driver_cache_key(
