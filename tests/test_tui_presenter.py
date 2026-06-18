@@ -9,6 +9,7 @@ from downloader.models import (
     ComicBook,
     ComicVolume,
     DownloadSummary,
+    ImageDownloadFailure,
     VolumeDownloadResult,
 )
 from downloader.tui import TerminalPresenter
@@ -20,6 +21,9 @@ def presenter_with_output() -> tuple[TerminalPresenter, StringIO]:
     return TerminalPresenter(console), output
 
 
+# ---------------------------------------------------------------------------
+# 搜索结果
+# ---------------------------------------------------------------------------
 def test_search_results_render_table_with_source_author_name_and_url():
     presenter, output = presenter_with_output()
     comic = Comic()
@@ -36,7 +40,9 @@ def test_search_results_render_table_with_source_author_name_and_url():
     )
 
     rendered = output.getvalue()
-    assert '搜索结果 (1 条，用时 1.2s)' in rendered
+    assert '搜索结果' in rendered
+    assert '猎人' in rendered
+    assert '1.2s' in rendered
     assert '摩锐漫画' in rendered
     assert '作者' in rendered
     assert '漫画名' in rendered
@@ -51,6 +57,38 @@ def test_search_results_render_empty_message():
     assert '未找到与 "不存在" 相关的结果。' in output.getvalue()
 
 
+def test_search_results_footer_resolves_markup_not_literal():
+    """Footer 是富文本标记字符串，必须被渲染为样式而不是字面 [cyan] 文本。"""
+    presenter, output = presenter_with_output()
+    comic = Comic()
+    comic.source = 'morui'
+    comic.name = '漫画名'
+    comic.url = 'https://example.test/comic'
+
+    presenter.search_results('猎人', [comic] * 3, {'morui': '摩锐漫画'}, 83.4)
+
+    rendered = output.getvalue()
+    assert '[cyan]' not in rendered
+    assert '3' in rendered
+    assert '条结果' in rendered
+    assert '83.4s' in rendered
+
+
+def test_search_results_render_placeholder_for_missing_fields():
+    presenter, output = presenter_with_output()
+    comic = Comic()
+    comic.source = 'morui'
+    comic.url = 'https://example.test/comic'
+
+    presenter.search_results('猎人', [comic], {'morui': '摩锐漫画'}, 0.2)
+
+    rendered = output.getvalue()
+    assert '[未提供]' in rendered
+
+
+# ---------------------------------------------------------------------------
+# 动漫详情
+# ---------------------------------------------------------------------------
 def test_comic_info_renders_metadata_and_chapter_table():
     presenter, output = presenter_with_output()
     comic = Comic()
@@ -69,13 +107,31 @@ def test_comic_info_renders_metadata_and_chapter_table():
     rendered = output.getvalue()
     assert '漫画名' in rendered
     assert '作者名' in rendered
-    assert '1' in rendered
+    assert '正篇' in rendered
     assert '第1话' in rendered
-    assert '2' in rendered
     assert '第2话' in rendered
 
 
-def test_download_summary_renders_success_counts():
+def test_comic_info_renders_author_and_source_when_present():
+    presenter, output = presenter_with_output()
+    comic = Comic()
+    comic.name = '漫画名'
+    comic.author = '作者名'
+    comic.source = 'morui'
+    comic.books = []
+
+    presenter.comic_info(comic)
+
+    rendered = output.getvalue()
+    assert '漫画名' in rendered
+    assert '作者名' in rendered
+    assert 'morui' in rendered
+
+
+# ---------------------------------------------------------------------------
+# 下载汇总
+# ---------------------------------------------------------------------------
+def test_download_summary_renders_success_counts_for_clean_run():
     presenter, output = presenter_with_output()
     summary = DownloadSummary()
     summary.add(
@@ -87,11 +143,157 @@ def test_download_summary_renders_success_counts():
 
     presenter.download_summary(summary)
 
-    assert '下载完成：成功 1，跳过 1' in output.getvalue()
+    rendered = output.getvalue()
+    assert '下载完成' in rendered
+    assert '成功 1' in rendered
+    assert '跳过 1' in rendered
+    assert '失败 0' in rendered
 
 
+def test_download_summary_renders_detail_table_with_badges_when_failures_exist():
+    presenter, output = presenter_with_output()
+    summary = DownloadSummary()
+    summary.add(
+        VolumeDownloadResult(
+            name='第1话', url='https://example.test/1', status='downloaded',
+            image_count=10, downloaded_count=10,
+        )
+    )
+    summary.add(
+        VolumeDownloadResult(
+            name='第2话', url='https://example.test/2', status='skipped',
+            archive_path='/tmp/第2话.zip',
+        )
+    )
+    summary.add(
+        VolumeDownloadResult(
+            name='第3话', url='https://example.test/3', status='failed', image_count=8,
+            downloaded_count=0, message='未解析到任何图片',
+        )
+    )
+    summary.add(
+        VolumeDownloadResult(
+            name='第4话', url='https://example.test/4', status='partial', image_count=5,
+            downloaded_count=3,
+            failed_images=[ImageDownloadFailure(index=4, url='u', file_path='p', error='超时')],
+        )
+    )
+
+    presenter.download_summary(summary)
+
+    rendered = output.getvalue()
+    assert '下载汇总' in rendered
+    assert '失败 1' in rendered
+    assert '部分 1' in rendered
+    # 详情表头
+    assert '状态' in rendered
+    assert '图片' in rendered
+    # 卷名都出现
+    assert '第1话' in rendered
+    assert '第2话' in rendered
+    assert '第3话' in rendered
+    assert '第4话' in rendered
+    # 状态徽标文本
+    assert '✓ 已下载' in rendered
+    assert '⊘ 已跳过' in rendered
+    assert '✗ 失败' in rendered
+    assert '△ 部分失败' in rendered
+    # 图片计数
+    assert '10/10' in rendered
+    assert '3/5' in rendered
+    # 失败图片展开
+    assert '超时' in rendered
+
+
+def test_download_summary_renders_warn_for_empty_run():
+    presenter, output = presenter_with_output()
+    summary = DownloadSummary()
+
+    presenter.download_summary(summary)
+
+    assert '没有下载任何章节' in output.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# 提示符
+# ---------------------------------------------------------------------------
 def test_prompt_includes_current_source_when_selected():
     presenter, _ = presenter_with_output()
 
     assert presenter.prompt(None) == '动漫下载器> '
     assert presenter.prompt('morui') == '动漫下载器[morui]> '
+
+
+# ---------------------------------------------------------------------------
+# 欢迎与退出
+# ---------------------------------------------------------------------------
+def test_welcome_renders_title_commands_and_sources():
+    presenter, output = presenter_with_output()
+
+    presenter.welcome(['摩锐漫画', '读漫屋'])
+
+    rendered = output.getvalue()
+    assert '动漫下载器' in rendered
+    assert '命令速查' in rendered
+    assert 's' in rendered and 'i' in rendered and 'd' in rendered
+    assert 'v' in rendered and 'source' in rendered and 'q' in rendered
+    assert '摩锐漫画' in rendered
+    assert '读漫屋' in rendered
+
+
+def test_welcome_renders_without_sources():
+    presenter, output = presenter_with_output()
+
+    presenter.welcome()
+
+    rendered = output.getvalue()
+    assert '动漫下载器' in rendered
+    assert '命令速查' in rendered
+
+
+def test_farewell_renders_message():
+    presenter, output = presenter_with_output()
+
+    presenter.farewell()
+
+    rendered = output.getvalue()
+    assert '再会' in rendered
+    assert '动漫下载器' in rendered
+
+
+# ---------------------------------------------------------------------------
+# 语义化提示
+# ---------------------------------------------------------------------------
+def test_semantic_methods_render_with_markers():
+    presenter, output = presenter_with_output()
+
+    presenter.info('普通信息')
+    presenter.success('成功信息')
+    presenter.warn('警告信息')
+    presenter.error('错误信息')
+
+    rendered = output.getvalue()
+    assert '✔ 成功信息' in rendered
+    assert '⚠ 警告信息' in rendered
+    assert '✖ 错误信息' in rendered
+    assert '普通信息' in rendered
+
+
+def test_source_options_renders_indexed_list_in_panel():
+    presenter, output = presenter_with_output()
+
+    presenter.source_options(['摩锐漫画', '读漫屋'])
+
+    rendered = output.getvalue()
+    assert '摩锐漫画' in rendered
+    assert '读漫屋' in rendered
+    assert '1.' in rendered
+    assert '2.' in rendered
+
+
+def test_output_path_renders_path_in_panel():
+    presenter, output = presenter_with_output()
+
+    presenter.output_path('/tmp/comics')
+
+    assert '/tmp/comics' in output.getvalue()

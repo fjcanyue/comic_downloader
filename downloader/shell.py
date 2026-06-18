@@ -145,20 +145,8 @@ def _run_search_parallel(
 
 class Shell(cmd.Cmd):
     use_rawinput = False
-
-    intro = """
-    欢迎使用动漫下载器，输入 help 或者 ? 查看帮助。
-    支持的命令有：
-    * s: 搜索动漫，从所有支持的源中搜索。输入s <搜索关键字>。例如：输入 s 猎人
-    * d: 全量下载动漫，输入d <搜索结果序号/动漫URL地址>。例如：输入 d 12，或者d https://www.maofly.com/manga/38316.html
-    * i: 查看动漫详情，输入i <搜索结果序号/动漫URL地址>。例如：输入 i 12，或者i https://www.maofly.com/manga/13954.html
-    * v: 按范围下载动漫，需要先执行查看动漫详情命令，根据详情的序号列表，指定下载范围。支持三种模式：
-      - 输入v <章节序号>，下载该章节下的所有动漫。例如：输入 v 1。
-      - 输入v <章节序号> <截止序号>，下载该章节下，从章节开始到截止序号的动漫。例如：输入 v 1 12
-      - 输入v <章节序号> <起始序号> <截止序号>，下载该章节下，从起始位置到截止位置的动漫。例如：输入 v 1 12 18
-    * source: 手动切换动漫下载网站源 (可选)。
-    * q: 退出动漫下载器
-    """
+    # 欢迎界面由 preloop 渲染（Panel 形式），不再使用 cmd 的纯文本 intro。
+    intro: str | None = None
     prefix = '动漫下载器> '
     prompt = prefix
 
@@ -193,6 +181,10 @@ class Shell(cmd.Cmd):
         self.source_options = list(self.source_bindings.keys())  # 存储源名称列表，方便按索引访问
         self.sources = {}
 
+    def preloop(self) -> None:
+        """交互式 shell 启动时渲染一次欢迎界面。子命令模式不经过 cmdloop，不会触发。"""
+        self.presenter.welcome(self.source_options)
+
     def _read_prompt_line(self, prompt: str) -> str:
         self.stdout.write(prompt)
         self.stdout.flush()
@@ -209,7 +201,7 @@ class Shell(cmd.Cmd):
                 runtime_config=self.runtime_config,
             )
         except Exception as e:
-            self.presenter.print(f'Failed to load comic sources: {e}', style='bold red')
+            self.presenter.error(f'Failed to load comic sources: {e}')
             return {}
 
     def _ensure_driver(
@@ -225,7 +217,7 @@ class Shell(cmd.Cmd):
 
     def _ensure_source_download_ready(self) -> bool:
         if self.context.source is None:
-            self.presenter.print('当前没有选中的动漫源！')
+            self.presenter.warn('当前没有选中的动漫源！')
             return False
         profile = getattr(self.context.source, 'profile', None)
         uses_driver = (
@@ -238,19 +230,19 @@ class Shell(cmd.Cmd):
         if self._ensure_driver(self.context.source):
             self.context.source.driver = self.context.driver
             return True
-        self.presenter.print('当前动漫源下载需要浏览器驱动，无法继续下载。', style='bold red')
+        self.presenter.error('当前动漫源下载需要浏览器驱动，无法继续下载。')
         return False
 
     def _ensure_source_page_ready(self) -> bool:
         if self.context.source is None:
-            self.presenter.print('当前没有选中的动漫源！')
+            self.presenter.warn('当前没有选中的动漫源！')
             return False
         if not self.context.source.current_browser_mode_uses_driver():
             return True
         if self._ensure_driver(self.context.source):
             self.context.source.driver = self.context.driver
             return True
-        self.presenter.print('当前动漫源页面解析需要浏览器驱动，无法继续。', style='bold red')
+        self.presenter.error('当前动漫源页面解析需要浏览器驱动，无法继续。')
         return False
 
     def _match_source_for_url(self, url: str) -> str | None:
@@ -275,14 +267,14 @@ class Shell(cmd.Cmd):
                     source_name = self.source_options[source_index]
                     self.__switch_source(source_name)
                     break  # 选择成功，退出循环
-                self.presenter.print(
+                self.presenter.warn(
                     f'无效的序号，请输入 1 到 {len(self.source_options)} 之间的序号。'
                 )
             except EOFError:
                 self.presenter.print()
                 return
             except ValueError:
-                self.presenter.print('请输入有效的数字序号。')
+                self.presenter.warn('请输入有效的数字序号。')
 
     def __switch_source(self, source_name):
         """切换动漫源"""
@@ -363,9 +355,8 @@ class Shell(cmd.Cmd):
                 skipped_sources.add(task.source_name)
         if not skipped_sources:
             return ready_tasks
-        self.presenter.print(
-            f'已跳过需要浏览器驱动的搜索源: {", ".join(sorted(skipped_sources))}',
-            style='bold yellow',
+        self.presenter.warn(
+            f'已跳过需要浏览器驱动的搜索源: {", ".join(sorted(skipped_sources))}'
         )
         return ready_tasks
 
@@ -376,9 +367,7 @@ class Shell(cmd.Cmd):
             if not outcome:
                 continue
             if outcome.error_message:
-                self.presenter.print(
-                    f'在 {source_name} 中搜索失败: {outcome.error_message}', style='bold red'
-                )
+                self.presenter.error(f'在 {source_name} 中搜索失败: {outcome.error_message}')
             self.context.searched_results.extend(outcome.results)
 
     def _print_search_table(self, keyword: str, search_duration: float) -> None:
@@ -396,7 +385,7 @@ class Shell(cmd.Cmd):
     def do_s(self, arg):
         """搜索动漫，输入s <搜索关键字>，例如：s 猎人"""
         if not arg:
-            self.presenter.print('请输入搜索关键字！')
+            self.presenter.warn('请输入搜索关键字！')
             return
 
         self.context.reset_comic()
@@ -430,7 +419,7 @@ class Shell(cmd.Cmd):
     def do_i(self, arg):
         """查看动漫详情，输入i <搜索结果序号/动漫URL地址>，例如：d 12，或者d https://www.maofly.com/manga/13954.html"""
         if not arg:
-            self.presenter.print('请输入动漫URL地址或者搜索结果序号！')
+            self.presenter.warn('请输入动漫URL地址或者搜索结果序号！')
             return
 
         url = self._resolve_info_url(arg)
@@ -438,7 +427,7 @@ class Shell(cmd.Cmd):
             return
 
         if not self.context.source:
-            self.presenter.print('无法确定该动漫所属的源，请先搜索或手动选择源。')
+            self.presenter.warn('无法确定该动漫所属的源，请先搜索或手动选择源。')
             return
         if not self._ensure_source_page_ready():
             return
@@ -447,7 +436,7 @@ class Shell(cmd.Cmd):
             self.context.comic = self.context.source.info(url)
 
         if self.context.comic is None:
-            self.presenter.print('未能获取动漫详情，请检查输入的地址或稍后重试。', style='bold red')
+            self.presenter.error('未能获取动漫详情，请检查输入的地址或稍后重试。')
             return
 
         self._print_comic_info(self.context.comic)
@@ -461,10 +450,10 @@ class Shell(cmd.Cmd):
         try:
             idx = parse_1_based_index(arg, len(self.context.searched_results), '搜索结果')
         except ValueError:
-            self.presenter.print('请先搜索动漫，或输入正确的搜索结果序号！')
+            self.presenter.warn('请先搜索动漫，或输入正确的搜索结果序号！')
             return None
         if not self.context.searched_results:
-            self.presenter.print('请先搜索动漫，或输入正确的搜索结果序号！')
+            self.presenter.warn('请先搜索动漫，或输入正确的搜索结果序号！')
             return None
 
         comic = self.context.searched_results[idx]
@@ -483,7 +472,7 @@ class Shell(cmd.Cmd):
             and url.startswith(self.context.source.base_url)
         ):
             return url
-        self.presenter.print('请输入完整的动漫地址，且确保该地址属于支持的动漫源！')
+        self.presenter.warn('请输入完整的动漫地址，且确保该地址属于支持的动漫源！')
         return None
 
     def _print_comic_info(self, comic: Comic) -> None:
@@ -499,13 +488,13 @@ class Shell(cmd.Cmd):
     def do_v(self, arg):
         """下载动漫，输入v <章节序号> <起始序号> <截止序号>，例如：v 1 11 12"""
         if not self.context.source:
-            self.presenter.print('请您先选择动漫下载网站源！')
+            self.presenter.warn('请您先选择动漫下载网站源！')
             return
         if not arg:
-            self.presenter.print('请输入动漫章节序号！')
+            self.presenter.warn('请输入动漫章节序号！')
             return
         if self.context.comic is None:
-            self.presenter.print('请先查看动漫详情！')
+            self.presenter.warn('请先查看动漫详情！')
             return
 
         args = arg.split()
@@ -514,7 +503,7 @@ class Shell(cmd.Cmd):
             book = self.context.comic.books[book_index]
             _, vol_slice = parse_volume_slice(args, len(self.context.comic.books), len(book.vols))
         except ValueError as e:
-            self.presenter.print(str(e))
+            self.presenter.warn(str(e))
             return
         vols = book.vols[vol_slice]
         if not self._ensure_source_download_ready():
@@ -531,10 +520,10 @@ class Shell(cmd.Cmd):
 
     def _download_loaded_comic(self):
         if self.context.comic is None:
-            self.presenter.print('请先查看动漫详情！')
+            self.presenter.warn('请先查看动漫详情！')
             return None
         if not self.context.source:
-            self.presenter.print('当前没有选中的动漫源！')
+            self.presenter.warn('当前没有选中的动漫源！')
             return None
         if not self._ensure_source_download_ready():
             return None
@@ -547,7 +536,7 @@ class Shell(cmd.Cmd):
         if comic.source:
             self.__switch_source(comic.source)
         if not comic.url:
-            self.presenter.print('搜索结果缺少下载地址，无法下载。')
+            self.presenter.warn('搜索结果缺少下载地址，无法下载。')
             return None
         return self._download_current_source_url(comic.url)
 
@@ -555,17 +544,17 @@ class Shell(cmd.Cmd):
         try:
             idx = parse_1_based_index(arg, len(self.context.searched_results), '搜索结果')
         except ValueError:
-            self.presenter.print('请先搜索动漫，或输入正确的搜索结果序号！')
+            self.presenter.warn('请先搜索动漫，或输入正确的搜索结果序号！')
             return None
         if not self.context.searched_results:
-            self.presenter.print('请先搜索动漫，或输入正确的搜索结果序号！')
+            self.presenter.warn('请先搜索动漫，或输入正确的搜索结果序号！')
             return None
 
         return self.context.searched_results[idx]
 
     def _download_current_source_url(self, url: str):
         if not self.context.source:
-            self.presenter.print('无法确定源，无法下载。')
+            self.presenter.warn('无法确定源，无法下载。')
             return None
         if not self._ensure_source_download_ready():
             return None
@@ -586,7 +575,7 @@ class Shell(cmd.Cmd):
         ):
             pass
         else:
-            self.presenter.print('请输入完整的动漫地址，且确保该地址属于支持的动漫源！')
+            self.presenter.warn('请输入完整的动漫地址，且确保该地址属于支持的动漫源！')
             return None
 
         return self._download_current_source_url(arg)
@@ -610,7 +599,7 @@ class Shell(cmd.Cmd):
     def do_q(self, arg):
         """退出动漫下载器"""
         self.context.destroy()
-        self.presenter.print('感谢使用，再会！')
+        self.presenter.farewell()
         return True
 
 
