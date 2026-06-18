@@ -9,10 +9,10 @@ from urllib.parse import urljoin
 import requests
 from loguru import logger
 from requests.adapters import HTTPAdapter
-from rich.progress import Progress
 from urllib3.util.retry import Retry
 
 from downloader.browser.modes import SELENIUMBASE_MODE
+from downloader.download.progress import DownloadProgress, ensure_download_progress
 from downloader.models import (
     ImageDownloadCancelledError,
     ImageDownloadContext,
@@ -30,7 +30,7 @@ class ImageDownloadMixin:
         vol_name: str,
         source_url: str,
         imgs: list[str],
-        progress: Progress | None = None,
+        progress: DownloadProgress | None = None,
     ) -> VolumeDownloadResult:
         """下载图片"""
         logger.info('开始下载图片到目录: {} (共 {} 张)', path, len(imgs))
@@ -47,16 +47,13 @@ class ImageDownloadMixin:
         self,
         context: ImageDownloadContext,
         imgs: list[str],
-        progress: Progress | None,
+        progress: DownloadProgress | None,
         vol_name: str,
     ) -> list[ImageDownloadFailure]:
+        progress = ensure_download_progress(progress)
         failed_images: list[ImageDownloadFailure] = []
         max_workers = max(1, min(self._source_max_download_workers(), len(imgs)))
-        task_id = (
-            progress.add_task(description=f'  [cyan]{vol_name}', total=len(imgs))
-            if progress
-            else None
-        )
+        task_id = progress.add_task(description=f'  [cyan]{vol_name}', total=len(imgs))
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
         futures: list[concurrent.futures.Future] = []
         try:
@@ -68,8 +65,7 @@ class ImageDownloadMixin:
                 failure = future.result()
                 if failure:
                     failed_images.append(failure)
-                if progress and task_id is not None:
-                    progress.advance(task_id)
+                progress.advance(task_id)
             executor.shutdown(wait=True)
         except (KeyboardInterrupt, SystemExit):
             context.cancel_event.set()

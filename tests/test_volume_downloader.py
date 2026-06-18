@@ -5,8 +5,9 @@ from typing import Any, cast
 
 from downloader import comic as comic_module
 from downloader.comic import ComicSource
+from downloader.download.progress import NoopDownloadProgress
 from downloader.download.volume import download_volume
-from downloader.models import VolumeDownloadResult
+from downloader.models import ComicVolume, VolumeDownloadResult
 
 
 class PipelineSource:
@@ -104,6 +105,70 @@ def test_parse_exception_returns_failed_result(tmp_path):
     assert source.download_calls == []
 
 
+def test_download_volume_without_progress_does_not_print(monkeypatch, tmp_path):
+    source = PipelineSource()
+    source.images = ['0001.jpg']
+
+    def fail_print(*args, **kwargs):
+        raise AssertionError('download_volume should use a progress adapter instead of print')
+
+    monkeypatch.setattr('builtins.print', fail_print)
+
+    result = download_volume(
+        source,
+        str(tmp_path),
+        'chapter',
+        'https://example.test/chapter',
+    )
+
+    assert result is source.download_result
+
+
+class RecordingProgress(NoopDownloadProgress):
+    def __init__(self) -> None:
+        self.events = []
+
+    def add_task(self, description: str, total: float | None = None):
+        task_id = len(self.events) + 1
+        self.events.append(('add_task', description, total, task_id))
+        return task_id
+
+    def remove_task(self, task_id) -> None:
+        self.events.append(('remove_task', task_id))
+
+    def advance(self, task_id, amount: float = 1) -> None:
+        self.events.append(('advance', task_id, amount))
+
+    def update(
+        self,
+        task_id,
+        *,
+        description: str | None = None,
+        total: float | None = None,
+    ) -> None:
+        self.events.append(('update', task_id, description, total))
+
+
+def test_download_volume_uses_progress_adapter_for_parse_task(tmp_path):
+    source = PipelineSource()
+    source.images = ['0001.jpg']
+    progress = RecordingProgress()
+
+    result = download_volume(
+        source,
+        str(tmp_path),
+        'chapter',
+        'https://example.test/chapter',
+        progress,
+    )
+
+    assert result is source.download_result
+    assert progress.events == [
+        ('add_task', '[yellow]正在解析 chapter 图片...', None, 1),
+        ('remove_task', 1),
+    ]
+
+
 def test_successful_parse_delegates_to_image_download(tmp_path):
     source = PipelineSource()
     source.images = ['0001.jpg', '0002.jpg']
@@ -116,15 +181,13 @@ def test_successful_parse_delegates_to_image_download(tmp_path):
     )
 
     assert result is source.download_result
-    assert source.download_calls == [
-        (
-            os.path.join(str(tmp_path), 'chapter'),
-            'chapter',
-            'https://example.test/chapter',
-            ['0001.jpg', '0002.jpg'],
-            None,
-        )
-    ]
+    assert len(source.download_calls) == 1
+    path, vol_name, source_url, imgs, progress = source.download_calls[0]
+    assert path == os.path.join(str(tmp_path), 'chapter')
+    assert vol_name == 'chapter'
+    assert source_url == 'https://example.test/chapter'
+    assert imgs == ['0001.jpg', '0002.jpg']
+    assert isinstance(progress, NoopDownloadProgress)
 
 
 class ParseDelegatingSource(ComicSource):
@@ -182,4 +245,46 @@ def test_comic_source_download_vol_delegates_to_volume_pipeline(monkeypatch, tmp
             'https://example.test/chapter',
             None,
         )
+    ]
+
+
+def test_comic_source_download_vols_uses_download_progress_adapter(monkeypatch, tmp_path):
+    source = ParseDelegatingSource(str(tmp_path), cast(Any, object()), None)
+    progress = RecordingProgress()
+    expected = VolumeDownloadResult(
+        name='chapter',
+        url='https://example.test/chapter',
+        status='downloaded',
+    )
+    calls = []
+
+    def fake_create_download_progress():
+        return progress
+
+    def fake_download_volume(source_arg, path, vol_name, url, parent_progress=None):
+        calls.append((source_arg, path, vol_name, url, parent_progress))
+        return expected
+
+    monkeypatch.setattr(source, 'create_download_progress', fake_create_download_progress)
+    monkeypatch.setattr(comic_module, 'download_volume', fake_download_volume)
+
+    summary = source.download_vols(
+        'comic',
+        'book',
+        [ComicVolume('chapter', 'https://example.test/chapter')],
+    )
+
+    assert summary.volume_results == [expected]
+    assert calls == [
+        (
+            source,
+            os.path.join(str(tmp_path), 'comic', 'book'),
+            'chapter',
+            'https://example.test/chapter',
+            progress,
+        )
+    ]
+    assert progress.events == [
+        ('add_task', '下载 book', 1, 1),
+        ('advance', 1, 1),
     ]

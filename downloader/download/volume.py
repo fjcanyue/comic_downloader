@@ -4,8 +4,8 @@ import os
 from typing import Any
 
 from loguru import logger
-from rich.progress import Progress
 
+from downloader.download.progress import DownloadProgress, ensure_download_progress
 from downloader.models import VolumeDownloadResult, filter_dir_name
 
 
@@ -14,7 +14,7 @@ def download_volume(
     path: str,
     vol_name: str,
     url: str,
-    parent_progress: Progress | None = None,
+    parent_progress: DownloadProgress | Any | None = None,
 ) -> VolumeDownloadResult:
     logger.info('开始下载卷/话: {} 从 {}', vol_name, url)
 
@@ -29,18 +29,16 @@ def download_volume(
             message='文件已存在',
         )
 
+    progress = ensure_download_progress(parent_progress)
     parse_task_id = None
-    if parent_progress:
-        parse_task_id = parent_progress.add_task(
-            description=f'[yellow]正在解析 {vol_name} 图片...',
-            total=None,
-        )
-    else:
-        print(f'正在解析 {vol_name} 图片...')
+    parse_task_id = progress.add_task(
+        description=f'[yellow]正在解析 {vol_name} 图片...',
+        total=None,
+    )
 
     try:
         imgs = source.parse_images(url)
-        source._remove_progress_task(parent_progress, parse_task_id)
+        source._remove_progress_task(progress, parse_task_id)
         parse_task_id = None
 
         if not imgs:
@@ -58,7 +56,7 @@ def download_volume(
             vol_name,
             url,
             imgs,
-            parent_progress,
+            progress,
         )
         if result.ok:
             logger.info('卷/话 {} 下载完成.', vol_name)
@@ -72,6 +70,6 @@ def download_volume(
             )
         return result
     except Exception as e:
-        source._remove_progress_task(parent_progress, parse_task_id)
+        source._remove_progress_task(progress, parse_task_id)
         logger.error('处理卷/话失败: {} ({}), 错误: {}', vol_name, url, e, exc_info=True)
         return VolumeDownloadResult(name=vol_name, url=url, status='failed', message=str(e))

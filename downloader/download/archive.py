@@ -5,8 +5,8 @@ import re
 import shutil
 
 from loguru import logger
-from rich.progress import Progress
 
+from downloader.download.progress import DownloadProgress
 from downloader.models import (
     ImageDownloadFailure,
     VolumeDownloadResult,
@@ -40,7 +40,7 @@ class ArchiveMixin:
                 return padded_path
         return None
 
-    def _remove_progress_task(self, progress: Progress | None, task_id) -> None:
+    def _remove_progress_task(self, progress: DownloadProgress | None, task_id) -> None:
         if progress is None or task_id is None:
             return
         try:

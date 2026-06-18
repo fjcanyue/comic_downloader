@@ -9,7 +9,6 @@ from typing import Any
 import requests
 from loguru import logger
 from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
-from rich.progress import BarColumn, Progress, TextColumn
 
 from downloader.browser.html_parser import HtmlParsingMixin
 from downloader.browser.modes import (
@@ -20,6 +19,7 @@ from downloader.browser.modes import (
 )
 from downloader.download.archive import ArchiveMixin
 from downloader.download.images import ImageDownloadMixin
+from downloader.download.progress import DownloadProgress, RichDownloadProgress
 from downloader.download.volume import download_volume
 from downloader.models import (
     Comic,
@@ -297,11 +297,7 @@ class ComicSource(ImageDownloadMixin, ArchiveMixin, HtmlParsingMixin, ABC):
         os.makedirs(path, exist_ok=True)
         summary = DownloadSummary()
 
-        with Progress(
-            TextColumn('[progress.description]{task.description}'),
-            BarColumn(),
-            '[progress.percentage]{task.percentage:>3.0f}%',
-        ) as progress:
+        with self.create_download_progress() as progress:
             for book in comic.books:
                 book_path = os.path.join(path, filter_dir_name(book.name or '默认章节'))
                 logger.info('处理章节: {}', book.name)
@@ -328,6 +324,9 @@ class ComicSource(ImageDownloadMixin, ArchiveMixin, HtmlParsingMixin, ABC):
                 # 任务完成后移除或保留? 一般保留显示完成状态
                 progress.update(task_id, description=f'{book.name} 完成')
         return summary
+
+    def create_download_progress(self) -> DownloadProgress:
+        return RichDownloadProgress()
 
     @abstractmethod
     def __parse_imgs__(self, url) -> list[str]:
@@ -360,11 +359,7 @@ class ComicSource(ImageDownloadMixin, ArchiveMixin, HtmlParsingMixin, ABC):
         os.makedirs(path, exist_ok=True)
         summary = DownloadSummary()
 
-        with Progress(
-            TextColumn('[progress.description]{task.description}'),
-            BarColumn(),
-            '[progress.percentage]{task.percentage:>3.0f}%',
-        ) as progress:
+        with self.create_download_progress() as progress:
             task_id = progress.add_task(description=f'下载 {book_name}', total=len(vols))
             for vol in vols:
                 try:
@@ -384,7 +379,7 @@ class ComicSource(ImageDownloadMixin, ArchiveMixin, HtmlParsingMixin, ABC):
         return summary
 
     def __download_vol__(
-        self, path: str, vol_name: str, url: str, parent_progress: Progress | None = None
+        self, path: str, vol_name: str, url: str, parent_progress: DownloadProgress | None = None
     ) -> VolumeDownloadResult:
         """下载动漫卷/话
 
