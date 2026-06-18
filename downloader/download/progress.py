@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
-from rich.progress import BarColumn, Progress, TextColumn
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+    TimeRemainingColumn,
+)
 
 
 @runtime_checkable
@@ -61,9 +68,12 @@ class NoopDownloadProgress:
 class RichDownloadProgress:
     def __init__(self, progress: Any | None = None) -> None:
         self.progress = progress or Progress(
+            SpinnerColumn(style='cyan'),
             TextColumn('[progress.description]{task.description}'),
-            BarColumn(),
-            '[progress.percentage]{task.percentage:>3.0f}%',
+            BarColumn(bar_width=None, complete_style='green', finished_style='green'),
+            TaskProgressColumn(),
+            TimeRemainingColumn(),
+            expand=True,
         )
 
     def __enter__(self):
