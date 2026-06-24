@@ -1,10 +1,10 @@
-# -*- mode: python ; coding: utf-8 -*-
+# ruff: noqa: F821
 
 import site
 from importlib.machinery import EXTENSION_SUFFIXES
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 
 def collect_mypyc_support_modules():
@@ -17,21 +17,76 @@ def collect_mypyc_support_modules():
     return sorted(modules)
 
 
-block_cipher = None
-runtime_hiddenimports = (
-    collect_submodules('rich._unicode_data')
-    + collect_submodules('charset_normalizer')
-    + collect_mypyc_support_modules()
-)
-source_adapter_hiddenimports = collect_submodules('downloader.sources.adapters')
+def unique_imports(*groups):
+    imports = []
+    seen = set()
+    for group in groups:
+        for module in group:
+            if module not in seen:
+                imports.append(module)
+                seen.add(module)
+    return imports
 
+
+block_cipher = None
+runtime_hiddenimports = unique_imports(
+    collect_submodules('rich._unicode_data'),
+    ('charset_normalizer.md',),
+    collect_mypyc_support_modules(),
+)
+source_adapter_hiddenimports = (
+    'downloader.sources.adapters',
+    'downloader.sources.adapters.boya',
+    'downloader.sources.adapters.dmzj',
+    'downloader.sources.adapters.dumanwu',
+    'downloader.sources.adapters.manhuafree',
+    'downloader.sources.adapters.manhuagui',
+    'downloader.sources.adapters.manhuazhan',
+    'downloader.sources.adapters.maofly',
+    'downloader.sources.adapters.morui',
+    'downloader.sources.adapters.thmh',
+    'downloader.sources.adapters.tuku',
+)
+source_hiddenimports = unique_imports(
+    (
+        'downloader.sources.registry',
+        'downloader.sources.templates',
+        *source_adapter_hiddenimports,
+    ),
+    collect_submodules('downloader.sources'),
+)
+
+# Core dependency edges that PyInstaller may miss during automatic analysis.
+# Keep this targeted: collecting whole packages such as seleniumbase also pulls
+# in large optional test/CLI trees that are not part of the downloader runtime.
+dependency_hiddenimports = unique_imports(
+    (
+        'lxml.etree',
+        'lxml._elementpath',
+        'selenium.webdriver',
+        'selenium.webdriver.chrome.webdriver',
+        'selenium.webdriver.chrome.options',
+        'selenium.webdriver.edge.webdriver',
+        'selenium.webdriver.edge.options',
+        'selenium.webdriver.firefox.webdriver',
+        'selenium.webdriver.firefox.options',
+        'selenium.webdriver.common.by',
+        'selenium.webdriver.support.ui',
+        'seleniumbase',
+        'seleniumbase.core.browser_launcher',
+        'cloakbrowser.human',
+        'urllib3.util.retry',
+    ),
+    collect_submodules('seleniumbase.undetected'),
+)
+dependency_datas = collect_data_files('seleniumbase')
 
 a = Analysis(
     ['main.py'],
     pathex=['downloader'],
     binaries=[],
-    datas=[('configs', 'configs')],
-    hiddenimports=source_adapter_hiddenimports + runtime_hiddenimports,
+    datas=[('configs', 'configs'), *dependency_datas],
+    hiddenimports=[*source_hiddenimports, *runtime_hiddenimports, *dependency_hiddenimports],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
