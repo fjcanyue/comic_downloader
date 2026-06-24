@@ -32,7 +32,7 @@ def download_volume(
     progress = ensure_download_progress(parent_progress)
     parse_task_id = None
     parse_task_id = progress.add_task(
-        description=f'[yellow]正在解析 {vol_name} 图片...',
+        description=f'[yellow]🔍 解析章节图片 · {vol_name}',
         total=None,
     )
 

@@ -297,13 +297,18 @@ class ComicSource(ImageDownloadMixin, ArchiveMixin, HtmlParsingMixin, ABC):
         os.makedirs(path, exist_ok=True)
         summary = DownloadSummary()
 
+        total_vols = sum(len(book.vols) for book in comic.books)
         with self.create_download_progress() as progress:
+            # 总体进度条：贯穿所有章节，让大下载一眼可见 X/N 的完成度，
+            # 替代此前按 book 拆分的孤立 bar。
+            overall_id = progress.add_task(
+                description=f'📦 {comic.name or "未知动漫"} · 共 {total_vols} 章',
+                total=total_vols,
+            )
+
             for book in comic.books:
                 book_path = os.path.join(path, filter_dir_name(book.name or '默认章节'))
                 logger.info('处理章节: {}', book.name)
-
-                # 创建一个针对该书的任务
-                task_id = progress.add_task(description=f'下载 {book.name}', total=len(book.vols))
 
                 for vol in book.vols:
                     try:
@@ -319,10 +324,7 @@ class ComicSource(ImageDownloadMixin, ArchiveMixin, HtmlParsingMixin, ABC):
                             message=str(e),
                         )
                     summary.add(result)
-                    progress.advance(task_id)
-
-                # 任务完成后移除或保留? 一般保留显示完成状态
-                progress.update(task_id, description=f'{book.name} 完成')
+                    progress.advance(overall_id)
         return summary
 
     def create_download_progress(self) -> DownloadProgress:

@@ -164,7 +164,7 @@ def test_download_volume_uses_progress_adapter_for_parse_task(tmp_path):
 
     assert result is source.download_result
     assert progress.events == [
-        ('add_task', '[yellow]正在解析 chapter 图片...', None, 1),
+        ('add_task', '[yellow]🔍 解析章节图片 · chapter', None, 1),
         ('remove_task', 1),
     ]
 

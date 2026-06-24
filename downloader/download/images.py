@@ -53,7 +53,7 @@ class ImageDownloadMixin:
         progress = ensure_download_progress(progress)
         failed_images: list[ImageDownloadFailure] = []
         max_workers = max(1, min(self._source_max_download_workers(), len(imgs)))
-        task_id = progress.add_task(description=f'  [cyan]{vol_name}', total=len(imgs))
+        task_id = progress.add_task(description=f'[cyan]🖼  {vol_name}', total=len(imgs))
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
         futures: list[concurrent.futures.Future] = []
         try:
