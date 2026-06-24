@@ -1,5 +1,7 @@
 # 动漫下载器
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/fjcanyue/comic_downloader)
+
 轻量级动漫下载器，CLI 方式单线程下载。支持三种浏览器渲染模式，自动在请求被屏蔽时回退。
 
 ## 支持的网站
