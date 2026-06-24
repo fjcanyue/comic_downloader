@@ -14,8 +14,8 @@
 | [图库漫画](https://www.tuku.cc) | ✅ 可用 | requests |
 | [GoDa漫画](https://manhuafree.com) | ✅ 可用 | requests |
 
-[![asciicast](https://asciinema.org/a/H7hsCmPz1v9mqpxF4t40oLomM.svg)](https://asciinema.org/a/H7hsCmPz1v9mqpxF4t40oLomM)
-
+ ![演示](docs/demo.gif)
+ 
 ## 浏览器模式
 
 工具支持三种 HTML 解析方式，按源的配置自动切换：
