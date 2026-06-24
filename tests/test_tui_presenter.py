@@ -12,7 +12,7 @@ from downloader.models import (
     ImageDownloadFailure,
     VolumeDownloadResult,
 )
-from downloader.tui import TerminalPresenter
+from downloader.tui import SourceStat, TerminalPresenter
 
 
 def presenter_with_output() -> tuple[TerminalPresenter, StringIO]:
@@ -297,3 +297,97 @@ def test_output_path_renders_path_in_panel():
     presenter.output_path('/tmp/comics')
 
     assert '/tmp/comics' in output.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# help 命令速查
+# ---------------------------------------------------------------------------
+def test_help_renders_command_cheatsheet_panel():
+    presenter, output = presenter_with_output()
+
+    presenter.help()
+
+    rendered = output.getvalue()
+    assert '命令速查' in rendered
+    assert 's' in rendered and 'i' in rendered and 'd' in rendered
+    assert 'v' in rendered and 'source' in rendered and 'q' in rendered
+
+
+# ---------------------------------------------------------------------------
+# 搜索结果源状态汇总
+# ---------------------------------------------------------------------------
+def _comic(source: str = 'morui', name: str = '漫画名') -> Comic:
+    comic = Comic()
+    comic.source = source
+    comic.name = name
+    comic.url = 'https://example.test/comic'
+    return comic
+
+
+def test_search_results_renders_source_stats_when_provided():
+    presenter, output = presenter_with_output()
+
+    presenter.search_results(
+        '猎人',
+        [_comic()],
+        {'morui': '摩锐漫画'},
+        2.5,
+        source_stats=[
+            SourceStat(display_name='摩锐漫画', ok=True, duration=1.2),
+            SourceStat(display_name='读漫屋', ok=False, duration=0.5, error='timeout'),
+        ],
+    )
+
+    rendered = output.getvalue()
+    assert '源状态' in rendered
+    assert '摩锐漫画' in rendered
+    assert '1.2s' in rendered
+    assert '读漫屋' in rendered
+    assert 'timeout' in rendered
+
+
+def test_search_results_omits_source_stats_line_when_not_provided():
+    presenter, output = presenter_with_output()
+
+    presenter.search_results('猎人', [_comic()], {'morui': '摩锐漫画'}, 1.0)
+
+    assert '源状态' not in output.getvalue()
+
+
+def test_search_results_renders_source_stats_for_empty_results():
+    """无搜索结果时也应展示各源执行状态，便于排查失败的源。"""
+    presenter, output = presenter_with_output()
+
+    presenter.search_results(
+        '不存在',
+        [],
+        {},
+        0.1,
+        source_stats=[SourceStat(display_name='摩锐漫画', ok=True, duration=0.1)],
+    )
+
+    rendered = output.getvalue()
+    assert '未找到' in rendered
+    assert '源状态' in rendered
+    assert '摩锐漫画' in rendered
+
+
+# ---------------------------------------------------------------------------
+# 章节表自适应列数
+# ---------------------------------------------------------------------------
+def test_chapter_table_columns_adapt_to_console_width():
+    """窄终端应收敛到更少列数，宽终端可展开更多列；卷名始终可见。"""
+    narrow = Console(width=64, force_terminal=False, color_system=None)
+    wide = Console(width=200, force_terminal=False, color_system=None)
+    book = ComicBook()
+    book.name = '正篇'
+    book.vols = [ComicVolume(f'第{i}话', f'https://example.test/{i}') for i in range(1, 7)]
+
+    narrow_table = TerminalPresenter(narrow).chapter_table(0, book)
+    wide_table = TerminalPresenter(wide).chapter_table(0, book)
+
+    # 宽终端列数应不少于窄终端
+    assert len(wide_table.columns) >= len(narrow_table.columns)
+    # 至少 2 列（序号+名称对），且宽终端应在窄终端之上
+    assert len(narrow_table.columns) >= 2
+    assert len(wide_table.columns) > len(narrow_table.columns)

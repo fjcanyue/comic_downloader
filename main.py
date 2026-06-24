@@ -64,8 +64,7 @@ def main() -> int:
     try:
         _run_command(shell, subcommand, subcommand_args)
     except KeyboardInterrupt:
-        print()
-        print('感谢使用，再会！')
+        shell.presenter.farewell()
         return INTERRUPT_EXIT_CODE
     finally:
         shell.context.destroy()

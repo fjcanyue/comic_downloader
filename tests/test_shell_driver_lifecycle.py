@@ -272,6 +272,23 @@ def test_shell_prompt_updates_when_source_switches(tmp_path):
         shell.context.destroy()
 
 
+def test_shell_source_display_names_resolve_to_chinese_not_code(tmp_path):
+    """欢迎/选源界面必须展示中文显示名（读漫屋），而非源代码名（dumanwu）。"""
+    shell = Shell(str(tmp_path))
+    try:
+        display_names = shell._source_display_names()
+
+        assert len(display_names) == len(shell.source_options)
+        # 源代码名（小写英文）不应出现在展示列表中
+        for code_name in ('dumanwu', 'manhuafree', 'manhuagui', 'manhuazhan', 'morui', 'thmh', 'tuku'):
+            assert code_name not in display_names
+        # 已知中文名应出现
+        assert '摩锐漫画' in display_names
+        assert '读漫屋' in display_names
+    finally:
+        shell.context.destroy()
+
+
 def test_context_destroy_suppresses_driver_cleanup_interrupt():
     class InterruptingDriver:
         def __init__(self):

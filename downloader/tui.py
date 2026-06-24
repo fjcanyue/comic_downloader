@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from rich.console import Console, Group
@@ -28,6 +29,16 @@ MUTED = 'dim'
 BRAND = '动漫下载器'
 MAX_FAILURE_DETAIL_ROWS = 5
 MAX_URL_DISPLAY_WIDTH = 50
+
+
+@dataclass(frozen=True)
+class SourceStat:
+    """单个搜索源在一次搜索中的执行结果摘要，用于在搜索结果下方汇总展示。"""
+
+    display_name: str
+    ok: bool
+    duration: float
+    error: str | None = None
 
 
 class TerminalPresenter:
@@ -76,20 +87,26 @@ class TerminalPresenter:
         )
 
     # ------------------------------------------------------------------
-    # 欢迎与退出
+    # 命令速查：welcome 与 help 复用同一份文本，避免两处不一致。
     # ------------------------------------------------------------------
-    def welcome(self, source_names: list[str] | None = None) -> None:
-        title = Text(BRAND, style=f'bold {ACCENT}')
-        commands = (
+    def _command_cheatsheet(self) -> str:
+        return (
             '[bold]命令速查[/]\n'
             f'  [{ACCENT}]s[/]  <关键词>       从所有源搜索动漫\n'
             f'  [{ACCENT}]i[/]  <序号/URL>     查看动漫详情\n'
             f'  [{ACCENT}]d[/]  <序号/URL>     全量下载动漫\n'
             f'  [{ACCENT}]v[/]  <章节> [范围]  按范围下载章节\n'
             f'  [{ACCENT}]source[/]            手动切换下载源\n'
+            f'  [{ACCENT}]help[/] / [{ACCENT}]?[/]        查看命令速查\n'
             f'  [{ACCENT}]q[/]                 退出'
         )
-        body_lines = [commands]
+
+    # ------------------------------------------------------------------
+    # 欢迎与退出
+    # ------------------------------------------------------------------
+    def welcome(self, source_names: list[str] | None = None) -> None:
+        title = Text(BRAND, style=f'bold {ACCENT}')
+        body_lines = [self._command_cheatsheet()]
         if source_names:
             joined = f'  · '.join(source_names)
             body_lines.append(f'\n[{MUTED}]支持源: {joined}')
@@ -100,6 +117,18 @@ class TerminalPresenter:
                 border_style=ACCENT,
                 padding=(0, 2),
                 title=f'欢迎使用 {BRAND}',
+                title_align='left',
+            )
+        )
+
+    def help(self) -> None:
+        """随时可调用的命令速查面板，交互过程中也能查看。"""
+        self.print(
+            Panel(
+                self._command_cheatsheet(),
+                border_style=ACCENT,
+                padding=(0, 2),
+                title='命令速查',
                 title_align='left',
             )
         )
@@ -136,9 +165,12 @@ class TerminalPresenter:
         comics: list[Comic],
         source_display_names: dict[str | None, str],
         duration: float,
+        *,
+        source_stats: list[SourceStat] | None = None,
     ) -> None:
         if not comics:
             self.warn(f'未找到与 "{keyword}" 相关的结果。')
+            self._print_source_stats(source_stats)
             return
 
         self.print(Rule(f'搜索结果 · [bold]{keyword}[/]', style=ACCENT))
@@ -165,6 +197,22 @@ class TerminalPresenter:
 
         footer = f'共 [{ACCENT}]{len(comics)}[/] 条结果，用时 [{ACCENT}]{duration:.1f}s[/]'
         self.print(Group(table, Text(''), footer))
+        self._print_source_stats(source_stats)
+
+    def _print_source_stats(self, source_stats: list[SourceStat] | None) -> None:
+        """在结果下方渲染一行紧凑的各源执行状态，帮助用户一眼看出哪个源失败了。"""
+        if not source_stats:
+            return
+        parts: list[str] = []
+        for stat in source_stats:
+            if stat.ok:
+                parts.append(f'[{SUCCESS}]✓[/] {stat.display_name} ({stat.duration:.1f}s)')
+            else:
+                detail = stat.error or '失败'
+                if len(detail) > MAX_URL_DISPLAY_WIDTH:
+                    detail = detail[: MAX_URL_DISPLAY_WIDTH - 1] + '…'
+                parts.append(f'[{ERROR}]✗[/] {stat.display_name} ({detail})')
+        self.print(f'[{MUTED}]源状态: {f"  ".join(parts)}[/]')
 
     # ------------------------------------------------------------------
     # 动漫详情
@@ -199,7 +247,9 @@ class TerminalPresenter:
             title_style='bold',
         )
 
-        columns = 3
+        # 自适应列数：每对「序号+名称」预估占约 32 字符宽度，按终端宽度动态分列，
+        # 避免窄终端挤压换行、宽终端浪费空间。至少 1 列。
+        columns = max(1, self.console.width // 32)
         for _ in range(columns):
             table.add_column('Index', justify='right', style=ACCENT)
             table.add_column('Name', style='white')

@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 
 import main as main_module
+from downloader.tui import TerminalPresenter
 
 
 class FakeContext:
@@ -19,6 +20,8 @@ class FakeShell:
         self.overwrite = overwrite
         self.runtime_config = runtime_config
         self.context = FakeContext()
+        # 真实 Shell 通过 TerminalPresenter 暴露输出，fake 也需对齐该接口。
+        self.presenter = TerminalPresenter()
         self.cmdloop_called = False
 
     def cmdloop(self):
@@ -79,7 +82,9 @@ def test_keyboard_interrupt_exits_cleanly(monkeypatch, capsys):
 
     output = capsys.readouterr().out
     assert exit_code == main_module.INTERRUPT_EXIT_CODE
-    assert '感谢使用，再会！' in output
+    # 中断后走 presenter.farewell()，输出告别横幅与文案。
+    assert '再会' in output
+    assert '动漫下载器' in output
     assert created_shells[0].context.destroyed is True
 
 

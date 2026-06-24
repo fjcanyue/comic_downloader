@@ -18,7 +18,7 @@ from downloader.comic import Comic, ComicSource
 from downloader.runtime_config import RuntimeConfig
 from downloader.sources import load_source_bindings
 from downloader.sources.profiles import SourceBinding, SourceProfile
-from downloader.tui import TerminalPresenter
+from downloader.tui import SourceStat, TerminalPresenter
 
 FULL_VOLUME_ARG_COUNT = 1
 VOLUME_TO_ARG_COUNT = 2
@@ -183,7 +183,16 @@ class Shell(cmd.Cmd):
 
     def preloop(self) -> None:
         """交互式 shell 启动时渲染一次欢迎界面。子命令模式不经过 cmdloop，不会触发。"""
-        self.presenter.welcome(self.source_options)
+        self.presenter.welcome(self._source_display_names())
+
+    def _source_display_names(self) -> list[str]:
+        """按源顺序解析展示用中文名（读漫屋、摩锐漫画…），缺失时回退到源代码名。"""
+        names: list[str] = []
+        for source_name in self.source_options:
+            binding = self.source_bindings.get(source_name)
+            cls = binding.source_class if binding else None
+            names.append(getattr(cls, 'name', source_name) if cls is not None else source_name)
+        return names
 
     def _read_prompt_line(self, prompt: str) -> str:
         self.stdout.write(prompt)
@@ -254,13 +263,14 @@ class Shell(cmd.Cmd):
 
     def do_source(self, arg):
         """选择动漫下载网站源。输入 source  后，根据提示选择源序号。"""
-        self.presenter.source_options(self.source_options)
+        display_names = self._source_display_names()
+        self.presenter.source_options(display_names)
 
         while True:
             try:
                 source_index_str = self._read_prompt_line('请输入网站源序号: ')
                 if not source_index_str:  # 用户直接回车，重新显示列表
-                    self.presenter.source_options(self.source_options)
+                    self.presenter.source_options(display_names)
                     continue  # 继续下一次循环，等待用户输入
                 source_index = int(source_index_str) - 1  # 序号从1开始，索引从0开始
                 if 0 <= source_index < len(self.source_options):
@@ -370,7 +380,9 @@ class Shell(cmd.Cmd):
                 self.presenter.error(f'在 {source_name} 中搜索失败: {outcome.error_message}')
             self.context.searched_results.extend(outcome.results)
 
-    def _print_search_table(self, keyword: str, search_duration: float) -> None:
+    def _print_search_table(
+        self, keyword: str, search_duration: float, source_stats: list[SourceStat]
+    ) -> None:
         source_display_names = {
             source_name: getattr(source_obj, 'name', source_name)
             for source_name, source_obj in self.sources.items()
@@ -380,7 +392,30 @@ class Shell(cmd.Cmd):
             self.context.searched_results,
             source_display_names,
             search_duration,
+            source_stats=source_stats,
         )
+
+    def _build_source_stats(
+        self, outcomes: list[SearchOutcome], task_lookup: dict[str, SearchTask]
+    ) -> list[SourceStat]:
+        """把各源搜索结果汇总为 SourceStat 列表，按用户可见的源顺序排列。"""
+        outcome_by_source = {outcome.source_name: outcome for outcome in outcomes}
+        stats: list[SourceStat] = []
+        for source_name in self.source_options:
+            outcome = outcome_by_source.get(source_name)
+            task = task_lookup.get(source_name)
+            display_name = task.display_name if task else source_name
+            if outcome is None:
+                continue
+            stats.append(
+                SourceStat(
+                    display_name=display_name,
+                    ok=outcome.error_message is None,
+                    duration=outcome.duration,
+                    error=outcome.error_message,
+                )
+            )
+        return stats
 
     def do_s(self, arg):
         """搜索动漫，输入s <搜索关键字>，例如：s 猎人"""
@@ -407,6 +442,7 @@ class Shell(cmd.Cmd):
 
         search_duration = time.perf_counter() - search_start
         self._merge_search_outcomes(outcomes)
+        source_stats = self._build_source_stats(outcomes, task_lookup)
         logger.info(
             '搜索完成: keyword={keyword}, sources={sources}, results={results}, duration={duration:.2f}s',
             keyword=arg,
@@ -414,7 +450,7 @@ class Shell(cmd.Cmd):
             results=len(self.context.searched_results),
             duration=search_duration,
         )
-        self._print_search_table(arg, search_duration)
+        self._print_search_table(arg, search_duration, source_stats)
 
     def do_i(self, arg):
         """查看动漫详情，输入i <搜索结果序号/动漫URL地址>，例如：d 12，或者d https://www.maofly.com/manga/13954.html"""
@@ -601,6 +637,22 @@ class Shell(cmd.Cmd):
         self.context.destroy()
         self.presenter.farewell()
         return True
+
+    def do_help(self, arg):
+        """查看命令速查"""
+        self.presenter.help()
+
+    # help 的快捷别名，降低记忆负担；交互过程中随时可调用。
+    # 注意：cmd 的 parseline 已把行首 '?' 改写为 'help'，故无需再定义 do_?。
+    do_h = do_help
+
+    def default(self, line):
+        """未知命令时给出友好提示，替代 cmd 默认的 *** Unknown syntax。"""
+        self.presenter.warn(f'未知命令: {line}。输入 help 查看可用命令。')
+
+    def emptyline(self):
+        """空行不再重复上一条命令，避免误触发。"""
+        return None
 
 
 class Context:
