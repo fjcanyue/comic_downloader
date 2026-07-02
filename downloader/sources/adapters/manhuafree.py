@@ -7,6 +7,7 @@ from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
 
 from downloader.browser.modes import REQUESTS_MODE
 from downloader.comic import Comic, ComicBook, ComicSource, ComicVolume, logger
+from downloader.sources.templates import ConfigurableSearchMixin
 
 # 漫画状态码映射
 STATUS_MAP = {'0': '完结', '1': '连载', '2': '暂停'}
@@ -20,7 +21,7 @@ DEFAULT_IMG_HOST = 'https://t40-1-4.g-mh.online'
 API_SUCCESS_CODE = 200
 
 
-class ManhuafreeComic(ComicSource):
+class ManhuafreeComic(ConfigurableSearchMixin, ComicSource):
     name = 'GoDa漫画'
     base_url = 'https://manhuafree.com'
     browser_mode = REQUESTS_MODE
@@ -28,8 +29,8 @@ class ManhuafreeComic(ComicSource):
     config_file = 'manhuafree.json'
     enable = True
 
-    def __init__(self, output_dir, http, driver, overwrite=True, *, profile=None):
-        super().__init__(output_dir, http, driver, overwrite, profile=profile)
+    def _build_search_url(self, keyword: str) -> str:
+        return f'{self.base_url}/s/{quote(keyword)}'
 
     def _api_get(self, path, params=None):
         """调用 API 并返回 JSON 数据，失败返回 None"""
@@ -72,55 +73,6 @@ class ManhuafreeComic(ComicSource):
             return ms_match.group(1), cs_match.group(1)
         logger.error('无法从页面提取 data-ms 或 data-cs: {}', url)
         return None, None
-
-    def search(self, keyword):
-        logger.info('开始在 {} 搜索: {}', self.name, keyword)
-        search_url = f'{self.base_url}/s/{quote(keyword)}'
-        arr = []
-        try:
-            root = self.__parse_html__(search_url)
-            if root is None:
-                logger.error("搜索 '{}' 失败，无法获取或解析页面: {}", keyword, search_url)
-                return arr
-
-            items = self.parse_xpath_list(
-                root, self.config['search_xpath'], self.config['search_extract']
-            )
-            if not items:
-                logger.info(
-                    "在 {} 搜索 '{}' 时未找到结果，可能无结果或页面结构变更.",
-                    self.name,
-                    keyword,
-                )
-                return arr
-
-            for item in items:
-                comic = self._parse_search_item(item)
-                if comic:
-                    arr.append(comic)
-        except Exception as e:
-            logger.error("在 {} 搜索 '{}' 期间发生错误: {}", self.name, keyword, e, exc_info=True)
-            return arr
-        logger.info("{} 搜索 '{}' 完成, 共找到 {} 条结果.", self.name, keyword, len(arr))
-        return arr
-
-    def _parse_search_item(self, item):
-        """解析单个搜索结果"""
-        try:
-            url_part = item.get('url')
-            if not url_part:
-                logger.warning('解析到一个没有URL的漫画条目，已跳过。')
-                return None
-            comic = Comic()
-            comic.url = self.base_url + url_part if url_part.startswith('/') else url_part
-            name_text = item.get('name') or ''
-            comic.name = name_text.strip() or '未知漫画'
-            comic.author = ''
-            logger.debug('找到漫画: {}, URL: {}', comic.name, comic.url)
-            return comic
-        except Exception as e:
-            logger.error('解析漫画条目时出错: {}, 错误: {}', item, e, exc_info=True)
-            return None
 
     def info(self, url):
         logger.info('开始获取 {} 动漫详细信息: {}', self.name, url)

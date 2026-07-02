@@ -132,8 +132,9 @@ class ConfigurableSearchMixin(SourceUrlMixin):
         return comic
 
 
-class GroupedChapterInfoMixin(SourceUrlMixin):
-    reverse_volumes: bool = True
+class InfoFlowMixin(SourceUrlMixin):
+    """Standard info() orchestration: parse page → header → metadata → books."""
+
     info_encoding: str = 'utf-8'
 
     def info(self, url):
@@ -155,6 +156,19 @@ class GroupedChapterInfoMixin(SourceUrlMixin):
             len(comic.books),
         )
         return comic
+
+    def _parse_comic_header(self, root, url) -> Comic | None:
+        raise NotImplementedError
+
+    def _append_metadata(self, root, comic) -> None:
+        pass
+
+    def _append_books(self, root, comic, url) -> None:
+        raise NotImplementedError
+
+
+class GroupedChapterInfoMixin(InfoFlowMixin):
+    reverse_volumes: bool = True
 
     def _parse_comic_header(self, root, url):
         try:
@@ -180,9 +194,6 @@ class GroupedChapterInfoMixin(SourceUrlMixin):
                 exc_info=True,
             )
             return None
-
-    def _append_metadata(self, root, comic) -> None:
-        return None
 
     def _append_books(self, root, comic, url) -> None:
         book_list = root.xpath(self.config['info_books_xpath'])
@@ -348,6 +359,7 @@ class JsImageSourceMixin:
         logger.info('Start parsing images from {}: {}', self.name, url)
         try:
             self.driver.get(url)
+            self._prepare_driver_for_image_parse()
             img_urls = self.execute_js_safely(
                 self.driver, self.config[self.image_js_config_key], []
             )
@@ -361,6 +373,9 @@ class JsImageSourceMixin:
         except Exception as e:
             logger.error('Error while parsing image list from {}: {}', url, e, exc_info=True)
             return []
+
+    def _prepare_driver_for_image_parse(self):
+        """Hook called after driver.get() and before JS execution."""
 
     def _process_js_image_urls(self, img_urls):
         return [img for img in img_urls if img and isinstance(img, str)]
