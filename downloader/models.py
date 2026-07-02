@@ -125,4 +125,14 @@ filter_dir_re = re.compile(r'[\/:*?"<>|]')
 
 
 def filter_dir_name(name: str) -> str:
-    return re.sub(filter_dir_re, '-', name)
+    """Sanitize a name for use as a directory component.
+
+    Strips dangerous characters and neutralizes path-traversal sequences
+    (e.g. ``..``) so the resulting name cannot escape its parent directory.
+    """
+    sanitized = re.sub(filter_dir_re, '-', name)
+    # Collapse any '..' path-traversal components to safe dashes
+    sanitized = re.sub(r'\.{2,}', '-', sanitized)
+    # Strip leading/trailing dots and whitespace to avoid hidden dirs or trailing-dot issues
+    sanitized = sanitized.strip('. \t')
+    return sanitized or '未知'

@@ -112,6 +112,20 @@ class HtmlParsingMixin:
             self.logger.debug('提取 {key} 时出错: {error}', key=key, error=e)
             return None
 
+    _JS_DANGEROUS_PATTERNS = re.compile(
+        r'(?:'
+        r'(?<!\w)eval\s*\('
+        r'|(?<!\w)Function\s*\('
+        r'|(?<!\w)import\s*\('
+        r'|document\.cookie'
+        r'|localStorage'
+        r'|sessionStorage'
+        r'|XMLHttpRequest'
+        r'|fetch\s*\('
+        r'|navigator\.sendBeacon'
+        r')',
+    )
+
     def execute_js_safely(self, driver, js_code, fallback=None):
         """安全执行JavaScript代码
 
@@ -124,9 +138,11 @@ class HtmlParsingMixin:
             执行结果或fallback
         """
         try:
-            # 简单验证JS代码，避免明显注入
-            if not js_code or 'eval(' in js_code:
-                self.logger.warning('潜在不安全JS代码: {js_code}', js_code=js_code)
+            if not js_code:
+                self.logger.warning('空的JS代码')
+                return fallback
+            if self._JS_DANGEROUS_PATTERNS.search(js_code):
+                self.logger.warning('潜在不安全JS代码被阻止: {js_code}', js_code=js_code[:200])
                 return fallback
             return driver.execute_script(js_code)
         except Exception as e:

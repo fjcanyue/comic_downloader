@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin
 
 from loguru import logger
 from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
@@ -56,7 +56,7 @@ class ConfigurableSearchMixin(SourceUrlMixin):
     def _build_search_url(self, keyword: str) -> str:
         if not self.search_url_template:
             raise RuntimeError(f'{type(self).__name__} must define search_url_template')
-        return self.search_url_template.format(base_url=self.base_url, keyword=keyword)
+        return self.search_url_template.format(base_url=self.base_url, keyword=quote(keyword))
 
     def _search_root(self, root):
         if not self.search_root_xpath:
