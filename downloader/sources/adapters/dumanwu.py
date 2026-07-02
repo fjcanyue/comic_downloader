@@ -8,11 +8,12 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 
 from downloader.comic import Comic, ComicBook, ComicSource, ComicVolume, logger
+from downloader.sources.templates import InfoFlowMixin
 
 METADATA_PAIR_LENGTH = 2
 
 
-class DumanwuComic(ComicSource):
+class DumanwuComic(InfoFlowMixin, ComicSource):
     name = '读漫屋'
     base_url = 'https://www.dumanwu.com'
     # base_img_url = 'http://imgpc.31mh.com/images/comic'
@@ -23,9 +24,6 @@ class DumanwuComic(ComicSource):
     download_requires_driver = True
     config_file = 'dumanwu.json'
     enable = True
-
-    def __init__(self, output_dir, http, driver, overwrite=True, *, profile=None):
-        super().__init__(output_dir, http, driver, overwrite, profile=profile)
 
     def search(self, keyword):
         self.logger.info(
@@ -94,28 +92,6 @@ class DumanwuComic(ComicSource):
             len=len(arr),
         )
         return arr
-
-    def info(self, url):
-        self.logger.info(
-            '开始获取 {source_name} 动漫详细信息: {url}', source_name=self.name, url=url
-        )
-        root = self.__parse_html__(url)
-        if root is None:
-            self.logger.error('获取动漫详细信息失败，无法获取或解析页面内容: {url}', url=url)
-            return None
-
-        comic = self._parse_comic_header(root, url)
-        if comic is None:
-            return None
-        self._append_metadata(root, comic)
-        self._append_books(root, comic, url)
-        self.logger.info(
-            '{source_name} 动漫详细信息获取完成: {comic_name}, 共 {count} 个章节分组.',
-            source_name=self.name,
-            comic_name=comic.name,
-            count=len(comic.books),
-        )
-        return comic
 
     def _parse_comic_header(self, root, url):
         try:
@@ -215,7 +191,9 @@ class DumanwuComic(ComicSource):
                 if not vol_url_part:
                     self.logger.warning("卷 '{vol_name}' 的URL部分为空，跳过.", vol_name=vol_name)
                     continue
-                full_vol_url = self.base_url + vol_url_part
+                full_vol_url = self.absolute_url(vol_url_part)
+                if not full_vol_url:
+                    continue
                 comic_book.vols.append(ComicVolume(vol_name, full_vol_url, comic_book.name))
                 self.logger.debug(
                     '  找到卷 (初始列表): {vol_name} ({full_vol_url})',

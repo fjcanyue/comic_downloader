@@ -1,9 +1,10 @@
 from selenium.webdriver.support.ui import WebDriverWait
 
 from downloader.comic import Comic, ComicBook, ComicSource, ComicVolume, logger
+from downloader.sources.templates import InfoFlowMixin, JsImageSourceMixin
 
 
-class ManhuaguiComic(ComicSource):
+class ManhuaguiComic(InfoFlowMixin, JsImageSourceMixin, ComicSource):
     """
     This class is deprecated and will be removed in future versions.
     """
@@ -15,9 +16,6 @@ class ManhuaguiComic(ComicSource):
     download_requires_driver = True
     config_file = 'manhuagui.json'
     enable = True
-
-    def __init__(self, output_dir, http, driver, overwrite=True, *, profile=None):
-        super().__init__(output_dir, http, driver, overwrite, profile=profile)
 
     def search(self, keyword):
         logger.info('开始在 看漫画 搜索: {}', keyword)
@@ -62,19 +60,6 @@ class ManhuaguiComic(ComicSource):
             arr.append(comic)
         logger.info("看漫画 搜索 '{}' 完成, 共找到 {} 条结果.", keyword, len(arr))
         return arr
-
-    def info(self, url):
-        logger.info('开始获取 看漫画 动漫详细信息: {}', url)
-        root = self.__parse_html__(url)
-        if root is None:
-            logger.error('获取动漫详细信息失败，无法获取页面内容: {}', url)
-            return None
-
-        comic = self._parse_comic_header(root, url)
-        self._append_metadata(root, comic)
-        self._append_books(root, comic, url)
-        logger.info('看漫画 动漫详细信息获取完成: {}, 共 {} 个章节.', comic.name, len(comic.books))
-        return comic
 
     def _parse_comic_header(self, root, url):
         comic = Comic()
@@ -127,34 +112,22 @@ class ManhuaguiComic(ComicSource):
             vol_list = book_node.xpath('ul/li')
             for vol in vol_list:
                 v = vol.xpath('a')[0]
-                comic_book.vols.append(
-                    ComicVolume(
-                        v.xpath('span')[0].text.strip(),
-                        self.base_url + '/' + v.attrib.get('href'),
-                        comic_book.name,
+                vol_url = self.absolute_url(v.attrib.get('href'))
+                if vol_url:
+                    comic_book.vols.append(
+                        ComicVolume(
+                            v.xpath('span')[0].text.strip(),
+                            vol_url,
+                            comic_book.name,
+                        )
                     )
-                )
             comic_book.vols.reverse()  # 保持原有反转逻辑
             comic.books.append(comic_book)
 
-    def __parse_imgs__(self, url):
-        logger.info('开始从 看漫画 解析图片列表: {}', url)
-        try:
-            self.driver.get(url)
-            self.driver.implicitly_wait(5)
-            WebDriverWait(self.driver, 10).until(
-                lambda d: d.execute_script(
-                    "return typeof pVars !== 'undefined' && pVars.page !== undefined"
-                )
+    def _prepare_driver_for_image_parse(self):
+        self.driver.implicitly_wait(5)
+        WebDriverWait(self.driver, 10).until(
+            lambda d: d.execute_script(
+                "return typeof pVars !== 'undefined' && pVars.page !== undefined"
             )
-            imgs = self.execute_js_safely(self.driver, self.config['imgs_js'], [])
-            if imgs:
-                logger.info('成功解析到 {} 张图片来自 {}', len(imgs), url)
-            else:
-                logger.warning('未解析到任何图片链接来自 {}', url)
-            if not isinstance(imgs, list):
-                return []
-            return [img for img in imgs if isinstance(img, str)]
-        except Exception as e:
-            logger.error('使用 Selenium 解析图片列表失败: {}, 错误: {}', url, e, exc_info=True)
-            return []
+        )

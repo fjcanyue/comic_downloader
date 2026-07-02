@@ -1,9 +1,10 @@
 import requests
 
 from downloader.comic import Comic, ComicBook, ComicSource, ComicVolume, logger
+from downloader.sources.templates import InfoFlowMixin, JsImageSourceMixin
 
 
-class DmzjComic(ComicSource):
+class DmzjComic(InfoFlowMixin, JsImageSourceMixin, ComicSource):
     """
     This class is deprecated and will be removed in future versions.
     """
@@ -16,9 +17,6 @@ class DmzjComic(ComicSource):
     config_file = 'dmzj.json'
     enable = False
     search_requires_driver = True
-
-    def __init__(self, output_dir, http, driver, overwrite=True, *, profile=None):
-        super().__init__(output_dir, http, driver, overwrite, profile=profile)
 
     def search(self, keyword):
         logger.info('开始在 动漫之家 搜索: {}', keyword)
@@ -52,24 +50,6 @@ class DmzjComic(ComicSource):
             arr.append(comic)
         logger.info("动漫之家 搜索 '{}' 完成, 共找到 {} 条结果.", keyword, len(arr))
         return arr
-
-    def info(self, url):
-        logger.info('开始获取 动漫之家 动漫详细信息: {}', url)
-        root = self.__parse_html__(url)
-        if root is None:
-            logger.error('获取动漫详细信息失败，无法获取页面内容: {}', url)
-            return None
-
-        comic = self._parse_comic_header(root, url)
-        if comic is None:
-            return None
-        self._append_metadata(root, comic)
-        book_list_nodes, is_direct_chapter_list = self._find_book_nodes(root, url)
-        self._append_books(book_list_nodes, is_direct_chapter_list, comic, url)
-        logger.info(
-            '动漫之家 动漫详细信息获取完成: {}, 共 {} 个章节.', comic.name, len(comic.books)
-        )
-        return comic
 
     def _parse_comic_header(self, root, url):
         comic = Comic()
@@ -120,7 +100,11 @@ class DmzjComic(ComicSource):
             logger.warning('未找到章节列表元素: {}, 页面结构可能已更改或无章节信息.', url)
         return book_list_nodes, is_direct_chapter_list
 
-    def _append_books(self, book_list_nodes, is_direct_chapter_list, comic, url):
+    def _append_books(self, root, comic, url):
+        book_list_nodes, is_direct_chapter_list = self._find_book_nodes(root, url)
+        self._append_books_from_nodes(book_list_nodes, is_direct_chapter_list, comic, url)
+
+    def _append_books_from_nodes(self, book_list_nodes, is_direct_chapter_list, comic, url):
         for book in book_list_nodes:
             if is_direct_chapter_list:
                 comic_book = self._build_direct_chapter_book(book, url)
@@ -138,14 +122,13 @@ class DmzjComic(ComicSource):
         comic_book.name = a_tag.text.strip() if a_tag.text else '默认章节'
         vol_url_part = a_tag.attrib.get('href')
         if vol_url_part:
-            full_vol_url = (
-                self.base_url + vol_url_part
-                if not vol_url_part.startswith('http')
-                else vol_url_part
-            )
-            comic_book.vols.append(ComicVolume(comic_book.name, full_vol_url, comic_book.name))
-        else:
-            logger.warning('未找到卷链接 for {} in {}', comic_book.name, url)
+            full_vol_url = self.absolute_url(vol_url_part)
+            if full_vol_url:
+                comic_book.vols.append(
+                    ComicVolume(comic_book.name, full_vol_url, comic_book.name)
+                )
+            else:
+                logger.warning('未找到卷链接 for {} in {}', comic_book.name, url)
         logger.debug('处理单卷章节: {}', comic_book.name)
         return comic_book
 
@@ -190,23 +173,12 @@ class DmzjComic(ComicSource):
         if not vol_url_part:
             logger.warning('未找到卷链接 for {} in {} ({})', vol_name, comic_book.name, url)
             return
-        full_vol_url = (
-            self.base_url + vol_url_part if not vol_url_part.startswith('http') else vol_url_part
-        )
+        full_vol_url = self.absolute_url(vol_url_part)
+        if not full_vol_url:
+            logger.warning('卷 URL 为空: {} in {} ({})', vol_name, comic_book.name, url)
+            return
         comic_book.vols.append(ComicVolume(vol_name, full_vol_url, comic_book.name))
         logger.debug('  找到卷: {} ({})', vol_name, full_vol_url)
 
-    def __parse_imgs__(self, url):
-        logger.info('开始从 动漫之家 解析图片列表: {}', url)
-        try:
-            self.driver.get(url)
-            self.driver.implicitly_wait(10)
-            imgs = self.execute_js_safely(self.driver, self.config['imgs_js'], [])
-            if imgs and isinstance(imgs, list):
-                logger.info('成功解析到 {} 张图片来自 {}', len(imgs), url)
-            else:
-                logger.warning('未解析到图片链接: {}', url)
-            return imgs if isinstance(imgs, list) else []
-        except Exception as e:
-            logger.error('使用 Selenium 解析图片列表失败: {}, 错误: {}', url, e, exc_info=True)
-            return []
+    def _prepare_driver_for_image_parse(self):
+        self.driver.implicitly_wait(10)

@@ -34,9 +34,6 @@ class MoruiComic(
     search_root_xpath = '//div[contains(@class,"page-main")]'
     search_count_xpath = './/h4[@class="fl"]'
 
-    def __init__(self, output_dir, http, driver, overwrite=True, *, profile=None):
-        super().__init__(output_dir, http, driver, overwrite, profile=profile)
-
     def _append_metadata(self, root, comic):
         meta_table = root.xpath(self.config['info_meta_xpath'])
         for meta in meta_table:

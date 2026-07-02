@@ -4,11 +4,12 @@ import requests
 from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
 
 from downloader.comic import Comic, ComicBook, ComicSource, ComicVolume, logger
+from downloader.sources.templates import InfoFlowMixin
 
 JS_SNIPPET_LONG_LENGTH = 400
 
 
-class MaoflyComic(ComicSource):
+class MaoflyComic(InfoFlowMixin, ComicSource):
     """
     This class is deprecated and will be removed in future versions.
     """
@@ -76,11 +77,7 @@ class MaoflyComic(ComicSource):
                     logger.warning('解析到一个没有URL的漫画条目，已跳过。')
                     continue
                 if not comic.url.startswith('http'):
-                    comic.url = (
-                        self.base_url + comic.url
-                        if comic.url.startswith('/')
-                        else self.base_url + '/' + comic.url
-                    )
+                    comic.url = self.absolute_url(comic.url) or comic.url
 
                 comic.name = b.attrib.get('title', '未知漫画')
                 author_nodes = book.xpath('div/a')
@@ -92,26 +89,6 @@ class MaoflyComic(ComicSource):
                 continue
         logger.info("{} 搜索 '{}' 完成, 共找到 {} 条结果.", self.name, keyword, len(arr))
         return arr
-
-    def info(self, url):
-        logger.info('开始获取 {} 动漫详细信息: {}', self.name, url)
-        root = self.__parse_html__(url)
-        if root is None:
-            logger.error('获取动漫详细信息失败，无法获取或解析页面内容: {}', url)
-            return None
-
-        comic = self._parse_comic_header(root, url)
-        if comic is None:
-            return None
-        self._append_metadata(root, comic)
-        self._append_books(root, comic, url)
-        logger.info(
-            '{} 动漫详细信息获取完成: {}, 共 {} 个章节分组.',
-            self.name,
-            comic.name,
-            len(comic.books),
-        )
-        return comic
 
     def _parse_comic_header(self, root, url):
         try:
@@ -192,7 +169,9 @@ class MaoflyComic(ComicSource):
                     etree.tostring(vol_node, encoding='unicode'),
                 )
                 continue
-            full_vol_url = vol_href if vol_href.startswith('http') else self.base_url + vol_href
+            full_vol_url = self.absolute_url(vol_href)
+            if not full_vol_url:
+                continue
             comic_book.vols.append(ComicVolume(vol_title.strip(), full_vol_url, comic_book.name))
             logger.debug('  找到卷: {} ({})', vol_title.strip(), full_vol_url)
 
