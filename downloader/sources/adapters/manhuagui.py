@@ -71,30 +71,49 @@ class ManhuaguiComic(ComicSource):
             return None
 
         comic = self._parse_comic_header(root, url)
+        if comic is None:
+            logger.error('解析动漫基本信息失败: {}', url)
+            return None
         self._append_metadata(root, comic)
         self._append_books(root, comic, url)
         logger.info('看漫画 动漫详细信息获取完成: {}, 共 {} 个章节.', comic.name, len(comic.books))
         return comic
 
     def _parse_comic_header(self, root, url):
-        comic = Comic()
-        comic.url = url
-        comic.name = root.xpath('//div[contains(@class,"book-title")]/h1')[0].text.strip()
-        return comic
+        try:
+            comic = Comic()
+            comic.url = url
+            name_nodes = root.xpath('//div[contains(@class,"book-title")]/h1')
+            if not name_nodes:
+                logger.error('解析动漫名称失败，未找到标题元素: {}', url)
+                return None
+            name_text = name_nodes[0].text
+            if not name_text or not name_text.strip():
+                logger.error('解析动漫名称失败，标题文本为空: {}', url)
+                return None
+            comic.name = name_text.strip()
+            return comic
+        except Exception as e:
+            logger.error('解析动漫基本信息时出错: {}, 错误: {}', url, e, exc_info=True)
+            return None
 
     def _append_metadata(self, root, comic):
         meta_table = root.xpath('//ul[contains(@class,"detail-list")]/li')
         for meta in meta_table:
-            kvs = [meta.xpath('span/strong')[0].text, '']
-            link = meta.find('span/a')
-            if link is None:
-                value = kvs[1]
-                if not value:
+            try:
+                strong_nodes = meta.xpath('span/strong')
+                if not strong_nodes or not strong_nodes[0].text:
                     continue
-            else:
-                value = link.text
-            logger.debug('元数据: {} - {}', kvs[0], value.strip())
-            comic.metadata.append({'k': kvs[0], 'v': value.strip()})
+                key = strong_nodes[0].text.strip()
+                link = meta.find('span/a')
+                if link is None or not link.text:
+                    continue
+                value = link.text.strip()
+                if key and value:
+                    logger.debug('元数据: {} - {}', key, value)
+                    comic.metadata.append({'k': key, 'v': value})
+            except Exception as e:
+                logger.warning('解析元数据时出错: {}, 错误: {}', meta.text, e, exc_info=True)
 
     def _append_books(self, root, comic, url):
         book_list_nodes = root.xpath('//div[contains(@class,"chapter-list")]')
@@ -126,15 +145,31 @@ class ManhuaguiComic(ComicSource):
                 comic_book.name = f'章节卷 {book_index + 1}'
             vol_list = book_node.xpath('ul/li')
             for vol in vol_list:
-                v = vol.xpath('a')[0]
-                comic_book.vols.append(
-                    ComicVolume(
-                        v.xpath('span')[0].text.strip(),
-                        self.base_url + '/' + v.attrib.get('href'),
-                        comic_book.name,
+                try:
+                    a_nodes = vol.xpath('a')
+                    if not a_nodes:
+                        logger.warning('卷信息缺少链接元素: {}', url)
+                        continue
+                    v = a_nodes[0]
+                    span_nodes = v.xpath('span')
+                    if not span_nodes or not span_nodes[0].text:
+                        logger.warning('卷信息缺少名称: {}', url)
+                        continue
+                    vol_href = v.attrib.get('href')
+                    if not vol_href:
+                        logger.warning("卷 '{}' 的URL部分为空，跳过.", span_nodes[0].text)
+                        continue
+                    comic_book.vols.append(
+                        ComicVolume(
+                            span_nodes[0].text.strip(),
+                            self.base_url + '/' + vol_href,
+                            comic_book.name,
+                        )
                     )
-                )
-            comic_book.vols.reverse()  # 保持原有反转逻辑
+                except Exception as e:
+                    logger.warning('解析卷信息时出错: {}, 错误: {}', url, e, exc_info=True)
+                    continue
+            comic_book.vols.reverse()
             comic.books.append(comic_book)
 
     def __parse_imgs__(self, url):

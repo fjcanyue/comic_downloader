@@ -97,7 +97,19 @@ class ComicSource(ImageDownloadMixin, ArchiveMixin, HtmlParsingMixin, ABC):
         try:
             with open(config_path, encoding='utf-8') as f:
                 config = json.load(f)
-        except (OSError, json.JSONDecodeError):
+        except OSError as e:
+            logger.debug(
+                'Could not read browser mode config file: {}, error: {}',
+                config_path,
+                e,
+            )
+            return None
+        except json.JSONDecodeError as e:
+            logger.warning(
+                'Failed to parse browser mode config JSON: {}, error: {}',
+                config_path,
+                e,
+            )
             return None
         browser_mode = config.get('browser_mode')
         return str(browser_mode) if browser_mode else None

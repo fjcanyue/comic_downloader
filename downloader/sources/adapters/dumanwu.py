@@ -210,7 +210,14 @@ class DumanwuComic(ComicSource):
                         node=etree.tostring(vol_node, encoding='unicode'),
                     )
                     continue
-                vol_name = li_node[0].text.strip()
+                li_text = li_node[0].text
+                if not li_text:
+                    self.logger.warning(
+                        '卷名称文本为空: {node}',
+                        node=etree.tostring(vol_node, encoding='unicode'),
+                    )
+                    continue
+                vol_name = li_text.strip()
                 vol_url_part = vol_node.attrib.get('href')
                 if not vol_url_part:
                     self.logger.warning("卷 '{vol_name}' 的URL部分为空，跳过.", vol_name=vol_name)
