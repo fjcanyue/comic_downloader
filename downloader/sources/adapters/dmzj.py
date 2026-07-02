@@ -93,12 +93,23 @@ class DmzjComic(ComicSource):
     def _append_metadata(self, root, comic):
         meta_table = root.xpath('//div[@class="anim-main_list"]/table/tr')
         for meta in meta_table:
-            v_element = meta.xpath('td/a')
-            if len(v_element) > 0:
-                key = meta.xpath('th')[0].text
+            try:
+                v_element = meta.xpath('td/a')
+                if not v_element:
+                    continue
+                th_nodes = meta.xpath('th')
+                if not th_nodes or not th_nodes[0].text:
+                    continue
+                key = th_nodes[0].text.strip()
                 value = v_element[0].text
-                logger.debug('元数据: {} - {}', key, value)
-                comic.metadata.append({'k': key, 'v': value})
+                if not value:
+                    continue
+                value = value.strip()
+                if key and value:
+                    logger.debug('元数据: {} - {}', key, value)
+                    comic.metadata.append({'k': key, 'v': value})
+            except Exception as e:
+                logger.warning('解析元数据时出错: {}', e, exc_info=True)
 
     def _find_book_nodes(self, root, url):
         book_list_xpaths = [
@@ -133,8 +144,13 @@ class DmzjComic(ComicSource):
                 logger.warning("章节分组 '{}' 不包含任何有效卷，已跳过.", comic_book.name)
 
     def _build_direct_chapter_book(self, book, url):
-        a_tag = book.xpath('.//a')[0]
         comic_book = ComicBook()
+        a_nodes = book.xpath('.//a')
+        if not a_nodes:
+            logger.warning('章节缺少链接元素: {}', url)
+            comic_book.name = '默认章节'
+            return comic_book
+        a_tag = a_nodes[0]
         comic_book.name = a_tag.text.strip() if a_tag.text else '默认章节'
         vol_url_part = a_tag.attrib.get('href')
         if vol_url_part:
@@ -184,8 +200,12 @@ class DmzjComic(ComicSource):
         return vol_list_nodes
 
     def _append_grouped_volume(self, comic_book, vol_node, url):
-        a = vol_node.xpath('.//a')[0]
-        vol_name = a.text.strip()
+        a_nodes = vol_node.xpath('.//a')
+        if not a_nodes:
+            logger.warning('卷信息缺少链接元素: {}', url)
+            return
+        a = a_nodes[0]
+        vol_name = a.text.strip() if a.text else '未知卷'
         vol_url_part = a.attrib.get('href')
         if not vol_url_part:
             logger.warning('未找到卷链接 for {} in {} ({})', vol_name, comic_book.name, url)

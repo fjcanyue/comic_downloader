@@ -205,13 +205,18 @@ class Shell(cmd.Cmd):
     def _discover_source_bindings(self, include_deprecated: bool = False):
         """加载已声明的 ComicSource 实现。"""
         try:
-            return load_source_bindings(
+            bindings = load_source_bindings(
                 include_deprecated=include_deprecated,
                 runtime_config=self.runtime_config,
             )
         except Exception as e:
+            logger.error('Failed to load comic sources: {}', e, exc_info=True)
             self.presenter.error(f'Failed to load comic sources: {e}')
             return {}
+        if not bindings and not include_deprecated:
+            logger.warning('No comic sources were loaded')
+            self.presenter.warn('未加载到任何动漫源，请检查配置。')
+        return bindings
 
     def _ensure_driver(
         self, source_or_class: SourceProfile | ComicSource | type[ComicSource] | None = None

@@ -9,6 +9,8 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
+from loguru import logger
+
 from downloader.browser.modes import (
     REQUESTS_MODE,
     BrowserModeName,
@@ -143,9 +145,14 @@ def load_site_config(source_class: type[Any]) -> dict[str, Any]:
     try:
         with open(config_path, encoding='utf-8') as f:
             raw_config = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
+    except FileNotFoundError:
+        logger.warning('Site config file not found: {}', config_path)
+        return {}
+    except json.JSONDecodeError as e:
+        logger.warning('Failed to parse site config JSON: {}, error: {}', config_path, e)
         return {}
     if not isinstance(raw_config, dict):
+        logger.warning('Site config is not a JSON object: {}', config_path)
         return {}
     return raw_config
 
