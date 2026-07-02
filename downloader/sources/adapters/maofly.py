@@ -1,4 +1,5 @@
 import re
+from urllib.parse import quote
 
 import requests
 from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
@@ -41,7 +42,7 @@ class MaoflyComic(ComicSource):
 
     def search(self, keyword):
         logger.info('开始在 {} 搜索: {}', self.name, keyword)
-        search_url = f'{self.base_url}/search.html?q={keyword}'
+        search_url = f'{self.base_url}/search.html?q={quote(keyword)}'
         arr = []
         try:
             root = self.__parse_html__(search_url)

@@ -1,3 +1,5 @@
+from urllib.parse import quote
+
 import requests
 
 from downloader.comic import Comic, ComicBook, ComicSource, ComicVolume, logger
@@ -22,7 +24,7 @@ class DmzjComic(ComicSource):
 
     def search(self, keyword):
         logger.info('开始在 动漫之家 搜索: {}', keyword)
-        search_url = f'http://sacg.dmzj.com/comicsum/search.php?s={keyword}'
+        search_url = f'http://sacg.dmzj.com/comicsum/search.php?s={quote(keyword)}'
         arr = []
         try:
             r = self.http.get(search_url, timeout=30)
