@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, urljoin
 
 from loguru import logger
@@ -10,6 +11,22 @@ from downloader.models import Comic, ComicBook, ComicVolume
 
 
 class SourceUrlMixin:
+    base_url: str
+    name: str
+    config: dict[str, Any]
+    driver: Any
+
+    if TYPE_CHECKING:
+
+        def __parse_html__(self, url: str, **kwargs: Any) -> Any: ...
+
+        def execute_js_safely(
+            self,
+            driver: Any,
+            js_code: str | None,
+            fallback: Any = None,
+        ) -> Any: ...
+
     def absolute_url(self, url_part: str | None, base_url: str | None = None) -> str | None:
         if not url_part:
             return None
@@ -52,6 +69,15 @@ class ConfigurableSearchMixin(SourceUrlMixin):
     search_root_xpath: str | None = None
     search_count_xpath: str | None = None
     search_encoding: str = 'utf-8'
+
+    if TYPE_CHECKING:
+
+        def parse_xpath_list(
+            self,
+            root: Any,
+            xpath: str,
+            extract_map: Mapping[str, str],
+        ) -> list[dict[str, Any]]: ...
 
     def _build_search_url(self, keyword: str) -> str:
         if not self.search_url_template:
@@ -343,6 +369,18 @@ class XPathImageSourceMixin(SourceUrlMixin):
 
 class JsImageSourceMixin:
     image_js_config_key = 'imgs_js'
+    name: str
+    config: dict[str, Any]
+    driver: Any
+
+    if TYPE_CHECKING:
+
+        def execute_js_safely(
+            self,
+            driver: Any,
+            js_code: str | None,
+            fallback: Any = None,
+        ) -> Any: ...
 
     def __parse_imgs__(self, url):
         logger.info('Start parsing images from {}: {}', self.name, url)

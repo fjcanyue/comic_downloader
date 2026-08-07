@@ -4,9 +4,10 @@ import base64
 import json
 import os
 import sys
+from collections.abc import Iterable
 from contextlib import suppress
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import requests
 from seleniumbase import SB
@@ -219,7 +220,8 @@ class SeleniumBaseDriver:
 
     def _mark_seleniumbase_teardown_done(self) -> None:
         with suppress(Exception):
-            self._sb._BaseCase__called_teardown = True
+            driver = cast(Any, self._sb)
+            driver._BaseCase__called_teardown = True
 
     def _exit_context(self) -> None:
         try:
@@ -309,7 +311,7 @@ class SeleniumBaseDriver:
         if cdp is not None and hasattr(cdp, 'get_all_cookies'):
             try:
                 cookies = cdp.get_all_cookies()
-                return list(cookies or [])
+                return list(cookies) if isinstance(cookies, Iterable) else []
             except Exception:
                 return self._webdriver_cookies()
         return self._webdriver_cookies()
@@ -318,7 +320,8 @@ class SeleniumBaseDriver:
         get_cookies = getattr(self._sb, 'get_cookies', None)
         if callable(get_cookies):
             try:
-                return list(get_cookies() or [])
+                cookies = get_cookies()
+                return list(cookies) if isinstance(cookies, Iterable) else []
             except Exception:
                 return []
         return []

@@ -53,3 +53,11 @@ def test_runtime_enabled_override_controls_profile_enabled():
     )
 
     assert profile.enabled is True
+
+
+def test_source_profile_exposes_explicit_capabilities():
+    profile = resolve_source_profile(_definition('morui'), MoruiComic)
+
+    assert profile.capabilities.search is True
+    assert profile.capabilities.info is True
+    assert profile.capabilities.download is True

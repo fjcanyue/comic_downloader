@@ -43,11 +43,15 @@ class DmzjComic(ComicSource):
 
         for book in results:
             comic = Comic()
-            comic_url_raw = book.get('comic_url_raw') or ''
-            comic.url = 'http:' + comic_url_raw
-            if not comic.url.startswith(self.base_url):
-                logger.debug('跳过非动漫之家站内链接: {}', comic.url)
+            comic_url_raw = book.get('comic_url_raw')
+            if not isinstance(comic_url_raw, str):
+                logger.debug('跳过缺少有效链接的动漫之家搜索结果: {}', book)
                 continue
+            comic_url = 'http:' + comic_url_raw
+            if not comic_url.startswith(self.base_url):
+                logger.debug('跳过非动漫之家站内链接: {}', comic_url)
+                continue
+            comic.url = comic_url
             comic.name = book.get('comic_name', '未知漫画')
             comic.author = book.get('comic_author', '未知作者')
             logger.debug('找到漫画: {}, 作者: {}, URL: {}', comic.name, comic.author, comic.url)

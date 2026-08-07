@@ -188,8 +188,8 @@ def test_context_driver_methods_delegate_to_driver_manager(tmp_path):
     context = Context(quiet_console())
     context.create(str(tmp_path))
     fake_driver_manager = FakeDriverManager()
-    context.driver_manager = fake_driver_manager
-    source_marker = object()
+    context.driver_manager = cast(Any, fake_driver_manager)
+    source_marker: Any = object()
 
     assert context.ensure_driver(source_marker) is True
     assert context.get_driver(source_marker) is fake_driver_manager.drivers[('selenium', True)]

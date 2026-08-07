@@ -4,6 +4,7 @@ import concurrent.futures
 import os
 import threading
 import time
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urljoin
 
 import requests
@@ -21,10 +22,34 @@ from downloader.models import (
     VolumeDownloadResult,
 )
 
+if TYPE_CHECKING:
+    from downloader.browser.modes import BrowserModeName
+
 IMAGE_RETRY_STATUS_CODES = [400, 429, 500, 502, 503, 504]
 
 
 class ImageDownloadMixin:
+    overwrite: bool
+    http: Any
+    driver: Any
+
+    if TYPE_CHECKING:
+
+        def _finalize_volume_download(
+            self,
+            path: str,
+            vol_name: str,
+            source_url: str,
+            expected_count: int,
+            failed_images: list[ImageDownloadFailure],
+        ) -> VolumeDownloadResult: ...
+
+        def _remove_progress_task(
+            self, progress: DownloadProgress | None, task_id: Any
+        ) -> None: ...
+
+        def _source_browser_mode(self) -> BrowserModeName: ...
+
     def __download_vol_images__(
         self,
         path: str,

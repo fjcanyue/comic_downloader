@@ -295,7 +295,17 @@ def test_source_catalog_renders_capabilities_and_current_source():
     presenter.source_catalog(
         [
             SourceView(1, 'morui', '摩锐漫画', 'seleniumbase', True, True, selected=True),
-            SourceView(2, 'dumanwu', '读漫屋', 'requests', False, True),
+            SourceView(
+                2,
+                'dumanwu',
+                '读漫屋',
+                'requests',
+                False,
+                True,
+                supports_info=False,
+                verification_status='healthy',
+                last_verified_at='2026-08-08T00:00:00+08:00',
+            ),
         ]
     )
 
@@ -307,6 +317,11 @@ def test_source_catalog_renders_capabilities_and_current_source():
     assert 'SeleniumBase' in rendered
     assert 'HTTP' in rendered
     assert '浏览器' in rendered
+    assert '详情' in rendered
+    assert '未检查' in rendered
+    assert '不支持' in rendered
+    assert '正常' in rendered
+    assert '2026-08-08' in rendered
     assert '>' in rendered
     assert max(len(line) for line in rendered.splitlines()) <= 112
 

@@ -230,6 +230,9 @@ class Shell(cmd.Cmd):
                     search_uses_driver=binding.profile.uses_driver_for_search(),
                     download_uses_driver=binding.profile.uses_driver_for_download(),
                     selected=source_name == self.current_source_name,
+                    supports_search=binding.profile.capabilities.search,
+                    supports_info=binding.profile.capabilities.info,
+                    supports_download=binding.profile.capabilities.download,
                 )
             )
         return views

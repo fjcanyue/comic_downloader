@@ -14,39 +14,33 @@ from rich.progress import (
 
 @runtime_checkable
 class DownloadProgress(Protocol):
-    def __enter__(self):
-        ...
+    def __enter__(self) -> DownloadProgress: ...
 
-    def __exit__(self, exc_type, exc, tb):
-        ...
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool | None: ...
 
-    def add_task(self, description: str, total: float | None = None):
-        ...
+    def add_task(self, description: str, total: float | None = None) -> Any: ...
 
-    def advance(self, task_id, amount: float = 1) -> None:
-        ...
+    def advance(self, task_id: Any, amount: float = 1) -> None: ...
 
     def update(
         self,
-        task_id,
+        task_id: Any,
         *,
         description: str | None = None,
         total: float | None = None,
-    ) -> None:
-        ...
+    ) -> None: ...
 
-    def remove_task(self, task_id) -> None:
-        ...
+    def remove_task(self, task_id: Any) -> None: ...
 
 
 class NoopDownloadProgress:
-    def __enter__(self):
+    def __enter__(self) -> NoopDownloadProgress:
         return self
 
-    def __exit__(self, exc_type, exc, tb):
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
         return False
 
-    def add_task(self, description: str, total: float | None = None):
+    def add_task(self, description: str, total: float | None = None) -> Any:
         return None
 
     def advance(self, task_id, amount: float = 1) -> None:
@@ -76,14 +70,14 @@ class RichDownloadProgress:
             expand=True,
         )
 
-    def __enter__(self):
+    def __enter__(self) -> RichDownloadProgress:
         self.progress.__enter__()
         return self
 
-    def __exit__(self, exc_type, exc, tb):
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool | None:
         return self.progress.__exit__(exc_type, exc, tb)
 
-    def add_task(self, description: str, total: float | None = None):
+    def add_task(self, description: str, total: float | None = None) -> Any:
         return self.progress.add_task(description=description, total=total)
 
     def advance(self, task_id, amount: float = 1) -> None:

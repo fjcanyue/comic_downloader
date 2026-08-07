@@ -56,6 +56,11 @@ class SourceView:
     search_uses_driver: bool
     download_uses_driver: bool
     selected: bool = False
+    supports_search: bool = True
+    supports_info: bool = True
+    supports_download: bool = True
+    verification_status: str = 'unchecked'
+    last_verified_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -222,7 +227,9 @@ class TerminalPresenter:
             table.add_column('代码名', min_width=8, style=MUTED, no_wrap=True)
         table.add_column('页面加载', min_width=8, no_wrap=True)
         table.add_column('搜索', min_width=6, no_wrap=True)
+        table.add_column('详情', min_width=6, no_wrap=True)
         table.add_column('下载', min_width=6, no_wrap=True)
+        table.add_column('验证', min_width=6, no_wrap=True)
 
         for source in sources:
             row = [
@@ -235,8 +242,16 @@ class TerminalPresenter:
             row.extend(
                 [
                     self._browser_mode_label(source.browser_mode),
-                    self._access_label(source.search_uses_driver),
-                    self._access_label(source.download_uses_driver),
+                    self._access_label(source.supports_search, source.search_uses_driver),
+                    self._access_label(
+                        source.supports_info,
+                        source.browser_mode != 'requests',
+                    ),
+                    self._access_label(source.supports_download, source.download_uses_driver),
+                    self._verification_label(
+                        source.verification_status,
+                        source.last_verified_at,
+                    ),
                 ]
             )
             table.add_row(*row, style='bold' if source.selected else None)
@@ -267,10 +282,25 @@ class TerminalPresenter:
         return labels.get(browser_mode, browser_mode)
 
     @staticmethod
-    def _access_label(uses_driver: bool) -> str:
+    def _access_label(supported: bool, uses_driver: bool) -> str:
+        if not supported:
+            return f'[{MUTED}]不支持[/]'
         if uses_driver:
             return f'[{WARN}]浏览器[/]'
         return f'[{SUCCESS}]HTTP[/]'
+
+    @staticmethod
+    def _verification_label(status: str, checked_at: str | None) -> str:
+        labels = {
+            'unchecked': f'[{MUTED}]未检查[/]',
+            'healthy': f'[{SUCCESS}]正常[/]',
+            'degraded': f'[{WARN}]受限[/]',
+            'unavailable': f'[{ERROR}]不可用[/]',
+        }
+        label = labels.get(status, escape(status))
+        if not checked_at or status == 'unchecked':
+            return label
+        return f'{label} [{MUTED}]{escape(checked_at[:10])}[/]'
 
     def source_selected(self, display_name: str, source_name: str) -> None:
         self.success(f'已切换到 [bold]{display_name}[/] [{MUTED}]({source_name})[/]')

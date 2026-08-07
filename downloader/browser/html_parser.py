@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-import hashlib
-import json
-import os
-import re
 import time
 from contextlib import ExitStack
 from dataclasses import replace
 from io import StringIO
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
 
 import requests
 from loguru import logger
@@ -19,7 +14,12 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from seleniumbase import SB
 
+from downloader.browser.diagnostics import (
+    SELENIUMBASE_DIAGNOSTIC_DIR,
+    SeleniumBaseDiagnosticsMixin,
+)
 from downloader.browser.drivers import configure_seleniumbase_driver_cache
+from downloader.browser.extraction import HtmlExtractionMixin
 from downloader.browser.modes import (
     CLOAKBROWSER_MODE,
     REQUESTS_MODE,
@@ -44,110 +44,15 @@ HTML_MODE_METHODS: dict[str, BrowserModeName] = {
 REQUESTS_TO_SELENIUMBASE_STATUS_CODES = {403, 429}
 SELENIUMBASE_HTML_MAX_ATTEMPTS = 2
 SELENIUMBASE_RETRY_BACKOFF_SECONDS = 3.0
-SELENIUMBASE_DIAGNOSTIC_DIR = 'seleniumbase_diagnostics'
-SELENIUMBASE_ERROR_CHAIN_LIMIT = 5
-PROXY_ENVIRONMENT_KEYS = (
-    'HTTP_PROXY',
-    'HTTPS_PROXY',
-    'ALL_PROXY',
-    'NO_PROXY',
-    'http_proxy',
-    'https_proxy',
-    'all_proxy',
-    'no_proxy',
-)
 
 
-class HtmlParsingMixin:
-    def parse_xpath_list(self, root, xpath, extract_map):
-        """通用XPath列表解析方法
-
-        Args:
-            root: etree根元素
-            xpath (str): XPath表达式
-            extract_map (dict): 提取映射，如 {'name': './@title', 'url': './@href'}
-
-        Returns:
-            list: 提取的数据字典列表
-        """
-        results = []
-        try:
-            nodes = root.xpath(xpath)
-            results.extend(self._extract_xpath_item(node, extract_map) for node in nodes)
-        except Exception as e:
-            self.logger.error('XPath解析失败: {xpath}, 错误: {error}', xpath=xpath, error=e)
-        return results
-
-    def _extract_xpath_item(self, node, extract_map):
-        item = {}
-        for key, expr in extract_map.items():
-            item[key] = self._extract_xpath_value(node, key, expr)
-        return item
-
-    def _extract_xpath_value(self, node, key, expr):
-        try:
-            if expr.startswith('./@'):
-                vals = node.xpath(expr)
-                return (
-                    vals[0].strip()
-                    if vals and isinstance(vals[0], str)
-                    else vals[0]
-                    if vals
-                    else None
-                )
-            if expr == './text()':
-                return node.text.strip() if node.text else None
-            vals = node.xpath(expr)
-            if not vals:
-                return None
-            text_node = vals[0]
-            if isinstance(text_node, str):
-                return text_node.strip()
-            return (
-                text_node.text.strip()
-                if hasattr(text_node, 'text') and text_node.text
-                else text_node
-            )
-        except Exception as e:
-            self.logger.debug('提取 {key} 时出错: {error}', key=key, error=e)
-            return None
-
-    _JS_DANGEROUS_PATTERNS = re.compile(
-        r'(?:'
-        r'(?<!\w)eval\s*\('
-        r'|(?<!\w)Function\s*\('
-        r'|(?<!\w)import\s*\('
-        r'|document\.cookie'
-        r'|localStorage'
-        r'|sessionStorage'
-        r'|XMLHttpRequest'
-        r'|fetch\s*\('
-        r'|navigator\.sendBeacon'
-        r')',
-    )
-
-    def execute_js_safely(self, driver, js_code, fallback=None):
-        """安全执行JavaScript代码
-
-        Args:
-            driver: Selenium WebDriver
-            js_code (str): JS代码
-            fallback: 默认返回值
-
-        Returns:
-            执行结果或fallback
-        """
-        try:
-            if not js_code:
-                self.logger.warning('空的JS代码')
-                return fallback
-            if self._JS_DANGEROUS_PATTERNS.search(js_code):
-                self.logger.warning('潜在不安全JS代码被阻止: {js_code}', js_code=js_code[:200])
-                return fallback
-            return driver.execute_script(js_code)
-        except Exception as e:
-            self.logger.error('JS执行失败: {js_code}, 错误: {error}', js_code=js_code, error=e)
-            return fallback
+class HtmlParsingMixin(HtmlExtractionMixin, SeleniumBaseDiagnosticsMixin):
+    logger: Any
+    driver: Any
+    parser: Any
+    output_dir: str
+    http: requests.Session
+    profile: Any
 
     def _source_browser_mode(self) -> BrowserModeName:
         return normalize_browser_mode(self._source_profile_value('browser_mode', REQUESTS_MODE))
@@ -329,192 +234,6 @@ class HtmlParsingMixin:
             if isinstance(url, str) and url:
                 return url
         return None
-
-    def _seleniumbase_diagnostic_base_path(self, url: str, attempt: int) -> Path:
-        diagnostic_dir = Path(self.output_dir or '.') / SELENIUMBASE_DIAGNOSTIC_DIR
-        diagnostic_dir.mkdir(parents=True, exist_ok=True)
-
-        slug = re.sub(r'[^A-Za-z0-9_-]+', '_', url.split('?', 1)[0]).strip('_')
-        slug = slug[-80:] or 'page'
-        url_hash = hashlib.sha256(url.encode('utf-8')).hexdigest()[:10]
-        timestamp = time.strftime('%Y%m%d-%H%M%S')
-        unique_suffix = f'{time.time_ns() % 1_000_000_000:09d}'
-        filename = f'{timestamp}-{unique_suffix}-attempt{attempt}-{slug}-{url_hash}'
-        return diagnostic_dir / filename
-
-    def _save_seleniumbase_page_source_diagnostic(self, sb, base_path: Path) -> str | None:
-        try:
-            html = self._get_seleniumbase_page_source(sb)
-        except Exception as e:
-            logger.debug('Failed to capture SeleniumBase page source: {}', e)
-            return None
-
-        html_path = base_path.with_suffix('.html')
-        try:
-            html_path.write_text(html, encoding='utf-8')
-            return str(html_path)
-        except Exception as e:
-            logger.debug('Failed to write SeleniumBase page source diagnostic: {}', e)
-            return None
-
-    def _save_seleniumbase_screenshot_diagnostic(self, sb, base_path: Path) -> str | None:
-        screenshot_path = base_path.with_suffix('.png')
-        for target in (sb, getattr(sb, 'cdp', None), getattr(sb, 'driver', None)):
-            if target is None:
-                continue
-            save_screenshot = getattr(target, 'save_screenshot', None)
-            if not callable(save_screenshot):
-                continue
-
-            try:
-                save_screenshot(screenshot_path.name, folder=str(screenshot_path.parent))
-            except TypeError:
-                try:
-                    save_screenshot(str(screenshot_path))
-                except Exception as e:
-                    logger.debug('Failed to capture SeleniumBase screenshot: {}', e)
-                    continue
-            except Exception as e:
-                logger.debug('Failed to capture SeleniumBase screenshot: {}', e)
-                continue
-
-            if screenshot_path.exists():
-                return str(screenshot_path)
-        return None
-
-    def _write_seleniumbase_diagnostic_metadata(
-        self, base_path: Path, metadata: dict[str, Any]
-    ) -> str | None:
-        metadata_path = base_path.with_suffix('.json')
-        try:
-            metadata_path.write_text(
-                json.dumps(metadata, ensure_ascii=False, indent=2),
-                encoding='utf-8',
-            )
-            return str(metadata_path)
-        except Exception as e:
-            logger.debug('Failed to write SeleniumBase diagnostic metadata: {}', e)
-            return None
-
-    def _json_safe_error_arg(self, value: Any) -> Any:
-        try:
-            json.dumps(value)
-            return value
-        except (TypeError, ValueError):
-            return repr(value)
-
-    def _seleniumbase_error_chain(self, error: Exception) -> list[dict[str, Any]]:
-        chain: list[dict[str, Any]] = []
-        current: BaseException | None = error
-        relation = 'error'
-        seen_ids: set[int] = set()
-        while (
-            current is not None
-            and id(current) not in seen_ids
-            and len(chain) < SELENIUMBASE_ERROR_CHAIN_LIMIT
-        ):
-            seen_ids.add(id(current))
-            chain.append(
-                {
-                    'relation': relation,
-                    'type': type(current).__name__,
-                    'module': type(current).__module__,
-                    'message': str(current),
-                    'repr': repr(current),
-                    'args': [self._json_safe_error_arg(arg) for arg in current.args],
-                }
-            )
-            if current.__cause__ is not None:
-                relation = 'cause'
-                current = current.__cause__
-            elif current.__context__ is not None and not current.__suppress_context__:
-                relation = 'context'
-                current = current.__context__
-            else:
-                current = None
-        return chain
-
-    def _seleniumbase_error_metadata(self, error: Exception) -> dict[str, Any]:
-        return {
-            'error_type': type(error).__name__,
-            'error_module': type(error).__module__,
-            'error_message': str(error),
-            'error_args': [self._json_safe_error_arg(arg) for arg in error.args],
-            'error_chain': self._seleniumbase_error_chain(error),
-        }
-
-    def _sanitize_proxy_environment_value(self, value: str) -> str:
-        if '@' not in value:
-            return value
-
-        try:
-            parsed = urlsplit(value)
-            has_credentials = bool(parsed.username or parsed.password)
-            if not has_credentials:
-                return '<redacted proxy value>'
-            hostname = parsed.hostname or ''
-            try:
-                port = f':{parsed.port}' if parsed.port is not None else ''
-            except ValueError:
-                port = ''
-            netloc = f'<credentials>@{hostname}{port}'
-            return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
-        except Exception:
-            return '<redacted proxy value>'
-
-    def _proxy_environment_metadata(self) -> dict[str, dict[str, Any]]:
-        metadata: dict[str, dict[str, Any]] = {}
-        for key in PROXY_ENVIRONMENT_KEYS:
-            value = os.environ.get(key)
-            if value is None:
-                metadata[key] = {'set': False}
-            else:
-                metadata[key] = {
-                    'set': True,
-                    'value': self._sanitize_proxy_environment_value(value),
-                }
-        return metadata
-
-    def _record_seleniumbase_failure_diagnostics(
-        self, sb, url: str, attempt: int, error: Exception
-    ):
-        try:
-            base_path = self._seleniumbase_diagnostic_base_path(url, attempt)
-            final_url = self._seleniumbase_current_url(sb)
-            html_path = self._save_seleniumbase_page_source_diagnostic(sb, base_path)
-            screenshot_path = self._save_seleniumbase_screenshot_diagnostic(sb, base_path)
-            error_metadata = self._seleniumbase_error_metadata(error)
-            metadata = {
-                'attempt': attempt,
-                'original_url': url,
-                'final_url': final_url,
-                'error': repr(error),
-                **error_metadata,
-                'proxy_environment': self._proxy_environment_metadata(),
-                'html_path': html_path,
-                'screenshot_path': screenshot_path,
-            }
-            metadata_path = self._write_seleniumbase_diagnostic_metadata(base_path, metadata)
-            logger.warning(
-                'SeleniumBase HTML attempt {} failed; original_url: {}; final_url: {}; '
-                'metadata: {}; html: {}; screenshot: {}; error_type: {}; '
-                'error_message: {}; error: {}',
-                attempt,
-                url,
-                final_url or '<unknown>',
-                metadata_path or '<unavailable>',
-                html_path or '<unavailable>',
-                screenshot_path or '<unavailable>',
-                error_metadata['error_type'],
-                error_metadata['error_message'] or '<empty>',
-                error,
-            )
-        except Exception as diagnostic_error:
-            logger.warning(
-                'Failed to record SeleniumBase failure diagnostics: {}',
-                diagnostic_error,
-                exc_info=True,
-            )
 
     def _parse_html_with_seleniumbase_attempt(self, url: str, attempt: int):
         driver = self._active_seleniumbase_driver()

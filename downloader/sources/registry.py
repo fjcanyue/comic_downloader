@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import importlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from downloader.comic import ComicSource
 from downloader.runtime_config import RuntimeConfig
+from downloader.sources.metadata import SourceCapabilities
 from downloader.sources.profiles import SourceBinding, resolve_source_profile, source_is_enabled
 
 
@@ -14,6 +15,7 @@ class SourceDefinition:
     class_name: str
     enabled: bool = True
     deprecated: bool = False
+    capabilities: SourceCapabilities = field(default_factory=SourceCapabilities)
 
 
 SOURCE_DEFINITIONS = (

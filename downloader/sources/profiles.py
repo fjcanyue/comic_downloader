@@ -19,6 +19,7 @@ from downloader.browser.modes import (
 )
 from downloader.runtime_config import RuntimeConfig
 from downloader.sources.config_keys import SOURCE_CONFIG_ATTRIBUTE_KEYS
+from downloader.sources.metadata import SourceCapabilities
 
 PROFILE_ATTRIBUTE_DEFAULTS: dict[str, Any] = {
     'base_url': '',
@@ -52,6 +53,7 @@ class SourceProfile:
     class_name: str
     enabled: bool
     deprecated: bool
+    capabilities: SourceCapabilities = field(default_factory=SourceCapabilities)
     base_url: str = ''
     base_img_url: str = ''
     browser_mode: BrowserModeName = REQUESTS_MODE
@@ -120,6 +122,7 @@ def resolve_source_profile(
         class_name=definition.class_name,
         enabled=source_is_enabled(definition, include_deprecated, runtime_config),
         deprecated=bool(definition.deprecated),
+        capabilities=definition.capabilities,
         raw_site_config=_freeze_mapping(raw_site_config),
         **values,
     )

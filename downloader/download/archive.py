@@ -17,6 +17,8 @@ from downloader.models import (
 
 
 class ArchiveMixin:
+    overwrite: bool
+
     def _find_existing_archive(self, path: str, vol_name: str) -> str | None:
         if self.overwrite:
             return None

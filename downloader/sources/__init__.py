@@ -1,4 +1,15 @@
 import importlib
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from downloader.sources.registry import (
+        SOURCE_DEFINITIONS,
+        SourceDefinition,
+        get_source_definitions,
+        load_source_bindings,
+        load_source_classes,
+        validate_runtime_config_sources,
+    )
 
 __all__ = [
     'SOURCE_DEFINITIONS',
