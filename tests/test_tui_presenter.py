@@ -12,7 +12,7 @@ from downloader.models import (
     ImageDownloadFailure,
     VolumeDownloadResult,
 )
-from downloader.tui import SourceStat, TerminalPresenter
+from downloader.tui import SourceStat, SourceView, TerminalPresenter
 
 
 def presenter_with_output() -> tuple[TerminalPresenter, StringIO]:
@@ -137,9 +137,7 @@ def test_download_summary_renders_success_counts_for_clean_run():
     summary.add(
         VolumeDownloadResult(name='第1话', url='https://example.test/1', status='downloaded')
     )
-    summary.add(
-        VolumeDownloadResult(name='第2话', url='https://example.test/2', status='skipped')
-    )
+    summary.add(VolumeDownloadResult(name='第2话', url='https://example.test/2', status='skipped'))
 
     presenter.download_summary(summary)
 
@@ -155,25 +153,37 @@ def test_download_summary_renders_detail_table_with_badges_when_failures_exist()
     summary = DownloadSummary()
     summary.add(
         VolumeDownloadResult(
-            name='第1话', url='https://example.test/1', status='downloaded',
-            image_count=10, downloaded_count=10,
+            name='第1话',
+            url='https://example.test/1',
+            status='downloaded',
+            image_count=10,
+            downloaded_count=10,
         )
     )
     summary.add(
         VolumeDownloadResult(
-            name='第2话', url='https://example.test/2', status='skipped',
-            archive_path='/tmp/第2话.zip',
+            name='第2话',
+            url='https://example.test/2',
+            status='skipped',
+            archive_path='C:/downloads/第2话.zip',
         )
     )
     summary.add(
         VolumeDownloadResult(
-            name='第3话', url='https://example.test/3', status='failed', image_count=8,
-            downloaded_count=0, message='未解析到任何图片',
+            name='第3话',
+            url='https://example.test/3',
+            status='failed',
+            image_count=8,
+            downloaded_count=0,
+            message='未解析到任何图片',
         )
     )
     summary.add(
         VolumeDownloadResult(
-            name='第4话', url='https://example.test/4', status='partial', image_count=5,
+            name='第4话',
+            url='https://example.test/4',
+            status='partial',
+            image_count=5,
             downloaded_count=3,
             failed_images=[ImageDownloadFailure(index=4, url='u', file_path='p', error='超时')],
         )
@@ -194,10 +204,10 @@ def test_download_summary_renders_detail_table_with_badges_when_failures_exist()
     assert '第3话' in rendered
     assert '第4话' in rendered
     # 状态徽标文本
-    assert '✓ 已下载' in rendered
-    assert '⊘ 已跳过' in rendered
-    assert '✗ 失败' in rendered
-    assert '△ 部分失败' in rendered
+    assert '已下载' in rendered
+    assert '已跳过' in rendered
+    assert '失败' in rendered
+    assert '部分失败' in rendered
     # 图片计数
     assert '10/10' in rendered
     assert '3/5' in rendered
@@ -237,8 +247,8 @@ def test_welcome_renders_title_commands_and_sources():
     assert '命令速查' in rendered
     assert 's' in rendered and 'i' in rendered and 'd' in rendered
     assert 'v' in rendered and 'source' in rendered and 'q' in rendered
-    assert '摩锐漫画' in rendered
-    assert '读漫屋' in rendered
+    assert '已启用 2 个动漫源' in rendered
+    assert 'sources' in rendered
 
 
 def test_welcome_renders_without_sources():
@@ -273,30 +283,82 @@ def test_semantic_methods_render_with_markers():
     presenter.error('错误信息')
 
     rendered = output.getvalue()
-    assert '✔ 成功信息' in rendered
-    assert '⚠ 警告信息' in rendered
-    assert '✖ 错误信息' in rendered
+    assert '成功 成功信息' in rendered
+    assert '注意 警告信息' in rendered
+    assert '错误 错误信息' in rendered
     assert '普通信息' in rendered
 
 
-def test_source_options_renders_indexed_list_in_panel():
+def test_source_catalog_renders_capabilities_and_current_source():
     presenter, output = presenter_with_output()
 
-    presenter.source_options(['摩锐漫画', '读漫屋'])
+    presenter.source_catalog(
+        [
+            SourceView(1, 'morui', '摩锐漫画', 'seleniumbase', True, True, selected=True),
+            SourceView(2, 'dumanwu', '读漫屋', 'requests', False, True),
+        ]
+    )
 
     rendered = output.getvalue()
+    assert '动漫源 · 2 个已启用' in rendered
     assert '摩锐漫画' in rendered
     assert '读漫屋' in rendered
-    assert '1.' in rendered
-    assert '2.' in rendered
+    assert 'morui' in rendered
+    assert 'SeleniumBase' in rendered
+    assert 'HTTP' in rendered
+    assert '浏览器' in rendered
+    assert '>' in rendered
+    assert max(len(line) for line in rendered.splitlines()) <= 112
+
+
+def test_source_catalog_hides_code_column_on_narrow_terminal():
+    output = StringIO()
+    presenter = TerminalPresenter(
+        Console(file=output, force_terminal=False, color_system=None, width=72)
+    )
+
+    presenter.source_catalog([SourceView(1, 'morui', '摩锐漫画', 'cloakbrowser', True, True)])
+
+    rendered = output.getvalue()
+    assert 'morui' not in rendered
+    assert 'CloakBrowser' in rendered
+
+
+def test_source_catalog_renders_empty_configuration_state():
+    presenter, output = presenter_with_output()
+
+    presenter.source_catalog([])
+
+    rendered = output.getvalue()
+    assert '没有启用的动漫源' in rendered
+    assert 'sources.<名称>.enabled' in rendered
+
+
+def test_source_feedback_uses_gbk_safe_characters():
+    presenter, output = presenter_with_output()
+
+    presenter.source_selected('摩锐漫画', 'morui')
+    presenter.source_unchanged('摩锐漫画')
+
+    output.getvalue().encode('gbk')
+
+
+def test_source_not_found_escapes_user_markup():
+    presenter, output = presenter_with_output()
+
+    presenter.source_not_found('[red]unknown[/]', 7)
+
+    rendered = output.getvalue()
+    assert '[red]unknown[/]' in rendered
+    assert '1 到 7' in rendered
 
 
 def test_output_path_renders_path_in_panel():
     presenter, output = presenter_with_output()
 
-    presenter.output_path('/tmp/comics')
+    presenter.output_path('C:/downloads/comics')
 
-    assert '/tmp/comics' in output.getvalue()
+    assert 'C:/downloads/comics' in output.getvalue()
 
 
 # ---------------------------------------------------------------------------

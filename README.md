@@ -2,7 +2,7 @@
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/fjcanyue/comic_downloader)
 
-轻量级动漫下载器，CLI 方式单线程下载。支持三种浏览器渲染模式，自动在请求被屏蔽时回退。
+轻量级动漫下载器，提供带状态反馈的交互式终端界面。支持多源并行搜索、按章节下载、断点复用，以及三种页面加载模式；请求被站点屏蔽时可自动回退到浏览器模式。
 
 ## 支持的网站
 
@@ -67,7 +67,8 @@ uv run pyinstaller downloader.spec
 | `i <序号/URL>` | 查看动漫详情（章节列表） | `i 1` 或 `i https://...` |
 | `d <序号/URL>` | 全量下载动漫 | `d 12` 或 `d https://...` |
 | `v <参数>` | 按范围下载章节 | `v 1` `v 1 12` `v 1 5 10` |
-| `source` | 手动选择动漫源（可选） | `source` |
+| `source [序号/代码名/名称]` | 查看并切换动漫源；带参数时直接切换 | `source morui` |
+| `sources` | 查看动漫源加载方式及浏览器依赖 | `sources` |
 | `q` | 退出 | `q` |
 
  ![截图](docs/screenshot.png)
@@ -89,7 +90,19 @@ comic_downloader search <关键词>
 comic_downloader info <URL>
 comic_downloader download <URL>
 comic_downloader download_vols <URL> <章节序号> [起始] [截止]
+comic_downloader sources
 ```
+
+### 动漫源概览
+
+在交互式 Shell 中输入 `sources`，或直接运行 `comic_downloader sources`，可以查看当前运行配置实际启用的动漫源。概览会展示：
+
+- 当前选中的动漫源；
+- 源代码名，可用于 `source <代码名>` 快速切换；
+- 页面使用 HTTP、SeleniumBase 还是 CloakBrowser 加载；
+- 搜索和下载阶段是否需要浏览器。
+
+输入 `source` 会在同一张能力表下进入选择模式；也可以使用序号、代码名或中文名称直接切换，例如 `source 2`、`source morui`、`source 摩锐漫画`。表格会根据终端宽度自动精简列，状态反馈使用兼容 Windows GBK 控制台的文字标签。
 
 ### 选项
 
@@ -111,3 +124,12 @@ comic_downloader download_vols <URL> <章节序号> [起始] [截止]
 - 下载需要浏览器驱动时：Firefox + Gecko Driver / Chrome
 
 搜索和查看详情等不依赖浏览器的命令可直接运行，无需预先安装浏览器驱动。
+
+## 迭代方向
+
+项目按以下顺序继续演进：
+
+1. **终端体验与源透明度**：统一欢迎页、帮助、搜索结果和下载汇总的视觉层级；展示实际生效的源配置与浏览器依赖，降低试错成本。本轮已完成源能力概览和快速切换。
+2. **下载可靠性**：在现有断点复用、失败汇总和请求重试基础上，继续完善损坏文件校验、可恢复任务记录与失败重试入口。
+3. **源可维护性**：逐步补齐源能力和最近验证信息，拆分历史解析逻辑，并减少现有 Pyright 类型债务。
+4. **可观测性**：增加可选的源连通性检查和结构化诊断摘要；在线状态将由显式检查产生，不把“已配置”误报为“当前可用”。

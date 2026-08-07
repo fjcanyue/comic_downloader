@@ -5,6 +5,7 @@ from typing import Any
 
 from rich.console import Console, Group
 from rich.markdown import Markdown
+from rich.markup import escape
 from rich.panel import Panel
 from rich.rule import Rule
 from rich.table import Table
@@ -29,6 +30,9 @@ MUTED = 'dim'
 BRAND = '动漫下载器'
 MAX_FAILURE_DETAIL_ROWS = 5
 MAX_URL_DISPLAY_WIDTH = 50
+MIN_SOURCE_CODE_COLUMN_WIDTH = 88
+MAX_COMMAND_PANEL_WIDTH = 96
+MAX_SOURCE_PANEL_WIDTH = 112
 
 
 @dataclass(frozen=True)
@@ -39,6 +43,19 @@ class SourceStat:
     ok: bool
     duration: float
     error: str | None = None
+
+
+@dataclass(frozen=True)
+class SourceView:
+    """面向终端展示的动漫源能力快照。"""
+
+    index: int
+    source_name: str
+    display_name: str
+    browser_mode: str
+    search_uses_driver: bool
+    download_uses_driver: bool
+    selected: bool = False
 
 
 class TerminalPresenter:
@@ -61,13 +78,13 @@ class TerminalPresenter:
         self.print(message)
 
     def success(self, message: Any) -> None:
-        self.print(f'[bold {SUCCESS}]✔ {message}')
+        self.print(f'[bold {SUCCESS}]成功[/] {message}')
 
     def warn(self, message: Any) -> None:
-        self.print(f'[bold {WARN}]⚠ {message}')
+        self.print(f'[bold {WARN}]注意[/] {message}')
 
     def error(self, message: Any) -> None:
-        self.print(f'[bold {ERROR}]✖ {message}')
+        self.print(f'[bold {ERROR}]错误[/] {message}')
 
     # ------------------------------------------------------------------
     # 提示符与路径
@@ -89,35 +106,51 @@ class TerminalPresenter:
     # ------------------------------------------------------------------
     # 命令速查：welcome 与 help 复用同一份文本，避免两处不一致。
     # ------------------------------------------------------------------
-    def _command_cheatsheet(self) -> str:
-        return (
-            '[bold]命令速查[/]\n'
-            f'  [{ACCENT}]s[/]  <关键词>       从所有源搜索动漫\n'
-            f'  [{ACCENT}]i[/]  <序号/URL>     查看动漫详情\n'
-            f'  [{ACCENT}]d[/]  <序号/URL>     全量下载动漫\n'
-            f'  [{ACCENT}]v[/]  <章节> [范围]  按范围下载章节\n'
-            f'  [{ACCENT}]source[/]            手动切换下载源\n'
-            f'  [{ACCENT}]help[/] / [{ACCENT}]?[/]        查看命令速查\n'
-            f'  [{ACCENT}]q[/]                 退出'
+    def _command_cheatsheet(self) -> Table:
+        commands = Table.grid(padding=(0, 2))
+        commands.add_column(style=f'bold {ACCENT}', no_wrap=True)
+        commands.add_column(style=MUTED, no_wrap=True)
+        commands.add_column()
+        commands.add_row('s', '<关键词>', '从所有启用源搜索动漫')
+        commands.add_row('i', '<序号/URL>', '查看动漫详情')
+        commands.add_row('d', '[序号/URL]', '下载当前或指定动漫')
+        commands.add_row('v', '<章节> [范围]', '按范围下载章节')
+        commands.add_row('source', '[序号/代码名]', '查看并切换动漫源')
+        commands.add_row('sources', '', '查看动漫源能力概览')
+        commands.add_row('help / ?', '', '查看命令速查')
+        commands.add_row('q', '', '退出')
+        return commands
+
+    def _command_panel_body(self) -> Group:
+        return Group(
+            Text('命令速查', style='bold'),
+            Text(''),
+            self._command_cheatsheet(),
         )
 
     # ------------------------------------------------------------------
     # 欢迎与退出
     # ------------------------------------------------------------------
     def welcome(self, source_names: list[str] | None = None) -> None:
-        title = Text(BRAND, style=f'bold {ACCENT}')
-        body_lines = [self._command_cheatsheet()]
+        source_summary = '尚未加载动漫源'
         if source_names:
-            joined = f'  · '.join(source_names)
-            body_lines.append(f'\n[{MUTED}]支持源: {joined}')
+            source_summary = f'已启用 {len(source_names)} 个动漫源，输入 sources 查看能力概览'
 
         self.print(
             Panel(
-                Group(title, Text(''), *body_lines),
+                Group(
+                    Text(BRAND, style=f'bold {ACCENT}'),
+                    Text('多源搜索 · 按章节下载 · 自动复用已下载图片', style=MUTED),
+                    Text(''),
+                    self._command_panel_body(),
+                    Text(''),
+                    Text(source_summary, style=MUTED),
+                ),
                 border_style=ACCENT,
-                padding=(0, 2),
-                title=f'欢迎使用 {BRAND}',
+                padding=(1, 2),
+                title='开始使用',
                 title_align='left',
+                width=min(self.console.width, MAX_COMMAND_PANEL_WIDTH),
             )
         )
 
@@ -125,11 +158,12 @@ class TerminalPresenter:
         """随时可调用的命令速查面板，交互过程中也能查看。"""
         self.print(
             Panel(
-                self._command_cheatsheet(),
+                self._command_panel_body(),
                 border_style=ACCENT,
-                padding=(0, 2),
+                padding=(1, 2),
                 title='命令速查',
                 title_align='left',
+                width=min(self.console.width, MAX_COMMAND_PANEL_WIDTH),
             )
         )
 
@@ -141,20 +175,101 @@ class TerminalPresenter:
     # ------------------------------------------------------------------
     # 源选择
     # ------------------------------------------------------------------
-    def source_options(self, source_names: list[str]) -> None:
-        lines = []
-        for index, source_name in enumerate(source_names):
-            lines.append(f'  [{ACCENT}]{index + 1:>2}.[/] {source_name}')
+    def source_catalog(self, sources: list[SourceView], *, selection_mode: bool = False) -> None:
+        """展示动漫源、页面加载方式以及搜索/下载所需能力。"""
+        panel_width = min(self.console.width, MAX_SOURCE_PANEL_WIDTH)
+        if not sources:
+            self.print(
+                Panel(
+                    Group(
+                        Text('没有启用的动漫源。', style=f'bold {WARN}'),
+                        Text('请检查运行配置中的 sources.<名称>.enabled。', style=MUTED),
+                    ),
+                    border_style=WARN,
+                    padding=(1, 2),
+                    title='动漫源',
+                    title_align='left',
+                    width=panel_width,
+                )
+            )
+            return
+
+        table = Table(
+            box=None,
+            collapse_padding=True,
+            expand=True,
+            header_style=f'bold {ACCENT}',
+            pad_edge=False,
+            row_styles=['none', MUTED],
+        )
+        table.add_column('', width=1, justify='center', no_wrap=True)
+        table.add_column('#', width=3, justify='right', style=ACCENT, no_wrap=True)
+        table.add_column('动漫源', min_width=8, overflow='ellipsis', no_wrap=True)
+        if self.console.width >= MIN_SOURCE_CODE_COLUMN_WIDTH:
+            table.add_column('代码名', min_width=8, style=MUTED, no_wrap=True)
+        table.add_column('页面加载', min_width=8, no_wrap=True)
+        table.add_column('搜索', min_width=6, no_wrap=True)
+        table.add_column('下载', min_width=6, no_wrap=True)
+
+        for source in sources:
+            row = [
+                f'[{ACCENT}]>[/]' if source.selected else '',
+                str(source.index),
+                source.display_name,
+            ]
+            if self.console.width >= MIN_SOURCE_CODE_COLUMN_WIDTH:
+                row.append(source.source_name)
+            row.extend(
+                [
+                    self._browser_mode_label(source.browser_mode),
+                    self._access_label(source.search_uses_driver),
+                    self._access_label(source.download_uses_driver),
+                ]
+            )
+            table.add_row(*row, style='bold' if source.selected else None)
+
+        hint = (
+            '输入序号、代码名或动漫源名称进行切换；直接回车刷新列表。'
+            if selection_mode
+            else '使用 source <序号/代码名> 直接切换动漫源。'
+        )
         self.print(
             Panel(
-                Group('请选择动漫下载网站源:', Text(''), *lines),
+                Group(table, Text(''), Text(hint, style=MUTED)),
                 border_style=ACCENT,
-                padding=(0, 1),
+                padding=(1, 2),
+                title=f'动漫源 · {len(sources)} 个已启用',
+                title_align='left',
+                width=panel_width,
             )
         )
 
-    def source_switching(self, source_name: str) -> None:
-        self.print(f'[{ACCENT}]⟳[/] 正在切换到 [bold]{source_name}[/] 动漫下载源...')
+    @staticmethod
+    def _browser_mode_label(browser_mode: str) -> str:
+        labels = {
+            'requests': 'HTTP',
+            'seleniumbase': 'SeleniumBase',
+            'cloakbrowser': 'CloakBrowser',
+        }
+        return labels.get(browser_mode, browser_mode)
+
+    @staticmethod
+    def _access_label(uses_driver: bool) -> str:
+        if uses_driver:
+            return f'[{WARN}]浏览器[/]'
+        return f'[{SUCCESS}]HTTP[/]'
+
+    def source_selected(self, display_name: str, source_name: str) -> None:
+        self.success(f'已切换到 [bold]{display_name}[/] [{MUTED}]({source_name})[/]')
+
+    def source_unchanged(self, display_name: str) -> None:
+        self.info(f'当前动漫源已经是 [bold {ACCENT}]{display_name}[/]。')
+
+    def source_not_found(self, selection: str, max_index: int) -> None:
+        self.warn(
+            f'未找到动漫源 "{escape(selection)}"。请输入 1 到 {max_index} 的序号，'
+            '或使用 sources 查看代码名。'
+        )
 
     # ------------------------------------------------------------------
     # 搜索结果
@@ -206,13 +321,13 @@ class TerminalPresenter:
         parts: list[str] = []
         for stat in source_stats:
             if stat.ok:
-                parts.append(f'[{SUCCESS}]✓[/] {stat.display_name} ({stat.duration:.1f}s)')
+                parts.append(f'[{SUCCESS}]成功[/] {stat.display_name} ({stat.duration:.1f}s)')
             else:
                 detail = stat.error or '失败'
                 if len(detail) > MAX_URL_DISPLAY_WIDTH:
                     detail = detail[: MAX_URL_DISPLAY_WIDTH - 1] + '…'
-                parts.append(f'[{ERROR}]✗[/] {stat.display_name} ({detail})')
-        self.print(f'[{MUTED}]源状态: {f"  ".join(parts)}[/]')
+                parts.append(f'[{ERROR}]失败[/] {stat.display_name} ({detail})')
+        self.print(f'[{MUTED}]源状态: {"  ".join(parts)}[/]')
 
     # ------------------------------------------------------------------
     # 动漫详情
@@ -228,8 +343,7 @@ class TerminalPresenter:
         body_lines: list[Any] = [Group(*header_parts)]
         if comic.metadata:
             md_lines = ['## 详情', '']
-            for meta in comic.metadata:
-                md_lines.append(f'- **{meta["k"]}**: {meta["v"]}')
+            md_lines.extend(f'- **{meta["k"]}**: {meta["v"]}' for meta in comic.metadata)
             body_lines.append(Text(''))
             body_lines.append(Markdown('\n'.join(md_lines)))
 
@@ -300,10 +414,10 @@ class TerminalPresenter:
         detail.add_column('说明', overflow='fold', style=MUTED)
 
         status_badges = {
-            'downloaded': f'[{SUCCESS}]✓ 已下载[/]',
-            'skipped': f'[{MUTED}]⊘ 已跳过[/]',
-            'partial': f'[{WARN}]△ 部分失败[/]',
-            'failed': f'[{ERROR}]✗ 失败[/]',
+            'downloaded': f'[{SUCCESS}]已下载[/]',
+            'skipped': f'[{MUTED}]已跳过[/]',
+            'partial': f'[{WARN}]部分失败[/]',
+            'failed': f'[{ERROR}]失败[/]',
         }
 
         shown_failures = 0
@@ -321,9 +435,7 @@ class TerminalPresenter:
 
             if result.failed_images and shown_failures < MAX_FAILURE_DETAIL_ROWS:
                 for img in result.failed_images[: MAX_FAILURE_DETAIL_ROWS - shown_failures]:
-                    detail.add_row(
-                        '', '', '', f'[{MUTED}]第 {img.index} 张: {img.error}[/]'
-                    )
+                    detail.add_row('', '', '', f'[{MUTED}]第 {img.index} 张: {img.error}[/]')
                     shown_failures += 1
 
         self.print(detail)
@@ -348,8 +460,8 @@ class TerminalPresenter:
 
 # 向后兼容：保持旧的 status badge 字典可见（如外部引用）。
 STATUS_BADGES = {
-    'downloaded': f'[{SUCCESS}]✓[/]',
-    'skipped': f'[{MUTED}]⊘[/]',
-    'partial': f'[{WARN}]△[/]',
-    'failed': f'[{ERROR}]✗[/]',
+    'downloaded': f'[{SUCCESS}]成功[/]',
+    'skipped': f'[{MUTED}]跳过[/]',
+    'partial': f'[{WARN}]部分[/]',
+    'failed': f'[{ERROR}]失败[/]',
 }

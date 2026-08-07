@@ -18,7 +18,7 @@ from downloader.comic import Comic, ComicSource
 from downloader.runtime_config import RuntimeConfig
 from downloader.sources import load_source_bindings
 from downloader.sources.profiles import SourceBinding, SourceProfile
-from downloader.tui import SourceStat, TerminalPresenter
+from downloader.tui import SourceStat, SourceView, TerminalPresenter
 
 FULL_VOLUME_ARG_COUNT = 1
 VOLUME_TO_ARG_COUNT = 2
@@ -187,12 +187,30 @@ class Shell(cmd.Cmd):
 
     def _source_display_names(self) -> list[str]:
         """按源顺序解析展示用中文名（读漫屋、摩锐漫画…），缺失时回退到源代码名。"""
-        names: list[str] = []
-        for source_name in self.source_options:
-            binding = self.source_bindings.get(source_name)
-            cls = binding.source_class if binding else None
-            names.append(getattr(cls, 'name', source_name) if cls is not None else source_name)
-        return names
+        return [self._source_display_name(source_name) for source_name in self.source_options]
+
+    def _source_display_name(self, source_name: str) -> str:
+        binding = self.source_bindings.get(source_name) or self.all_source_bindings.get(source_name)
+        if binding is None:
+            return source_name
+        return getattr(binding.source_class, 'name', source_name)
+
+    def _source_views(self) -> list[SourceView]:
+        views: list[SourceView] = []
+        for index, source_name in enumerate(self.source_options, start=1):
+            binding = self.source_bindings[source_name]
+            views.append(
+                SourceView(
+                    index=index,
+                    source_name=source_name,
+                    display_name=self._source_display_name(source_name),
+                    browser_mode=binding.profile.browser_mode,
+                    search_uses_driver=binding.profile.uses_driver_for_search(),
+                    download_uses_driver=binding.profile.uses_driver_for_download(),
+                    selected=source_name == self.current_source_name,
+                )
+            )
+        return views
 
     def _read_prompt_line(self, prompt: str) -> str:
         self.stdout.write(prompt)
@@ -266,36 +284,66 @@ class Shell(cmd.Cmd):
                 return source_name
         return None
 
+    def do_sources(self, arg):
+        """查看已启用动漫源的加载方式与浏览器依赖。"""
+        self.presenter.source_catalog(self._source_views())
+
     def do_source(self, arg):
-        """选择动漫下载网站源。输入 source  后，根据提示选择源序号。"""
-        display_names = self._source_display_names()
-        self.presenter.source_options(display_names)
+        """查看并切换动漫源；支持 source <序号/代码名/名称>。"""
+        if not self.source_options:
+            self.presenter.source_catalog([])
+            return
+
+        selection = arg.strip()
+        if selection:
+            self._select_source(selection)
+            return
+
+        self.presenter.source_catalog(self._source_views(), selection_mode=True)
 
         while True:
             try:
-                source_index_str = self._read_prompt_line('请输入网站源序号: ')
-                if not source_index_str:  # 用户直接回车，重新显示列表
-                    self.presenter.source_options(display_names)
-                    continue  # 继续下一次循环，等待用户输入
-                source_index = int(source_index_str) - 1  # 序号从1开始，索引从0开始
-                if 0 <= source_index < len(self.source_options):
-                    source_name = self.source_options[source_index]
-                    self.__switch_source(source_name)
-                    break  # 选择成功，退出循环
-                self.presenter.warn(
-                    f'无效的序号，请输入 1 到 {len(self.source_options)} 之间的序号。'
-                )
+                selection = self._read_prompt_line('选择动漫源: ').strip()
+                if not selection:
+                    self.presenter.source_catalog(self._source_views(), selection_mode=True)
+                    continue
+                if self._select_source(selection):
+                    break
             except EOFError:
                 self.presenter.print()
                 return
+
+    def _select_source(self, selection: str) -> bool:
+        source_name = self._resolve_source_selection(selection)
+        if source_name is None:
+            self.presenter.source_not_found(selection, len(self.source_options))
+            return False
+        self.__switch_source(source_name)
+        return True
+
+    def _resolve_source_selection(self, selection: str) -> str | None:
+        if selection.isdigit():
+            try:
+                index = parse_1_based_index(selection, len(self.source_options), '动漫源')
             except ValueError:
-                self.presenter.warn('请输入有效的数字序号。')
+                return None
+            return self.source_options[index]
+
+        normalized = selection.casefold()
+        for source_name in self.source_options:
+            if normalized in {
+                source_name.casefold(),
+                self._source_display_name(source_name).casefold(),
+            }:
+                return source_name
+        return None
 
     def __switch_source(self, source_name):
         """切换动漫源"""
+        display_name = self._source_display_name(source_name)
         if self.current_source_name == source_name:
+            self.presenter.source_unchanged(display_name)
             return
-        self.presenter.source_switching(source_name)
 
         if source_name not in self.sources:
             binding = self.source_bindings.get(source_name) or self.all_source_bindings[source_name]
@@ -310,7 +358,8 @@ class Shell(cmd.Cmd):
 
         self.context.source = self.sources[source_name]
         self.current_source_name = source_name
-        self.prompt = self.presenter.prompt(self.current_source_name)
+        self.prompt = self.presenter.prompt(display_name)
+        self.presenter.source_selected(display_name, source_name)
 
     def _build_search_func(
         self, binding: SourceBinding, uses_driver: bool
@@ -370,9 +419,7 @@ class Shell(cmd.Cmd):
                 skipped_sources.add(task.source_name)
         if not skipped_sources:
             return ready_tasks
-        self.presenter.warn(
-            f'已跳过需要浏览器驱动的搜索源: {", ".join(sorted(skipped_sources))}'
-        )
+        self.presenter.warn(f'已跳过需要浏览器驱动的搜索源: {", ".join(sorted(skipped_sources))}')
         return ready_tasks
 
     def _merge_search_outcomes(self, outcomes: list[SearchOutcome]) -> None:
@@ -657,7 +704,7 @@ class Shell(cmd.Cmd):
 
     def emptyline(self):
         """空行不再重复上一条命令，避免误触发。"""
-        return None
+        return False
 
 
 class Context:

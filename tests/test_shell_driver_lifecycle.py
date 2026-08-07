@@ -11,6 +11,7 @@ from downloader.comic import ComicSource
 from downloader.runtime_config import RuntimeConfig, SourceRuntimeConfig
 from downloader.shell import Context, Shell
 from downloader.sources.profiles import SourceProfile
+from downloader.tui import TerminalPresenter
 
 
 def quiet_console() -> Console:
@@ -267,7 +268,7 @@ def test_shell_prompt_updates_when_source_switches(tmp_path):
     try:
         cast(Any, shell)._Shell__switch_source('morui')
 
-        assert shell.prompt == '动漫下载器[morui]> '
+        assert shell.prompt == '动漫下载器[摩锐漫画]> '
     finally:
         shell.context.destroy()
 
@@ -280,11 +281,88 @@ def test_shell_source_display_names_resolve_to_chinese_not_code(tmp_path):
 
         assert len(display_names) == len(shell.source_options)
         # 源代码名（小写英文）不应出现在展示列表中
-        for code_name in ('dumanwu', 'manhuafree', 'manhuagui', 'manhuazhan', 'morui', 'thmh', 'tuku'):
+        for code_name in (
+            'dumanwu',
+            'manhuafree',
+            'manhuagui',
+            'manhuazhan',
+            'morui',
+            'thmh',
+            'tuku',
+        ):
             assert code_name not in display_names
         # 已知中文名应出现
         assert '摩锐漫画' in display_names
         assert '读漫屋' in display_names
+    finally:
+        shell.context.destroy()
+
+
+def test_shell_source_views_expose_runtime_capabilities(tmp_path):
+    runtime_config = RuntimeConfig(sources={'morui': SourceRuntimeConfig(browser_mode='requests')})
+    shell = Shell(str(tmp_path), runtime_config=runtime_config)
+    try:
+        views = {view.source_name: view for view in shell._source_views()}
+
+        assert views['morui'].display_name == '摩锐漫画'
+        assert views['morui'].browser_mode == 'requests'
+        assert views['morui'].search_uses_driver is False
+        assert views['morui'].download_uses_driver is True
+        assert views['morui'].selected is False
+    finally:
+        shell.context.destroy()
+
+
+def test_shell_resolves_source_by_index_code_and_display_name(tmp_path):
+    shell = Shell(str(tmp_path))
+    try:
+        first_source = shell.source_options[0]
+        first_display_name = shell._source_display_name(first_source)
+
+        assert shell._resolve_source_selection('1') == first_source
+        assert shell._resolve_source_selection(first_source.upper()) == first_source
+        assert shell._resolve_source_selection(first_display_name) == first_source
+        assert shell._resolve_source_selection('999') is None
+        assert shell._resolve_source_selection('不存在') is None
+    finally:
+        shell.context.destroy()
+
+
+def test_shell_source_command_switches_directly_without_secondary_prompt(monkeypatch, tmp_path):
+    shell = Shell(str(tmp_path))
+    output = StringIO()
+    shell.presenter = TerminalPresenter(
+        Console(file=output, force_terminal=False, color_system=None, width=120)
+    )
+
+    def fail_prompt(prompt: str) -> str:
+        raise AssertionError(f'direct source selection should not prompt: {prompt}')
+
+    monkeypatch.setattr(shell, '_read_prompt_line', fail_prompt)
+    try:
+        shell.do_source('morui')
+
+        assert shell.current_source_name == 'morui'
+        assert '已切换到 摩锐漫画 (morui)' in output.getvalue()
+    finally:
+        shell.context.destroy()
+
+
+def test_shell_sources_command_renders_capability_catalog(tmp_path):
+    shell = Shell(str(tmp_path))
+    output = StringIO()
+    shell.presenter = TerminalPresenter(
+        Console(file=output, force_terminal=False, color_system=None, width=120)
+    )
+    try:
+        shell.do_sources('')
+
+        rendered = output.getvalue()
+        assert '动漫源' in rendered
+        assert '页面加载' in rendered
+        assert '搜索' in rendered
+        assert '下载' in rendered
+        assert '摩锐漫画' in rendered
     finally:
         shell.context.destroy()
 

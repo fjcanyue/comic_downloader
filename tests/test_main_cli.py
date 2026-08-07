@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 
 import main as main_module
+
 from downloader.tui import TerminalPresenter
 
 
@@ -23,9 +24,13 @@ class FakeShell:
         # 真实 Shell 通过 TerminalPresenter 暴露输出，fake 也需对齐该接口。
         self.presenter = TerminalPresenter()
         self.cmdloop_called = False
+        self.sources_called = False
 
     def cmdloop(self):
         self.cmdloop_called = True
+
+    def do_sources(self, arg):
+        self.sources_called = True
 
 
 class InterruptingShell(FakeShell):
@@ -65,6 +70,25 @@ def test_default_output_path_is_current_working_directory(monkeypatch, tmp_path)
     assert exit_code == 0
     assert created_shells[0].output_path == str(tmp_path)
     assert created_shells[0].cmdloop_called is True
+
+
+def test_sources_subcommand_renders_catalog_without_entering_shell(monkeypatch, tmp_path):
+    created_shells = []
+
+    def make_shell(output_path, overwrite=False, runtime_config=None):
+        shell = FakeShell(output_path, overwrite, runtime_config)
+        created_shells.append(shell)
+        return shell
+
+    monkeypatch.setattr(main_module, 'Shell', make_shell)
+    monkeypatch.setattr(sys, 'argv', ['comic_downloader', str(tmp_path), 'sources'])
+
+    exit_code = main_module.main()
+
+    assert exit_code == 0
+    assert created_shells[0].sources_called is True
+    assert created_shells[0].cmdloop_called is False
+    assert created_shells[0].context.destroyed is True
 
 
 def test_keyboard_interrupt_exits_cleanly(monkeypatch, capsys):
