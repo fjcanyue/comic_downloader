@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from rich import box
 from rich.console import Console, Group
 from rich.markdown import Markdown
 from rich.markup import escape
@@ -61,6 +62,20 @@ class SourceView:
     supports_download: bool = True
     verification_status: str = 'unchecked'
     last_verified_at: str | None = None
+
+
+@dataclass(frozen=True)
+class SourceCheckView:
+    index: int
+    source_name: str
+    display_name: str
+    status: str
+    checked_at: str
+    latency_seconds: float | None = None
+    http_status: int | None = None
+    message: str | None = None
+    final_url: str | None = None
+    error_type: str | None = None
 
 
 @dataclass(frozen=True)
@@ -134,6 +149,7 @@ class TerminalPresenter:
         commands.add_row('v', '<章节> [范围]', '按范围下载章节')
         commands.add_row('source', '[序号/代码名]', '查看并切换动漫源')
         commands.add_row('sources', '', '查看动漫源能力概览')
+        commands.add_row('check', '[序号/代码名/all]', '显式检查动漫源连通性')
         commands.add_row('retry', '[序号/all]', '查看或重试未完成任务')
         commands.add_row('help / ?', '', '查看命令速查')
         commands.add_row('q', '', '退出')
@@ -259,7 +275,7 @@ class TerminalPresenter:
         hint = (
             '输入序号、代码名或动漫源名称进行切换；直接回车刷新列表。'
             if selection_mode
-            else '使用 source <序号/代码名> 直接切换动漫源。'
+            else '使用 source <序号/代码名> 切换；使用 check <序号/代码名/all> 显式验证。'
         )
         self.print(
             Panel(
@@ -313,6 +329,76 @@ class TerminalPresenter:
             f'未找到动漫源 "{escape(selection)}"。请输入 1 到 {max_index} 的序号，'
             '或使用 sources 查看代码名。'
         )
+
+    def source_check_started(self, count: int) -> None:
+        self.info(f'正在检查 {count} 个动漫源；本操作会显式访问各来源首页。')
+
+    def source_check_summary(
+        self,
+        checks: list[SourceCheckView],
+        *,
+        persisted: bool = True,
+    ) -> None:
+        panel_width = min(self.console.width, MAX_SOURCE_PANEL_WIDTH)
+        table = Table(
+            box=box.SIMPLE_HEAD,
+            expand=True,
+            show_edge=False,
+            pad_edge=False,
+            header_style=f'bold {MUTED}',
+        )
+        table.add_column('#', width=3, justify='right', style=ACCENT, no_wrap=True)
+        table.add_column('动漫源', min_width=8, overflow='ellipsis', no_wrap=True)
+        table.add_column('状态', min_width=6, no_wrap=True)
+        table.add_column('HTTP', width=5, justify='right', no_wrap=True)
+        table.add_column('耗时', width=8, justify='right', no_wrap=True)
+        table.add_column('检查时间', width=19, no_wrap=True)
+        if self.console.width >= MIN_SOURCE_CODE_COLUMN_WIDTH:
+            table.add_column('诊断摘要', min_width=18, overflow='ellipsis')
+
+        for check in checks:
+            row = [
+                str(check.index),
+                escape(check.display_name),
+                self._verification_label(check.status, None),
+                str(check.http_status) if check.http_status is not None else '-',
+                (f'{check.latency_seconds:.3f}s' if check.latency_seconds is not None else '-'),
+                escape(check.checked_at.replace('T', ' ')[:19]),
+            ]
+            if self.console.width >= MIN_SOURCE_CODE_COLUMN_WIDTH:
+                detail = check.message or check.error_type or check.final_url or '-'
+                row.append(escape(detail))
+            table.add_row(*row)
+
+        healthy = sum(check.status == 'healthy' for check in checks)
+        degraded = sum(check.status == 'degraded' for check in checks)
+        unavailable = sum(check.status == 'unavailable' for check in checks)
+        persistence_message = (
+            '结果已保存到 .comic_downloader/source-verifications.json'
+            if persisted
+            else '结果未能保存；请处理上方记录错误后重试'
+        )
+        self.print(
+            Panel(
+                Group(
+                    table,
+                    Text(''),
+                    Text(
+                        f'正常 {healthy} · 受限 {degraded} · 不可用 {unavailable} · '
+                        + persistence_message,
+                        style=MUTED,
+                    ),
+                ),
+                border_style=ERROR if unavailable else WARN if degraded else SUCCESS,
+                padding=(1, 2),
+                title=f'来源检查 · {len(checks)} 个结果',
+                title_align='left',
+                width=panel_width,
+            )
+        )
+
+    def source_verification_store_error(self, message: str) -> None:
+        self.error(f'无法读取或写入来源验证记录: {escape(message)}')
 
     # ------------------------------------------------------------------
     # 可恢复下载任务

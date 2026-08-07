@@ -69,6 +69,7 @@ uv run pyinstaller downloader.spec
 | `v <参数>` | 按范围下载章节 | `v 1` `v 1 12` `v 1 5 10` |
 | `source [序号/代码名/名称]` | 查看并切换动漫源；带参数时直接切换 | `source morui` |
 | `sources` | 查看动漫源加载方式及浏览器依赖 | `sources` |
+| `check [序号/代码名/all]` | 查看已存状态，或显式检查一个/全部动漫源 | `check morui` 或 `check all` |
 | `retry [序号/任务ID/all]` | 查看或重试未完成的下载任务 | `retry 1` 或 `retry all` |
 | `q` | 退出 | `q` |
 
@@ -92,6 +93,7 @@ comic_downloader info <URL>
 comic_downloader download <URL>
 comic_downloader download_vols <URL> <章节序号> [起始] [截止]
 comic_downloader sources
+comic_downloader check [动漫源序号|代码名|all]
 comic_downloader retry [任务序号|任务ID|all]
 ```
 
@@ -112,6 +114,21 @@ comic_downloader retry [任务序号|任务ID|all]
 `SourceVerification` 表达“未检查、正常、受限、不可用”及最近验证时间。历史 HTML
 职责已拆分为页面加载、XPath/JavaScript 提取和 SeleniumBase 诊断模块；项目级 Pyright
 检查当前为零错误、零警告，使新增或修复站点适配器时更容易发现接口漂移。
+
+### 来源连通性检查与诊断
+
+`sources` 和不带参数的 `check` 只读取本地记录，不会自动访问任何站点，也不会把“已配置”
+显示成“当前在线”。只有执行 `check <序号/代码名>` 或 `check all` 时，下载器才会显式并发访问
+所选来源的首页：
+
+- HTTP 2xx/3xx 记为“正常”；
+- 能建立连接但返回 HTTP 4xx/5xx 记为“受限”，例如反爬挑战或服务端错误；
+- DNS、连接、TLS 或超时错误记为“不可用”。
+
+检查摘要会展示 HTTP 状态、耗时、检查时间和诊断消息。最近一次结果使用原子替换写入
+`<下载目录>/.comic_downloader/source-verifications.json`，其中还保留最终 URL、错误类型和
+UTC 时间戳，便于脚本或故障排查读取。该检查只验证首页的 HTTP 连通性，不等同于搜索、
+详情解析或下载流程的端到端健康检查。
 
 ### 下载完整性与任务恢复
 
@@ -153,4 +170,4 @@ comic_downloader retry [任务序号|任务ID|all]
 1. **终端体验与源透明度（已完成）**：已统一欢迎页、帮助、搜索结果和下载汇总的视觉层级，并提供源能力概览与快速切换。
 2. **下载可靠性（已完成）**：已实现图片与 ZIP 完整性校验、跨进程任务记录，以及按任务或批量失败重试入口。
 3. **源可维护性（已完成）**：已补齐源能力与最近验证元数据，拆分历史解析和诊断职责，并将项目级 Pyright 类型检查收敛到零错误、零警告。
-4. **可观测性（待实现）**：增加可选的源连通性检查和结构化诊断摘要；在线状态将由显式检查产生，不把“已配置”误报为“当前可用”。
+4. **可观测性（已完成）**：已增加可选的并发源连通性检查、原子持久化的结构化诊断摘要；在线状态只由显式检查产生，不把“已配置”误报为“当前可用”。

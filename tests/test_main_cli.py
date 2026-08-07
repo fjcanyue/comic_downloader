@@ -25,6 +25,7 @@ class FakeShell:
         self.presenter = TerminalPresenter()
         self.cmdloop_called = False
         self.sources_called = False
+        self.check_called_with = None
         self.retry_called_with = None
 
     def cmdloop(self):
@@ -32,6 +33,9 @@ class FakeShell:
 
     def do_sources(self, arg):
         self.sources_called = True
+
+    def do_check(self, arg):
+        self.check_called_with = arg
 
     def do_retry(self, arg):
         self.retry_called_with = arg
@@ -55,6 +59,7 @@ def test_help_exits_before_shell_creation(monkeypatch, capsys):
     assert exit_code == 0
     assert '用法:' in output
     assert 'download_vols' in output
+    assert 'check' in output
 
 
 def test_default_output_path_is_current_working_directory(monkeypatch, tmp_path):
@@ -110,6 +115,25 @@ def test_retry_subcommand_passes_selection_without_entering_shell(monkeypatch, t
 
     assert exit_code == 0
     assert created_shells[0].retry_called_with == 'all'
+    assert created_shells[0].cmdloop_called is False
+    assert created_shells[0].context.destroyed is True
+
+
+def test_check_subcommand_passes_selection_without_entering_shell(monkeypatch, tmp_path):
+    created_shells = []
+
+    def make_shell(output_path, overwrite=False, runtime_config=None):
+        shell = FakeShell(output_path, overwrite, runtime_config)
+        created_shells.append(shell)
+        return shell
+
+    monkeypatch.setattr(main_module, 'Shell', make_shell)
+    monkeypatch.setattr(sys, 'argv', ['comic_downloader', str(tmp_path), 'check', 'morui'])
+
+    exit_code = main_module.main()
+
+    assert exit_code == 0
+    assert created_shells[0].check_called_with == 'morui'
     assert created_shells[0].cmdloop_called is False
     assert created_shells[0].context.destroyed is True
 

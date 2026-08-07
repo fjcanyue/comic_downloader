@@ -23,6 +23,7 @@ USAGE = """用法:
   comic_downloader [下载路径] download <漫画URL或搜索结果序号>
   comic_downloader [下载路径] download_vols <漫画URL> <章节序号> [起始序号] [截止序号]
   comic_downloader [下载路径] sources
+  comic_downloader [下载路径] check [动漫源序号|代码名|all]
   comic_downloader [下载路径] retry [任务序号|任务ID|all]
 
 选项:
@@ -121,7 +122,7 @@ def _pop_config_path(args: list[str]) -> str | None:
 
 
 def _parse_command(args: list[str]) -> tuple[str, str | None, list[str]]:
-    subcommands = {'search', 'info', 'download', 'download_vols', 'sources', 'retry'}
+    subcommands = {'search', 'info', 'download', 'download_vols', 'sources', 'check', 'retry'}
     subcommand = None
     subcommand_args = []
     output_path = os.getcwd()
@@ -156,6 +157,8 @@ def _run_command(shell: Shell, subcommand: str | None, subcommand_args: list[str
         _run_download_vols(shell, subcommand_args)
     elif subcommand == 'sources':
         shell.do_sources('')
+    elif subcommand == 'check':
+        shell.do_check(' '.join(subcommand_args))
     elif subcommand == 'retry':
         shell.do_retry(' '.join(subcommand_args))
     else:

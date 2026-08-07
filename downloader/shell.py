@@ -20,8 +20,20 @@ from downloader.download.tasks import DownloadTask, DownloadTaskStore, DownloadT
 from downloader.models import DownloadSummary, VolumeDownloadResult
 from downloader.runtime_config import RuntimeConfig
 from downloader.sources import load_source_bindings
+from downloader.sources.metadata import SourceVerification
 from downloader.sources.profiles import SourceBinding, SourceProfile
-from downloader.tui import RetryTaskView, SourceStat, SourceView, TerminalPresenter
+from downloader.sources.verification import (
+    SourceVerificationStore,
+    SourceVerificationStoreError,
+    verify_source_connectivity,
+)
+from downloader.tui import (
+    RetryTaskView,
+    SourceCheckView,
+    SourceStat,
+    SourceView,
+    TerminalPresenter,
+)
 
 FULL_VOLUME_ARG_COUNT = 1
 VOLUME_TO_ARG_COUNT = 2
@@ -183,6 +195,8 @@ class Shell(cmd.Cmd):
         self.context = Context(self.presenter)
         self.context.create(output_path)
         self.task_store = DownloadTaskStore(output_path)
+        self.verification_store = SourceVerificationStore(output_path)
+        self._verification_store_error: str | None = None
         self.overwrite = overwrite
         self.runtime_config = runtime_config
         self.search_driver_lock = threading.Lock()
@@ -218,9 +232,11 @@ class Shell(cmd.Cmd):
         return getattr(binding.source_class, 'name', source_name)
 
     def _source_views(self) -> list[SourceView]:
+        verifications = self._load_source_verifications()
         views: list[SourceView] = []
         for index, source_name in enumerate(self.source_options, start=1):
             binding = self.source_bindings[source_name]
+            verification = verifications.get(source_name, SourceVerification())
             views.append(
                 SourceView(
                     index=index,
@@ -233,9 +249,21 @@ class Shell(cmd.Cmd):
                     supports_search=binding.profile.capabilities.search,
                     supports_info=binding.profile.capabilities.info,
                     supports_download=binding.profile.capabilities.download,
+                    verification_status=verification.status,
+                    last_verified_at=verification.checked_at,
                 )
             )
         return views
+
+    def _load_source_verifications(self) -> dict[str, SourceVerification]:
+        try:
+            results = self.verification_store.load_all()
+            self._verification_store_error = None
+            return results
+        except SourceVerificationStoreError as exc:
+            logger.warning('无法读取来源验证记录: {}', exc)
+            self._verification_store_error = str(exc)
+            return {}
 
     def _read_prompt_line(self, prompt: str) -> str:
         self.stdout.write(prompt)
@@ -312,6 +340,99 @@ class Shell(cmd.Cmd):
     def do_sources(self, arg):
         """查看已启用动漫源的加载方式与浏览器依赖。"""
         self.presenter.source_catalog(self._source_views())
+        if self._verification_store_error:
+            self.presenter.source_verification_store_error(self._verification_store_error)
+
+    def do_check(self, arg):
+        """显式检查动漫源连通性；支持 check <序号/代码名/all>。"""
+        selection = arg.strip()
+        if not selection:
+            self.do_sources('')
+            self.presenter.info('输入 check <序号/代码名> 检查单个来源，或 check all 检查全部。')
+            return
+        if not self.source_options:
+            self.presenter.source_catalog([])
+            return
+
+        if selection.casefold() == 'all':
+            source_names = list(self.source_options)
+        else:
+            source_name = self._resolve_source_selection(selection)
+            if source_name is None:
+                self.presenter.source_not_found(selection, len(self.source_options))
+                return
+            source_names = [source_name]
+
+        if not source_names:
+            self.presenter.source_catalog([])
+            return
+
+        self.presenter.source_check_started(len(source_names))
+        results = self._run_source_checks(source_names)
+        persisted = True
+        try:
+            self.verification_store.save_all(results)
+            self._verification_store_error = None
+        except SourceVerificationStoreError as exc:
+            persisted = False
+            self._verification_store_error = str(exc)
+            self.presenter.source_verification_store_error(str(exc))
+        self.presenter.source_check_summary(
+            self._source_check_views(source_names, results),
+            persisted=persisted,
+        )
+
+    def _run_source_checks(self, source_names: list[str]) -> dict[str, SourceVerification]:
+        max_workers = min(4, len(source_names))
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
+        try:
+            future_sources = {
+                executor.submit(self._check_source, source_name): source_name
+                for source_name in source_names
+            }
+            results = {
+                future_sources[future]: future.result()
+                for future in concurrent.futures.as_completed(future_sources)
+            }
+            executor.shutdown(wait=True)
+            return results
+        except (KeyboardInterrupt, SystemExit):
+            executor.shutdown(wait=False, cancel_futures=True)
+            raise
+        except Exception:
+            executor.shutdown(wait=True)
+            raise
+
+    def _check_source(self, source_name: str) -> SourceVerification:
+        http = self.context.create_http_session(retry_total=0)
+        try:
+            return verify_source_connectivity(self.source_bindings[source_name].profile, http)
+        finally:
+            http.close()
+
+    def _source_check_views(
+        self,
+        source_names: list[str],
+        results: dict[str, SourceVerification],
+    ) -> list[SourceCheckView]:
+        views: list[SourceCheckView] = []
+        for source_name in source_names:
+            result = results[source_name]
+            views.append(
+                SourceCheckView(
+                    index=self.source_options.index(source_name) + 1,
+                    source_name=source_name,
+                    display_name=self._source_display_name(source_name),
+                    status=result.status,
+                    checked_at=result.checked_at or '',
+                    latency_seconds=result.latency_seconds,
+                    http_status=result.http_status,
+                    message=result.message,
+                    final_url=result.final_url,
+                    error_type=result.error_type,
+                )
+            )
+        return views
 
     def do_source(self, arg):
         """查看并切换动漫源；支持 source <序号/代码名/名称>。"""
@@ -871,9 +992,9 @@ class Context:
         self.presenter.output_path(output_path)
         self.http = self.create_http_session()
 
-    def create_http_session(self):
+    def create_http_session(self, retry_total: int = 3):
         retry_strategy = Retry(
-            total=3,
+            total=retry_total,
             status_forcelist=[400, 429, 500, 502, 503, 504],
             allowed_methods=['GET'],
             raise_on_status=False,

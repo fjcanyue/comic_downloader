@@ -12,6 +12,7 @@ from downloader.download.tasks import DownloadTask
 from downloader.models import VolumeDownloadResult
 from downloader.runtime_config import RuntimeConfig, SourceRuntimeConfig
 from downloader.shell import Context, Shell, url_matches_base
+from downloader.sources.metadata import SourceVerification
 from downloader.sources.profiles import SourceProfile
 from downloader.tui import TerminalPresenter
 
@@ -375,6 +376,60 @@ def test_shell_sources_command_renders_capability_catalog(tmp_path):
         assert '搜索' in rendered
         assert '下载' in rendered
         assert '摩锐漫画' in rendered
+    finally:
+        shell.context.destroy()
+
+
+def test_shell_check_without_selection_only_reads_cached_state(monkeypatch, tmp_path):
+    shell = Shell(str(tmp_path))
+    output = StringIO()
+    shell.presenter = TerminalPresenter(
+        Console(file=output, force_terminal=False, color_system=None, width=120)
+    )
+
+    def fail_check(source_name: str) -> SourceVerification:
+        raise AssertionError(f'check without selection must not access {source_name}')
+
+    monkeypatch.setattr(shell, '_check_source', fail_check)
+    try:
+        shell.do_check('')
+
+        rendered = output.getvalue()
+        assert '未检查' in rendered
+        assert 'check all' in rendered
+        assert not shell.verification_store.store_path.exists()
+    finally:
+        shell.context.destroy()
+
+
+def test_shell_check_persists_result_and_updates_source_catalog(monkeypatch, tmp_path):
+    shell = Shell(str(tmp_path))
+    output = StringIO()
+    shell.presenter = TerminalPresenter(
+        Console(file=output, force_terminal=False, color_system=None, width=120)
+    )
+    result = SourceVerification(
+        status='healthy',
+        checked_at='2026-08-08T00:00:00+00:00',
+        latency_seconds=0.125,
+        http_status=200,
+        message='HTTP 200，连接正常。',
+        final_url='https://www.morui.com/',
+    )
+    monkeypatch.setattr(shell, '_check_source', lambda source_name: result)
+    try:
+        shell.do_check('morui')
+        shell.do_sources('')
+
+        rendered = output.getvalue()
+        assert '来源检查 · 1 个结果' in rendered
+        assert '正常 1 · 受限 0 · 不可用 0' in rendered
+        assert '0.125s' in rendered
+        assert '2026-08-08' in rendered
+        assert shell.verification_store.load_all()['morui'] == result
+        view = next(view for view in shell._source_views() if view.source_name == 'morui')
+        assert view.verification_status == 'healthy'
+        assert view.last_verified_at == '2026-08-08T00:00:00+00:00'
     finally:
         shell.context.destroy()
 

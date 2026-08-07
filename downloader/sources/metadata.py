@@ -20,6 +20,8 @@ class SourceVerification:
     latency_seconds: float | None = None
     http_status: int | None = None
     message: str | None = None
+    final_url: str | None = None
+    error_type: str | None = None
 
     @property
     def checked(self) -> bool:
