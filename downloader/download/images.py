@@ -12,6 +12,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from downloader.browser.modes import SELENIUMBASE_MODE
+from downloader.download.integrity import validate_image_file
 from downloader.download.progress import DownloadProgress, ensure_download_progress
 from downloader.models import (
     ImageDownloadCancelledError,
@@ -53,7 +54,7 @@ class ImageDownloadMixin:
         progress = ensure_download_progress(progress)
         failed_images: list[ImageDownloadFailure] = []
         max_workers = max(1, min(self._source_max_download_workers(), len(imgs)))
-        task_id = progress.add_task(description=f'[cyan]🖼  {vol_name}', total=len(imgs))
+        task_id = progress.add_task(description=f'[cyan]图片 · {vol_name}', total=len(imgs))
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
         futures: list[concurrent.futures.Future] = []
         try:
@@ -200,7 +201,13 @@ class ImageDownloadMixin:
         return ImageDownloadFailure(index + 1, full_img_url, file_path, last_error)
 
     def _can_reuse_image(self, file_path: str) -> bool:
-        return not self.overwrite and os.path.exists(file_path) and os.path.getsize(file_path) > 0
+        if self.overwrite or not os.path.exists(file_path):
+            return False
+        check = validate_image_file(file_path)
+        if check.ok:
+            return True
+        logger.warning('已有图片校验失败，将重新下载: {} ({})', file_path, check.reason)
+        return False
 
     def _build_image_url(self, img_url_part: str, use_base_img_url: bool) -> str:
         if use_base_img_url and not img_url_part.startswith('http'):
@@ -267,6 +274,7 @@ class ImageDownloadMixin:
         finally:
             context.http_lock.release()
         self._raise_if_image_download_cancelled(context)
+        self._validate_downloaded_image(tmp_path, full_img_url)
         os.replace(tmp_path, file_path)
         return True
 
@@ -280,7 +288,13 @@ class ImageDownloadMixin:
                 if chunk:
                     f.write(chunk)
         self._raise_if_image_download_cancelled(context)
+        self._validate_downloaded_image(tmp_path, str(getattr(response, 'url', file_path)))
         os.replace(tmp_path, file_path)
+
+    def _validate_downloaded_image(self, tmp_path: str, source_url: str) -> None:
+        check = validate_image_file(tmp_path)
+        if not check.ok:
+            raise RuntimeError(f'下载内容不是完整图片: {source_url} ({check.reason})')
 
     def _handle_image_download_error(
         self,

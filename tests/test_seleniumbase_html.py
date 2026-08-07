@@ -647,7 +647,7 @@ class FakeSeleniumBaseDownloadDriver:
     def download_to_file(self, url, file_path, *, referer=None):
         self.downloads.append((url, referer))
         with open(file_path, 'wb') as f:
-            f.write(b'image-bytes')
+            f.write(b'\xff\xd8\xff\xe0' + (b'\x00' * 12) + b'\xff\xd9')
 
 
 def test_seleniumbase_image_download_uses_driver(tmp_path):

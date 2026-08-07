@@ -20,6 +20,7 @@ from downloader.browser.modes import (
 from downloader.download.archive import ArchiveMixin
 from downloader.download.images import ImageDownloadMixin
 from downloader.download.progress import DownloadProgress, RichDownloadProgress
+from downloader.download.tasks import DownloadTaskMixin
 from downloader.download.volume import download_volume
 from downloader.models import (
     Comic,
@@ -59,7 +60,7 @@ __all__ = [
 ]
 
 
-class ComicSource(ImageDownloadMixin, ArchiveMixin, HtmlParsingMixin, ABC):
+class ComicSource(ImageDownloadMixin, ArchiveMixin, DownloadTaskMixin, HtmlParsingMixin, ABC):
     base_url: str = ''
     base_img_url: str = ''
     browser_mode: BrowserModeName = REQUESTS_MODE
@@ -314,7 +315,7 @@ class ComicSource(ImageDownloadMixin, ArchiveMixin, HtmlParsingMixin, ABC):
             # 总体进度条：贯穿所有章节，让大下载一眼可见 X/N 的完成度，
             # 替代此前按 book 拆分的孤立 bar。
             overall_id = progress.add_task(
-                description=f'📦 {comic.name or "未知动漫"} · 共 {total_vols} 章',
+                description=f'{comic.name or "未知动漫"} · 共 {total_vols} 章',
                 total=total_vols,
             )
 

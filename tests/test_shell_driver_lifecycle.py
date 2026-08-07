@@ -8,8 +8,10 @@ from rich.console import Console
 
 from downloader.browser.manager import DriverManager
 from downloader.comic import ComicSource
+from downloader.download.tasks import DownloadTask
+from downloader.models import VolumeDownloadResult
 from downloader.runtime_config import RuntimeConfig, SourceRuntimeConfig
-from downloader.shell import Context, Shell
+from downloader.shell import Context, Shell, url_matches_base
 from downloader.sources.profiles import SourceProfile
 from downloader.tui import TerminalPresenter
 
@@ -211,6 +213,16 @@ def test_shell_uses_plain_stdin_for_interactive_prompt():
     assert Shell.use_rawinput is False
 
 
+def test_source_url_matching_rejects_prefix_and_scheme_confusion():
+    base_url = 'https://www.morui.com/manga'
+
+    assert url_matches_base('https://www.morui.com/manga/123', base_url) is True
+    assert url_matches_base('https://www.morui.com/mangaevil/123', base_url) is False
+    assert url_matches_base('https://www.morui.com.evil.test/manga/123', base_url) is False
+    assert url_matches_base('http://www.morui.com/manga/123', base_url) is False
+    assert url_matches_base('not-a-url', base_url) is False
+
+
 class DriverBackedSource(ComicSource):
     name = 'driver-backed'
     download_requires_driver = True
@@ -363,6 +375,72 @@ def test_shell_sources_command_renders_capability_catalog(tmp_path):
         assert '搜索' in rendered
         assert '下载' in rendered
         assert '摩锐漫画' in rendered
+    finally:
+        shell.context.destroy()
+
+
+def test_shell_resolves_retry_tasks_by_index_id_and_all(tmp_path):
+    shell = Shell(str(tmp_path))
+    tasks = [
+        DownloadTask(
+            task_id='abc123def456',
+            source_name='morui',
+            volume_name='chapter-1',
+            source_url='https://example.test/1',
+            target_path='comic/book/chapter-1',
+        ),
+        DownloadTask(
+            task_id='def456abc123',
+            source_name='morui',
+            volume_name='chapter-2',
+            source_url='https://example.test/2',
+            target_path='comic/book/chapter-2',
+        ),
+    ]
+    try:
+        assert shell._resolve_retry_tasks('all', tasks) == tasks
+        assert shell._resolve_retry_tasks('2', tasks) == [tasks[1]]
+        assert shell._resolve_retry_tasks('abc123', tasks) == [tasks[0]]
+        assert shell._resolve_retry_tasks('9', tasks) is None
+        assert shell._resolve_retry_tasks('unknown', tasks) is None
+    finally:
+        shell.context.destroy()
+
+
+def test_shell_retry_command_executes_selected_tasks_and_renders_summary(monkeypatch, tmp_path):
+    shell = Shell(str(tmp_path))
+    output = StringIO()
+    shell.presenter = TerminalPresenter(
+        Console(file=output, force_terminal=False, color_system=None, width=120)
+    )
+    task = DownloadTask(
+        task_id='abc123def456',
+        source_name='morui',
+        volume_name='chapter-1',
+        source_url='https://example.test/1',
+        target_path='comic/book/chapter-1',
+    )
+
+    class FakeTaskStore:
+        def list_pending(self):
+            return [task]
+
+    shell.task_store = cast(Any, FakeTaskStore())
+    monkeypatch.setattr(
+        shell,
+        '_retry_download_task',
+        lambda selected: VolumeDownloadResult(
+            name=selected.volume_name,
+            url=selected.source_url,
+            status='downloaded',
+        ),
+    )
+    try:
+        shell.do_retry('all')
+
+        rendered = output.getvalue()
+        assert '下载完成' in rendered
+        assert '成功 1' in rendered
     finally:
         shell.context.destroy()
 

@@ -12,7 +12,7 @@ from downloader.models import (
     ImageDownloadFailure,
     VolumeDownloadResult,
 )
-from downloader.tui import SourceStat, SourceView, TerminalPresenter
+from downloader.tui import RetryTaskView, SourceStat, SourceView, TerminalPresenter
 
 
 def presenter_with_output() -> tuple[TerminalPresenter, StringIO]:
@@ -351,6 +351,43 @@ def test_source_not_found_escapes_user_markup():
     rendered = output.getvalue()
     assert '[red]unknown[/]' in rendered
     assert '1 到 7' in rendered
+
+
+def test_retry_tasks_render_pending_downloads_and_commands():
+    presenter, output = presenter_with_output()
+
+    presenter.retry_tasks(
+        [
+            RetryTaskView(
+                index=1,
+                task_id='abc123def456',
+                source_name='摩锐漫画',
+                volume_name='第 12 话',
+                status='partial',
+                attempts=2,
+                updated_at='2026-08-08T10:00:00+00:00',
+                message='1 张图片失败',
+            )
+        ]
+    )
+
+    rendered = output.getvalue()
+    assert '下载恢复 · 1 个待处理' in rendered
+    assert '摩锐漫画' in rendered
+    assert '第 12 话' in rendered
+    assert '部分失败' in rendered
+    assert 'abc123def456' in rendered
+    assert 'retry all' in rendered
+
+
+def test_retry_tasks_render_empty_state():
+    presenter, output = presenter_with_output()
+
+    presenter.retry_tasks([])
+
+    rendered = output.getvalue()
+    assert '没有待恢复的下载任务' in rendered
+    assert '自动记录' in rendered
 
 
 def test_output_path_renders_path_in_panel():

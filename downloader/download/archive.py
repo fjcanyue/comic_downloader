@@ -6,6 +6,7 @@ import shutil
 
 from loguru import logger
 
+from downloader.download.integrity import validate_comic_archive
 from downloader.download.progress import DownloadProgress
 from downloader.models import (
     ImageDownloadFailure,
@@ -22,7 +23,7 @@ class ArchiveMixin:
 
         target_zip_name = filter_dir_name(vol_name) + '.zip'
         target_zip_path = os.path.join(path, target_zip_name)
-        if os.path.exists(target_zip_path):
+        if self._can_reuse_archive(target_zip_path):
             return target_zip_path
 
         base_name = filter_dir_name(vol_name)
@@ -35,10 +36,19 @@ class ArchiveMixin:
         for i in range(1, 3):
             padded_num = num_part.zfill(len(num_part) + i)
             padded_path = os.path.join(path, padded_num + rest_part + '.zip')
-            if os.path.exists(padded_path):
+            if self._can_reuse_archive(padded_path):
                 logger.info('文件已存在(补零匹配)，跳过: {}', padded_path)
                 return padded_path
         return None
+
+    def _can_reuse_archive(self, archive_path: str) -> bool:
+        if not os.path.exists(archive_path):
+            return False
+        check = validate_comic_archive(archive_path)
+        if check.ok:
+            return True
+        logger.warning('已有归档校验失败，将重新下载: {} ({})', archive_path, check.reason)
+        return False
 
     def _remove_progress_task(self, progress: DownloadProgress | None, task_id) -> None:
         if progress is None or task_id is None:
@@ -102,6 +112,9 @@ class ArchiveMixin:
         logger.info('开始压缩目录: {}', path)
         try:
             archive_path = shutil.make_archive(path, 'zip', path)
+            archive_check = validate_comic_archive(archive_path)
+            if not archive_check.ok:
+                raise RuntimeError(f'归档校验失败: {archive_check.reason}')
             logger.info('目录 {} 压缩完成.', path)
             return VolumeDownloadResult(
                 name=vol_name,

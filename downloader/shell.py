@@ -7,6 +7,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 from loguru import logger
@@ -15,10 +16,12 @@ from urllib3.util.retry import Retry
 
 from downloader.browser.manager import DriverManager
 from downloader.comic import Comic, ComicSource
+from downloader.download.tasks import DownloadTask, DownloadTaskStore, DownloadTaskStoreError
+from downloader.models import DownloadSummary, VolumeDownloadResult
 from downloader.runtime_config import RuntimeConfig
 from downloader.sources import load_source_bindings
 from downloader.sources.profiles import SourceBinding, SourceProfile
-from downloader.tui import SourceStat, SourceView, TerminalPresenter
+from downloader.tui import RetryTaskView, SourceStat, SourceView, TerminalPresenter
 
 FULL_VOLUME_ARG_COUNT = 1
 VOLUME_TO_ARG_COUNT = 2
@@ -52,6 +55,24 @@ def parse_volume_slice(args: list[str], book_count: int, vol_count: int) -> tupl
             raise ValueError('请输入正确的截止序号！')
         return book_index, slice(vol_from, vol_to + 1)
     raise ValueError('参数错误，请重新输入！')
+
+
+def url_matches_base(url: str, base_url: str) -> bool:
+    try:
+        target = urlparse(url)
+        base = urlparse(base_url)
+        target_port = target.port
+        base_port = base.port
+    except ValueError:
+        return False
+    if target.scheme not in {'http', 'https'} or target.scheme != base.scheme:
+        return False
+    if not target.hostname or target.hostname.casefold() != (base.hostname or '').casefold():
+        return False
+    if target_port != base_port:
+        return False
+    base_path = base.path.rstrip('/')
+    return not base_path or target.path == base_path or target.path.startswith(f'{base_path}/')
 
 
 @dataclass(frozen=True)
@@ -161,6 +182,7 @@ class Shell(cmd.Cmd):
         self.console = self.presenter.console
         self.context = Context(self.presenter)
         self.context.create(output_path)
+        self.task_store = DownloadTaskStore(output_path)
         self.overwrite = overwrite
         self.runtime_config = runtime_config
         self.search_driver_lock = threading.Lock()
@@ -280,7 +302,7 @@ class Shell(cmd.Cmd):
     def _match_source_for_url(self, url: str) -> str | None:
         for source_name, binding in self.all_source_bindings.items():
             base_url = binding.profile.base_url
-            if base_url and url.startswith(base_url):
+            if base_url and url_matches_base(url, base_url):
                 return source_name
         return None
 
@@ -320,6 +342,100 @@ class Shell(cmd.Cmd):
             return False
         self.__switch_source(source_name)
         return True
+
+    def do_retry(self, arg):
+        """查看或重试未完成下载任务；支持 retry <序号/任务ID/all>。"""
+        tasks = self._pending_download_tasks()
+        if tasks is None:
+            return
+        selection = arg.strip()
+        if not selection:
+            self.presenter.retry_tasks(self._retry_task_views(tasks))
+            return
+
+        selected_tasks = self._resolve_retry_tasks(selection, tasks)
+        if selected_tasks is None:
+            self.presenter.retry_selection_not_found(selection)
+            return
+
+        summary = DownloadSummary()
+        for task in selected_tasks:
+            summary.add(self._retry_download_task(task))
+        self.presenter.download_summary(summary)
+
+    def _pending_download_tasks(self) -> list[DownloadTask] | None:
+        try:
+            return self.task_store.list_pending()
+        except DownloadTaskStoreError as exc:
+            self.presenter.retry_store_error(str(exc))
+            return None
+
+    def _retry_task_views(self, tasks: list[DownloadTask]) -> list[RetryTaskView]:
+        return [
+            RetryTaskView(
+                index=index,
+                task_id=task.task_id,
+                source_name=self._source_display_name(task.source_name),
+                volume_name=task.volume_name,
+                status=task.status,
+                attempts=task.attempts,
+                updated_at=task.updated_at,
+                message=task.message,
+            )
+            for index, task in enumerate(tasks, start=1)
+        ]
+
+    def _resolve_retry_tasks(
+        self, selection: str, tasks: list[DownloadTask]
+    ) -> list[DownloadTask] | None:
+        if selection.casefold() == 'all':
+            return tasks
+        if selection.isdigit():
+            try:
+                index = parse_1_based_index(selection, len(tasks), '下载任务')
+            except ValueError:
+                return None
+            return [tasks[index]]
+        matches = [task for task in tasks if task.task_id.startswith(selection.casefold())]
+        return matches if len(matches) == 1 else None
+
+    def _retry_download_task(self, task: DownloadTask) -> VolumeDownloadResult:
+        binding = self.source_bindings.get(task.source_name)
+        if binding is None:
+            return VolumeDownloadResult(
+                name=task.volume_name,
+                url=task.source_url,
+                status='failed',
+                message=f'动漫源 {task.source_name} 当前未启用',
+            )
+        if not url_matches_base(task.source_url, binding.profile.base_url):
+            return VolumeDownloadResult(
+                name=task.volume_name,
+                url=task.source_url,
+                status='failed',
+                message='任务 URL 不属于记录的动漫源',
+            )
+        try:
+            self.__switch_source(task.source_name)
+            if not self._ensure_source_page_ready() or not self._ensure_source_download_ready():
+                return VolumeDownloadResult(
+                    name=task.volume_name,
+                    url=task.source_url,
+                    status='failed',
+                    message='动漫源所需浏览器未就绪',
+                )
+            source = self.context.source
+            if source is None:
+                raise DownloadTaskStoreError('未能创建任务所属动漫源。')
+            return source.retry_download_task(task)
+        except Exception as exc:
+            logger.error('重试下载任务失败: {}', task.task_id, exc_info=True)
+            return VolumeDownloadResult(
+                name=task.volume_name,
+                url=task.source_url,
+                status='failed',
+                message=str(exc),
+            )
 
     def _resolve_source_selection(self, selection: str) -> str | None:
         if selection.isdigit():
@@ -557,7 +673,7 @@ class Shell(cmd.Cmd):
         if (
             self.context.source
             and hasattr(self.context.source, 'base_url')
-            and url.startswith(self.context.source.base_url)
+            and url_matches_base(url, self.context.source.base_url)
         ):
             return url
         self.presenter.warn('请输入完整的动漫地址，且确保该地址属于支持的动漫源！')
@@ -659,7 +775,7 @@ class Shell(cmd.Cmd):
         elif (
             self.context.source
             and hasattr(self.context.source, 'base_url')
-            and arg.startswith(self.context.source.base_url)
+            and url_matches_base(arg, self.context.source.base_url)
         ):
             pass
         else:

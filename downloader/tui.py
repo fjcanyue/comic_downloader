@@ -58,6 +58,18 @@ class SourceView:
     selected: bool = False
 
 
+@dataclass(frozen=True)
+class RetryTaskView:
+    index: int
+    task_id: str
+    source_name: str
+    volume_name: str
+    status: str
+    attempts: int
+    updated_at: str
+    message: str | None = None
+
+
 class TerminalPresenter:
     def __init__(self, console: Console | None = None) -> None:
         self.console = console or Console()
@@ -117,6 +129,7 @@ class TerminalPresenter:
         commands.add_row('v', '<章节> [范围]', '按范围下载章节')
         commands.add_row('source', '[序号/代码名]', '查看并切换动漫源')
         commands.add_row('sources', '', '查看动漫源能力概览')
+        commands.add_row('retry', '[序号/all]', '查看或重试未完成任务')
         commands.add_row('help / ?', '', '查看命令速查')
         commands.add_row('q', '', '退出')
         return commands
@@ -270,6 +283,84 @@ class TerminalPresenter:
             f'未找到动漫源 "{escape(selection)}"。请输入 1 到 {max_index} 的序号，'
             '或使用 sources 查看代码名。'
         )
+
+    # ------------------------------------------------------------------
+    # 可恢复下载任务
+    # ------------------------------------------------------------------
+    def retry_tasks(self, tasks: list[RetryTaskView]) -> None:
+        panel_width = min(self.console.width, MAX_SOURCE_PANEL_WIDTH)
+        if not tasks:
+            self.print(
+                Panel(
+                    Group(
+                        Text('没有待恢复的下载任务。', style=f'bold {SUCCESS}'),
+                        Text('失败或中断的任务会自动记录在下载目录中。', style=MUTED),
+                    ),
+                    border_style=SUCCESS,
+                    padding=(1, 2),
+                    title='下载恢复',
+                    title_align='left',
+                    width=panel_width,
+                )
+            )
+            return
+
+        table = Table(
+            box=None,
+            expand=True,
+            header_style=f'bold {ACCENT}',
+            pad_edge=False,
+            row_styles=['none', MUTED],
+        )
+        table.add_column('#', width=3, justify='right', style=ACCENT, no_wrap=True)
+        table.add_column('动漫源', min_width=8, no_wrap=True)
+        table.add_column('章节', min_width=12, overflow='ellipsis', no_wrap=True)
+        table.add_column('状态', min_width=6, no_wrap=True)
+        table.add_column('尝试', width=4, justify='right', no_wrap=True)
+        if self.console.width >= MIN_SOURCE_CODE_COLUMN_WIDTH:
+            table.add_column('任务 ID', width=12, style=MUTED, no_wrap=True)
+            table.add_column('说明', min_width=12, overflow='ellipsis', style=MUTED)
+        for task in tasks:
+            row = [
+                str(task.index),
+                escape(task.source_name),
+                escape(task.volume_name),
+                self._retry_status_label(task.status),
+                str(task.attempts),
+            ]
+            if self.console.width >= MIN_SOURCE_CODE_COLUMN_WIDTH:
+                row.extend([escape(task.task_id), escape(task.message or '-')])
+            table.add_row(*row)
+
+        self.print(
+            Panel(
+                Group(
+                    table,
+                    Text(''),
+                    Text('使用 retry <序号> 重试单个任务，或 retry all 重试全部。', style=MUTED),
+                ),
+                border_style=ACCENT,
+                padding=(1, 2),
+                title=f'下载恢复 · {len(tasks)} 个待处理',
+                title_align='left',
+                width=panel_width,
+            )
+        )
+
+    @staticmethod
+    def _retry_status_label(status: str) -> str:
+        labels = {
+            'in_progress': f'[{WARN}]已中断[/]',
+            'partial': f'[{WARN}]部分失败[/]',
+            'failed': f'[{ERROR}]失败[/]',
+        }
+        return labels.get(status, escape(status))
+
+    def retry_selection_not_found(self, selection: str) -> None:
+        self.warn(f'未找到下载任务 "{escape(selection)}"。输入 retry 查看待恢复任务。')
+
+    def retry_store_error(self, message: str) -> None:
+        self.error(f'无法读取下载任务记录: {escape(message)}')
 
     # ------------------------------------------------------------------
     # 搜索结果
