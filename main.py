@@ -24,7 +24,9 @@ USAGE = """用法:
   comic_downloader [下载路径] download <漫画URL>
   comic_downloader [下载路径] download_vols <漫画URL> <章节序号> [起始序号] [截止序号]
   comic_downloader [下载路径] tasks [任务ID]
-  comic_downloader [下载路径] retry <任务ID>
+  comic_downloader [下载路径] sources
+  comic_downloader [下载路径] check [动漫源序号|代码名|all]
+  comic_downloader [下载路径] retry [任务序号|任务ID|all]
 
 选项:
   -d, --debug     输出调试日志到终端
@@ -78,8 +80,7 @@ def main() -> int:
     try:
         return _run_command(shell, subcommand, subcommand_args)
     except KeyboardInterrupt:
-        print()
-        print('感谢使用，再会！')
+        shell.presenter.farewell()
         return INTERRUPT_EXIT_CODE
     except Exception as e:
         logger.exception('命令执行失败')
@@ -136,7 +137,16 @@ def _pop_config_path(args: list[str]) -> str | None:
 
 
 def _parse_command(args: list[str]) -> tuple[str, str | None, list[str]]:
-    subcommands = {'search', 'info', 'download', 'download_vols', 'tasks', 'retry'}
+    subcommands = {
+        'search',
+        'info',
+        'download',
+        'download_vols',
+        'tasks',
+        'sources',
+        'check',
+        'retry',
+    }
     subcommand = None
     subcommand_args = []
     output_path = os.getcwd()
@@ -161,9 +171,12 @@ def _parse_command(args: list[str]) -> tuple[str, str | None, list[str]]:
 def _validate_command(subcommand: str | None, args: list[str]) -> None:
     if subcommand is None:
         return
-    if subcommand in {'tasks', 'retry'}:
-        if len(args) > 1 or (subcommand == 'retry' and not args):
-            raise CommandUsageError('用法：tasks [任务ID] 或 retry <任务ID>。')
+    optional_commands = {'sources': 0, 'tasks': 1, 'retry': 1, 'check': 1}
+    if subcommand in optional_commands:
+        if len(args) > optional_commands[subcommand]:
+            raise CommandUsageError(
+                f'{subcommand} 最多接受 {optional_commands[subcommand]} 个参数。'
+            )
         return
     if not args or not ' '.join(args).strip():
         raise CommandUsageError(f'{subcommand} 缺少参数。')
@@ -199,6 +212,10 @@ def _run_command(shell: Shell, subcommand: str | None, subcommand_args: list[str
         _run_download_vols(shell, subcommand_args)
     elif subcommand == 'tasks':
         shell.do_tasks(' '.join(subcommand_args))
+    elif subcommand == 'sources':
+        shell.do_sources('')
+    elif subcommand == 'check':
+        shell.do_check(' '.join(subcommand_args))
     elif subcommand == 'retry':
         shell.do_retry(' '.join(subcommand_args))
     else:

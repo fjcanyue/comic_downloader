@@ -9,6 +9,8 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
+from loguru import logger
+
 from downloader.browser.modes import (
     REQUESTS_MODE,
     BrowserModeName,
@@ -17,6 +19,7 @@ from downloader.browser.modes import (
 )
 from downloader.runtime_config import RuntimeConfig
 from downloader.sources.config_keys import SOURCE_CONFIG_ATTRIBUTE_KEYS
+from downloader.sources.metadata import SourceCapabilities
 
 PROFILE_ATTRIBUTE_DEFAULTS: dict[str, Any] = {
     'base_url': '',
@@ -50,6 +53,7 @@ class SourceProfile:
     class_name: str
     enabled: bool
     deprecated: bool
+    capabilities: SourceCapabilities = field(default_factory=SourceCapabilities)
     base_url: str = ''
     base_img_url: str = ''
     browser_mode: BrowserModeName = REQUESTS_MODE
@@ -118,6 +122,7 @@ def resolve_source_profile(
         class_name=definition.class_name,
         enabled=source_is_enabled(definition, include_deprecated, runtime_config),
         deprecated=bool(definition.deprecated),
+        capabilities=definition.capabilities,
         raw_site_config=_freeze_mapping(raw_site_config),
         **values,
     )
@@ -143,9 +148,14 @@ def load_site_config(source_class: type[Any]) -> dict[str, Any]:
     try:
         with open(config_path, encoding='utf-8') as f:
             raw_config = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
+    except FileNotFoundError:
+        logger.warning('Site config file not found: {}', config_path)
+        return {}
+    except json.JSONDecodeError as e:
+        logger.warning('Failed to parse site config JSON: {}, error: {}', config_path, e)
         return {}
     if not isinstance(raw_config, dict):
+        logger.warning('Site config is not a JSON object: {}', config_path)
         return {}
     return raw_config
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any, cast
 from uuid import uuid4
 
 from downloader.browser.modes import CLOAKBROWSER_MODE, REQUESTS_MODE, SELENIUMBASE_MODE
@@ -241,6 +242,9 @@ def test_seleniumbase_failure_records_diagnostics(monkeypatch):
     assert result.failure_reason == 'browser_load_failed'
     assert result.error_message == 'Bad Gateway'
     assert result.diagnostic_paths is not None
+    assert result.diagnostic_paths['html'] is not None
+    assert result.diagnostic_paths['screenshot'] is not None
+    assert result.diagnostic_paths['metadata'] is not None
 
     html_path = Path(result.diagnostic_paths['html'])
     screenshot_path = Path(result.diagnostic_paths['screenshot'])
@@ -291,11 +295,13 @@ def test_cloakbrowser_mode_uses_browser_adapter():
 
 def test_legacy_parse_html_returns_root_and_records_last_page_load_result():
     http = FakeHttp(FakeResponse(200, '<html><body><h1>Compat</h1></body></html>'))
-    source = CompatibilitySource('download-output', http, None)
+    source = CompatibilitySource('download-output', cast(Any, http), None)
 
     root = source.__parse_html__('https://example.test/comic')
 
     assert root is not None
     assert root.xpath('string(//h1)') == 'Compat'
+    assert source.last_page_load_result is not None
     assert source.last_page_load_result.ok is True
+    assert source.last_page_load_result is not None
     assert source.last_page_load_result.root is root

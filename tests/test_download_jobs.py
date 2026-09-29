@@ -267,6 +267,7 @@ with store.lock(sys.argv[2]):
         text=True,
     )
     try:
+        assert process.stdout is not None
         assert process.stdout.readline().strip() == 'locked'
         with pytest.raises(ValueError, match='其他进程'):
             run_download_job(store, job.id, JobSource(tmp_path))
@@ -289,13 +290,13 @@ def test_real_image_pipeline_recovers_failed_image_and_preserves_completed_volum
             if self.path == '/image2' and failed['enabled']:
                 self.send_error(503)
                 return
-            data = b'image bytes ' + self.path.encode()
+            data = b'\xff\xd8\xff\xe0' + (b'\x00' * 12) + self.path.encode() + b'\xff\xd9'
             self.send_response(200)
             self.send_header('Content-Length', str(len(data)))
             self.end_headers()
             self.wfile.write(data)
 
-        def log_message(self, *args):
+        def log_message(self, format, *args):
             pass
 
     class LocalSource(ComicSource):
@@ -335,6 +336,7 @@ def test_real_image_pipeline_recovers_failed_image_and_preserves_completed_volum
         store.save(job)
         initial = run_download_job(store, job.id, source)
         assert initial.state == 'failed'
+        assert initial.volumes[0].result is not None
         assert initial.volumes[0].result.status == 'partial'
         assert initial.volumes[1].complete
         original_second_zip = (tmp_path / '漫画' / '正篇' / '第二话.zip').read_bytes()
@@ -347,7 +349,10 @@ def test_real_image_pipeline_recovers_failed_image_and_preserves_completed_volum
         assert (tmp_path / '漫画' / '正篇' / '第二话.zip').read_bytes() == original_second_zip
         with zipfile.ZipFile(tmp_path / '漫画' / '正篇' / '第一话.zip') as archive:
             assert archive.namelist() == ['0001.jpg', '0002.jpg']
-            assert archive.read('0002.jpg') == b'image bytes /image2'
+            assert (
+                archive.read('0002.jpg')
+                == b'\xff\xd8\xff\xe0' + (b'\x00' * 12) + b'/image2\xff\xd9'
+            )
     finally:
         http.close()
         server.shutdown()

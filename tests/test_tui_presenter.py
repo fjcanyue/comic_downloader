@@ -15,7 +15,7 @@ from downloader.models import (
     SearchOutcome,
     VolumeDownloadResult,
 )
-from downloader.tui import TerminalPresenter
+from downloader.tui import RetryTaskView, SourceStat, SourceView, TerminalPresenter
 
 
 @pytest.mark.parametrize('width', [40, 80, 120])
@@ -258,7 +258,7 @@ def test_download_summary_renders_detail_table_with_badges_when_failures_exist()
             name='第2话',
             url='https://example.test/2',
             status='skipped',
-            archive_path='/downloads/第2话.zip',
+            archive_path='C:/downloads/第2话.zip',
         )
     )
     summary.add(
@@ -297,10 +297,10 @@ def test_download_summary_renders_detail_table_with_badges_when_failures_exist()
     assert '第3话' in rendered
     assert '第4话' in rendered
     # 状态徽标文本
-    assert '✓ 已下载' in rendered
-    assert '⊘ 已跳过' in rendered
-    assert '✗ 失败' in rendered
-    assert '△ 部分失败' in rendered
+    assert '已下载' in rendered
+    assert '已跳过' in rendered
+    assert '失败' in rendered
+    assert '部分失败' in rendered
     # 图片计数
     assert '10/10' in rendered
     assert '3/5' in rendered
@@ -340,8 +340,8 @@ def test_welcome_renders_title_commands_and_sources():
     assert '命令速查' in rendered
     assert 's' in rendered and 'i' in rendered and 'd' in rendered
     assert 'v' in rendered and 'source' in rendered and 'q' in rendered
-    assert '摩锐漫画' in rendered
-    assert '读漫屋' in rendered
+    assert '已启用 2 个动漫源' in rendered
+    assert 'sources' in rendered
 
 
 def test_welcome_renders_without_sources():
@@ -376,27 +376,225 @@ def test_semantic_methods_render_with_markers():
     presenter.error('错误信息')
 
     rendered = output.getvalue()
-    assert '✔ 成功信息' in rendered
-    assert '⚠ 警告信息' in rendered
-    assert '✖ 错误信息' in rendered
+    assert '成功 成功信息' in rendered
+    assert '注意 警告信息' in rendered
+    assert '错误 错误信息' in rendered
     assert '普通信息' in rendered
 
 
-def test_source_options_renders_indexed_list_in_panel():
+def test_source_catalog_renders_capabilities_and_current_source():
     presenter, output = presenter_with_output()
 
-    presenter.source_options(['摩锐漫画', '读漫屋'])
+    presenter.source_catalog(
+        [
+            SourceView(1, 'morui', '摩锐漫画', 'seleniumbase', True, True, selected=True),
+            SourceView(
+                2,
+                'dumanwu',
+                '读漫屋',
+                'requests',
+                False,
+                True,
+                supports_info=False,
+                verification_status='healthy',
+                last_verified_at='2026-08-08T00:00:00+08:00',
+            ),
+        ]
+    )
 
     rendered = output.getvalue()
+    assert '动漫源 · 2 个已启用' in rendered
     assert '摩锐漫画' in rendered
     assert '读漫屋' in rendered
-    assert '1.' in rendered
-    assert '2.' in rendered
+    assert 'morui' in rendered
+    assert 'SeleniumBase' in rendered
+    assert 'HTTP' in rendered
+    assert '浏览器' in rendered
+    assert '详情' in rendered
+    assert '未检查' in rendered
+    assert '不支持' in rendered
+    assert '正常' in rendered
+    assert '2026-08-08' in rendered
+    assert '>' in rendered
+    assert max(len(line) for line in rendered.splitlines()) <= 112
+
+
+def test_source_catalog_hides_code_column_on_narrow_terminal():
+    output = StringIO()
+    presenter = TerminalPresenter(
+        Console(file=output, force_terminal=False, color_system=None, width=72)
+    )
+
+    presenter.source_catalog([SourceView(1, 'morui', '摩锐漫画', 'cloakbrowser', True, True)])
+
+    rendered = output.getvalue()
+    assert 'morui' not in rendered
+    assert 'CloakBrowser' in rendered
+
+
+def test_source_catalog_renders_empty_configuration_state():
+    presenter, output = presenter_with_output()
+
+    presenter.source_catalog([])
+
+    rendered = output.getvalue()
+    assert '没有启用的动漫源' in rendered
+    assert 'sources.<名称>.enabled' in rendered
+
+
+def test_source_feedback_uses_gbk_safe_characters():
+    presenter, output = presenter_with_output()
+
+    presenter.source_selected('摩锐漫画', 'morui')
+    presenter.source_unchanged('摩锐漫画')
+
+    output.getvalue().encode('gbk')
+
+
+def test_source_not_found_escapes_user_markup():
+    presenter, output = presenter_with_output()
+
+    presenter.source_not_found('[red]unknown[/]', 7)
+
+    rendered = output.getvalue()
+    assert '[red]unknown[/]' in rendered
+    assert '1 到 7' in rendered
+
+
+def test_retry_tasks_render_pending_downloads_and_commands():
+    presenter, output = presenter_with_output()
+
+    presenter.retry_tasks(
+        [
+            RetryTaskView(
+                index=1,
+                task_id='abc123def456',
+                source_name='摩锐漫画',
+                volume_name='第 12 话',
+                status='partial',
+                attempts=2,
+                updated_at='2026-08-08T10:00:00+00:00',
+                message='1 张图片失败',
+            )
+        ]
+    )
+
+    rendered = output.getvalue()
+    assert '下载恢复 · 1 个待处理' in rendered
+    assert '摩锐漫画' in rendered
+    assert '第 12 话' in rendered
+    assert '部分失败' in rendered
+    assert 'abc123def456' in rendered
+    assert 'retry all' in rendered
+
+
+def test_retry_tasks_render_empty_state():
+    presenter, output = presenter_with_output()
+
+    presenter.retry_tasks([])
+
+    rendered = output.getvalue()
+    assert '没有待恢复的下载任务' in rendered
+    assert '自动记录' in rendered
 
 
 def test_output_path_renders_path_in_panel():
     presenter, output = presenter_with_output()
 
-    presenter.output_path('/downloads/comics')
+    presenter.output_path('C:/downloads/comics')
 
-    assert '/downloads/comics' in output.getvalue()
+    assert 'C:/downloads/comics' in output.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# help 命令速查
+# ---------------------------------------------------------------------------
+def test_help_renders_command_cheatsheet_panel():
+    presenter, output = presenter_with_output()
+
+    presenter.help()
+
+    rendered = output.getvalue()
+    assert '命令速查' in rendered
+    assert 's' in rendered and 'i' in rendered and 'd' in rendered
+    assert 'v' in rendered and 'source' in rendered and 'q' in rendered
+
+
+# ---------------------------------------------------------------------------
+# 搜索结果源状态汇总
+# ---------------------------------------------------------------------------
+def _comic(source: str = 'morui', name: str = '漫画名') -> Comic:
+    comic = Comic()
+    comic.source = source
+    comic.name = name
+    comic.url = 'https://example.test/comic'
+    return comic
+
+
+def test_search_results_renders_source_stats_when_provided():
+    presenter, output = presenter_with_output()
+
+    presenter.search_results(
+        '猎人',
+        [_comic()],
+        {'morui': '摩锐漫画'},
+        2.5,
+        source_stats=[
+            SourceStat(display_name='摩锐漫画', ok=True, duration=1.2),
+            SourceStat(display_name='读漫屋', ok=False, duration=0.5, error='timeout'),
+        ],
+    )
+
+    rendered = output.getvalue()
+    assert '源状态' in rendered
+    assert '摩锐漫画' in rendered
+    assert '1.2s' in rendered
+    assert '读漫屋' in rendered
+    assert 'timeout' in rendered
+
+
+def test_search_results_omits_source_stats_line_when_not_provided():
+    presenter, output = presenter_with_output()
+
+    presenter.search_results('猎人', [_comic()], {'morui': '摩锐漫画'}, 1.0)
+
+    assert '源状态' not in output.getvalue()
+
+
+def test_search_results_renders_source_stats_for_empty_results():
+    """无搜索结果时也应展示各源执行状态，便于排查失败的源。"""
+    presenter, output = presenter_with_output()
+
+    presenter.search_results(
+        '不存在',
+        [],
+        {},
+        0.1,
+        source_stats=[SourceStat(display_name='摩锐漫画', ok=True, duration=0.1)],
+    )
+
+    rendered = output.getvalue()
+    assert '未找到' in rendered
+    assert '源状态' in rendered
+    assert '摩锐漫画' in rendered
+
+
+# ---------------------------------------------------------------------------
+# 章节表自适应列数
+# ---------------------------------------------------------------------------
+def test_chapter_table_columns_adapt_to_console_width():
+    """窄终端应收敛到更少列数，宽终端可展开更多列；卷名始终可见。"""
+    narrow = Console(width=64, force_terminal=False, color_system=None)
+    wide = Console(width=200, force_terminal=False, color_system=None)
+    book = ComicBook()
+    book.name = '正篇'
+    book.vols = [ComicVolume(f'第{i}话', f'https://example.test/{i}') for i in range(1, 7)]
+
+    narrow_table = TerminalPresenter(narrow).chapter_table(0, book)
+    wide_table = TerminalPresenter(wide).chapter_table(0, book)
+
+    # 宽终端列数应不少于窄终端
+    assert len(wide_table.columns) >= len(narrow_table.columns)
+    # 至少 2 列（序号+名称对），且宽终端应在窄终端之上
+    assert len(narrow_table.columns) >= 2
+    assert len(wide_table.columns) > len(narrow_table.columns)

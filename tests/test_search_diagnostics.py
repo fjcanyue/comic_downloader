@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import cast
 from urllib.parse import parse_qs, urlsplit
 
 import main as main_module
@@ -68,7 +69,9 @@ def test_swallowed_network_error_is_visible_in_diagnostic_search(tmp_path):
     source = make_source(tmp_path, FakeHttp(error=requests.Timeout('network timed out')))
     response = source.search_with_diagnostics('漫画')
     assert response.comics == []
+    assert response.error_message is not None
     assert 'network timed out' in response.error_message
+    assert source.last_page_load_result is not None
     assert source.last_page_load_result.failure_reason == 'page_load_failed'
 
 
@@ -83,7 +86,9 @@ def test_browser_failure_reports_http_reason(tmp_path, monkeypatch):
         ),
     )
     response = source.search_with_diagnostics('漫画')
+    assert response.error_message is not None
     assert '429' in response.error_message
+    assert response.error_message is not None
     assert 'browser_adapter_required' in response.error_message
 
 
@@ -101,6 +106,7 @@ def test_changed_page_structure_is_not_reported_as_empty_success(tmp_path):
     source = make_source(tmp_path, FakeHttp('<html><body>login page</body></html>'))
     response = source.search_with_diagnostics('漫画')
     assert response.comics == []
+    assert response.error_message is not None
     assert '内容区域' in response.error_message
 
 
@@ -108,6 +114,7 @@ def test_invalid_xpath_is_reported_even_when_parser_swallows_exception(tmp_path)
     source = make_source(tmp_path, FakeHttp())
     source.config['search_xpath'] = '//['
     response = source.search_with_diagnostics('漫画')
+    assert response.error_message is not None
     assert 'XPath' in response.error_message
 
 
@@ -126,6 +133,7 @@ def test_partial_results_survive_item_parse_failure(tmp_path, monkeypatch):
     response = source.search_with_diagnostics('漫画')
     assert len(response.comics) == 1
     assert response.comics[0].url == 'https://example.test/1'
+    assert response.error_message is not None
     assert 'changed item' in response.error_message
 
 
@@ -248,6 +256,7 @@ def test_custom_adapters_do_not_hide_network_failures_as_empty_success(tmp_path,
         None,
     )[0]
     assert outcome.state == 'failed'
+    assert outcome.error_message is not None
     assert '网络超时' in outcome.error_message
 
 
@@ -280,11 +289,16 @@ def test_manual_adapters_preserve_valid_entries_when_another_entry_is_broken(
     response = source.search_with_diagnostics('漫画')
     assert len(response.comics) == 1
     assert response.comics[0].name == 'valid'
+    assert response.error_message is not None
     assert '部分搜索条目' in response.error_message
 
 
 def test_explicit_empty_result_page_is_not_a_structure_failure(tmp_path):
-    source = ManhuaguiComic(str(tmp_path), FakeHttp('<div class="no-result">没有找到</div>'), None)
+    source = ManhuaguiComic(
+        str(tmp_path),
+        cast(requests.Session, FakeHttp('<div class="no-result">没有找到</div>')),
+        None,
+    )
     source.browser_mode = 'requests'
     response = source.search_with_diagnostics('漫画')
     assert response.comics == []
@@ -310,7 +324,7 @@ def test_cli_real_http_search_reports_failed_source_and_keeps_all_other_results(
             self.end_headers()
             self.wfile.write(data)
 
-        def log_message(self, *args):
+        def log_message(self, format, *args):
             pass
 
     class HttpSource(ConfigSource):

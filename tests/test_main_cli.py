@@ -5,6 +5,8 @@ import sys
 import main as main_module
 import pytest
 
+from downloader.tui import TerminalPresenter
+
 
 class FakeContext:
     def __init__(self):
@@ -19,11 +21,29 @@ class FakeShell:
         self.output_path = output_path
         self.overwrite = overwrite
         self.runtime_config = runtime_config
+        self.last_command_ok = True
         self.context = FakeContext()
+        # 真实 Shell 通过 TerminalPresenter 暴露输出，fake 也需对齐该接口。
+        self.presenter = TerminalPresenter()
         self.cmdloop_called = False
+        self.sources_called = False
+        self.check_called_with = None
+        self.retry_called_with = None
 
     def cmdloop(self):
         self.cmdloop_called = True
+
+    def do_i(self, arg):
+        pass
+
+    def do_sources(self, arg):
+        self.sources_called = True
+
+    def do_check(self, arg):
+        self.check_called_with = arg
+
+    def do_retry(self, arg):
+        self.retry_called_with = arg
 
 
 class InterruptingShell(FakeShell):
@@ -44,6 +64,7 @@ def test_help_exits_before_shell_creation(monkeypatch, capsys):
     assert exit_code == 0
     assert '用法:' in output
     assert 'download_vols' in output
+    assert 'check' in output
 
 
 def test_default_output_path_is_current_working_directory(monkeypatch, tmp_path):
@@ -65,6 +86,63 @@ def test_default_output_path_is_current_working_directory(monkeypatch, tmp_path)
     assert created_shells[0].cmdloop_called is True
 
 
+def test_sources_subcommand_renders_catalog_without_entering_shell(monkeypatch, tmp_path):
+    created_shells = []
+
+    def make_shell(output_path, overwrite=False, runtime_config=None):
+        shell = FakeShell(output_path, overwrite, runtime_config)
+        created_shells.append(shell)
+        return shell
+
+    monkeypatch.setattr(main_module, 'Shell', make_shell)
+    monkeypatch.setattr(sys, 'argv', ['comic_downloader', str(tmp_path), 'sources'])
+
+    exit_code = main_module.main()
+
+    assert exit_code == 0
+    assert created_shells[0].sources_called is True
+    assert created_shells[0].cmdloop_called is False
+    assert created_shells[0].context.destroyed is True
+
+
+def test_retry_subcommand_passes_selection_without_entering_shell(monkeypatch, tmp_path):
+    created_shells = []
+
+    def make_shell(output_path, overwrite=False, runtime_config=None):
+        shell = FakeShell(output_path, overwrite, runtime_config)
+        created_shells.append(shell)
+        return shell
+
+    monkeypatch.setattr(main_module, 'Shell', make_shell)
+    monkeypatch.setattr(sys, 'argv', ['comic_downloader', str(tmp_path), 'retry', 'all'])
+
+    exit_code = main_module.main()
+
+    assert exit_code == 0
+    assert created_shells[0].retry_called_with == 'all'
+    assert created_shells[0].cmdloop_called is False
+    assert created_shells[0].context.destroyed is True
+
+
+def test_check_subcommand_passes_selection_without_entering_shell(monkeypatch, tmp_path):
+    created_shells = []
+
+    def make_shell(output_path, overwrite=False, runtime_config=None):
+        shell = FakeShell(output_path, overwrite, runtime_config)
+        created_shells.append(shell)
+        return shell
+
+    monkeypatch.setattr(main_module, 'Shell', make_shell)
+    monkeypatch.setattr(sys, 'argv', ['comic_downloader', str(tmp_path), 'check', 'morui'])
+
+    exit_code = main_module.main()
+
+    assert exit_code == 0
+    assert created_shells[0].check_called_with == 'morui'
+    assert created_shells[0].cmdloop_called is False
+    assert created_shells[0].context.destroyed is True
+
+
 def test_keyboard_interrupt_exits_cleanly(monkeypatch, capsys):
     created_shells = []
 
@@ -80,7 +158,9 @@ def test_keyboard_interrupt_exits_cleanly(monkeypatch, capsys):
 
     output = capsys.readouterr().out
     assert exit_code == main_module.INTERRUPT_EXIT_CODE
-    assert '感谢使用，再会！' in output
+    # 中断后走 presenter.farewell()，输出告别横幅与文案。
+    assert '再会' in output
+    assert '动漫下载器' in output
     assert created_shells[0].context.destroyed is True
 
 
@@ -143,7 +223,8 @@ def test_missing_config_path_exits_before_shell_creation(monkeypatch, capsys):
         ['download_vols', 'https://example.test/comic', '1', '2', '3', '4'],
         ['output', 'typo', 'argument'],
         ['--config=a.json', '--config=b.json'],
-        ['retry'],
+        ['sources', 'extra'],
+        ['check', 'morui', 'extra'],
         ['retry', 'abcd', 'extra'],
         ['tasks', 'abcd', 'extra'],
     ],

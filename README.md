@@ -1,6 +1,8 @@
 # 动漫下载器
 
-轻量级动漫下载器，CLI 方式单线程下载。支持三种浏览器渲染模式，自动在请求被屏蔽时回退。
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/fjcanyue/comic_downloader)
+
+轻量级动漫下载器，提供带状态反馈的交互式终端界面。支持多源并行搜索、按章节下载、断点复用，以及三种页面加载模式；请求被站点屏蔽时可自动回退到浏览器模式。
 
 ## 支持的网站
 
@@ -14,7 +16,7 @@
 | [图库漫画](https://www.tuku.cc) | ✅ 可用 | requests |
 | [GoDa漫画](https://manhuafree.com) | ✅ 可用 | requests |
 
-[![asciicast](https://asciinema.org/a/H7hsCmPz1v9mqpxF4t40oLomM.svg)](https://asciinema.org/a/H7hsCmPz1v9mqpxF4t40oLomM)
+ ![演示](docs/demo.gif)
 
 ## 浏览器模式
 
@@ -67,15 +69,17 @@ uv run pyinstaller downloader.spec
 | `ch <分组> [页码]` | 翻看当前漫画章节，每页 60 话 | `ch 1 2` |
 | `d <序号/URL>` | 全量下载动漫 | `d 12` 或 `d https://...` |
 | `v <参数>` | 按范围下载章节 | `v 1` `v 1 12` `v 1 5 10` |
-| `source [源名/序号]` | 切换下载源；无参数时显示菜单，回车或 q 取消 | `source dumanwu` |
+| `source [序号/代码名/名称]` | 切换下载源；无参数时显示菜单，回车或 q 取消 | `source morui` |
+| `sources` | 查看动漫源能力及浏览器依赖 | `sources` |
+| `check [序号/代码名/all]` | 查看已存状态，或显式检查来源 | `check all` |
 | `status` | 查看路径、当前漫画、搜索结果数和覆盖模式 | `status` |
-| `tasks [任务ID]` | 查看下载任务，或某个任务的章节和错误 | `tasks` |
-| `retry <任务ID>` | 继续未完成章节，支持程序重启后恢复 | `retry a1b2c3d4` |
+| `tasks [任务ID]` | 查看下载计划，或某个计划的章节和错误 | `tasks` |
+| `retry [序号/任务ID/all]` | 查看或继续未完成下载，支持重启后恢复 | `retry a1b2c3d4` |
 | `help [命令]` | 命令速查和具体用法 | `help v` |
 | `q` | 退出 | `q` |
 
  ![截图](docs/screenshot.png)
- 
+
  ![查看动漫详情命令截图](docs/screenshot_cmd_i.png)
 
 ### `v` 命令三种模式
@@ -111,7 +115,9 @@ comic_downloader info <URL>
 comic_downloader download <URL>
 comic_downloader download_vols <URL> <章节序号> [起始] [截止]
 comic_downloader tasks [任务ID]
-comic_downloader retry <任务ID>
+comic_downloader retry [任务序号|任务ID|all]
+comic_downloader sources
+comic_downloader check [动漫源序号|代码名|all]
 ```
 
 直接子命令没有上一次搜索的会话状态，`info` / `download` 必须使用完整 URL。
@@ -149,6 +155,54 @@ comic_downloader D:\Comics retry a1b2c3d4
 ZIP 完整写入临时文件后才替换最终文件，已有 ZIP 需通过可读性、非空与 CRC 校验才会跳过。
 打包只包含本次预期的编号图片，目录中的笔记和临时文件会保留在原地。
 
+### 动漫源概览
+
+在交互式 Shell 中输入 `sources`，或直接运行 `comic_downloader sources`，可以查看当前运行配置实际启用的动漫源。概览会展示：
+
+- 当前选中的动漫源；
+- 源代码名，可用于 `source <代码名>` 快速切换；
+- 页面使用 HTTP、SeleniumBase 还是 CloakBrowser 加载；
+- 搜索和下载阶段是否需要浏览器；
+- 搜索、详情和下载能力是否受支持；
+- 最近一次显式验证的状态和日期；未运行验证时明确显示“未检查”。
+
+输入 `source` 会在同一张能力表下进入选择模式；也可以使用序号、代码名或中文名称直接切换，例如 `source 2`、`source morui`、`source 摩锐漫画`。表格会根据终端宽度自动精简列，状态反馈使用兼容 Windows GBK 控制台的文字标签。
+
+源注册表通过 `SourceCapabilities` 明确描述搜索、详情和下载能力，并使用
+`SourceVerification` 表达“未检查、正常、受限、不可用”及最近验证时间。历史 HTML
+职责已拆分为页面加载、XPath/JavaScript 提取和 SeleniumBase 诊断模块；项目级 Pyright
+检查当前为零错误、零警告，使新增或修复站点适配器时更容易发现接口漂移。
+
+### 来源连通性检查与诊断
+
+`sources` 和不带参数的 `check` 只读取本地记录，不会自动访问任何站点，也不会把“已配置”
+显示成“当前在线”。只有执行 `check <序号/代码名>` 或 `check all` 时，下载器才会显式并发访问
+所选来源的首页：
+
+- HTTP 2xx/3xx 记为“正常”；
+- 能建立连接但返回 HTTP 4xx/5xx 记为“受限”，例如反爬挑战或服务端错误；
+- DNS、连接、TLS 或超时错误记为“不可用”。
+
+检查摘要会展示 HTTP 状态、耗时、检查时间和诊断消息。最近一次结果使用原子替换写入
+`<下载目录>/.comic_downloader/source-verifications.json`，其中还保留最终 URL、错误类型和
+UTC 时间戳，便于脚本或故障排查读取。该检查只验证首页的 HTTP 连通性，不等同于搜索、
+详情解析或下载流程的端到端健康检查。
+
+### 下载完整性与任务恢复
+
+下载器不会再把“文件存在”直接等同于“下载成功”：
+
+- 新下载内容在替换正式文件前会检查图片格式和完整性，HTTP 200 返回的 HTML 拦截页、空文件和常见截断文件会进入重试与失败汇总；
+- `--overwrite` 未启用时，已有图片只有通过 JPEG、PNG、GIF、WebP、BMP、TIFF 或 AVIF/HEIF 容器检查才会复用，损坏文件会重新下载；
+- 已有 ZIP 在跳过前会校验归档结构、内部路径、CRC 和图片内容，损坏归档会重新生成；
+- 每个章节从解析开始就在 `<下载路径>/.comic_downloader/tasks.json` 中留下原子写入的任务记录，程序中断、解析失败和图片部分失败都可以跨进程恢复；
+- 任务只保存相对于下载根目录的路径，重试时会重新验证任务所属源、URL 域名和目标路径。
+
+输入 `retry` 可以查看待恢复的下载计划和章节记录。`tasks` 中的下载计划使用任务 ID
+（或至少 4 位的不重复前缀）恢复；章节记录支持 `retry 1` 或 `retry <章节任务ID>`。
+`retry all` 先恢复未完成的下载计划，再恢复独立章节记录，同一次命令不会重复执行计划中
+已尝试的章节。重试会重新解析章节页面，并复用已通过完整性检查的图片。
+
 ### 选项
 
 | 选项 | 说明 |
@@ -169,3 +223,12 @@ ZIP 完整写入临时文件后才替换最终文件，已有 ZIP 需通过可�
 - 下载需要浏览器驱动时：Firefox + Gecko Driver / Chrome
 
 搜索和查看详情等不依赖浏览器的命令可直接运行，无需预先安装浏览器驱动。
+
+## 迭代方向
+
+项目按以下顺序继续演进：
+
+1. **终端体验与源透明度（已完成）**：已统一欢迎页、帮助、搜索结果和下载汇总的视觉层级，并提供源能力概览与快速切换。
+2. **下载可靠性（已完成）**：已实现图片与 ZIP 完整性校验、跨进程任务记录，以及按任务或批量失败重试入口。
+3. **源可维护性（已完成）**：已补齐源能力与最近验证元数据，拆分历史解析和诊断职责，并将项目级 Pyright 类型检查收敛到零错误、零警告。
+4. **可观测性（已完成）**：已增加可选的并发源连通性检查、原子持久化的结构化诊断摘要；在线状态只由显式检查产生，不把“已配置”误报为“当前可用”。

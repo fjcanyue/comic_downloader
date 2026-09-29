@@ -9,9 +9,13 @@ from rich.console import Console
 
 from downloader.browser.manager import DriverManager
 from downloader.comic import ComicSource
+from downloader.download.tasks import DownloadTask
+from downloader.models import VolumeDownloadResult
 from downloader.runtime_config import RuntimeConfig, SourceRuntimeConfig
-from downloader.shell import Context, Shell
+from downloader.shell import Context, Shell, url_matches_base
+from downloader.sources.metadata import SourceVerification
 from downloader.sources.profiles import SourceProfile
+from downloader.tui import TerminalPresenter
 
 
 def quiet_console() -> Console:
@@ -186,8 +190,8 @@ def test_context_driver_methods_delegate_to_driver_manager(tmp_path):
     context = Context(quiet_console())
     context.create(str(tmp_path))
     fake_driver_manager = FakeDriverManager()
-    context.driver_manager = fake_driver_manager
-    source_marker = object()
+    context.driver_manager = cast(Any, fake_driver_manager)
+    source_marker: Any = object()
 
     assert context.ensure_driver(source_marker) is True
     assert context.get_driver(source_marker) is fake_driver_manager.drivers[('selenium', True)]
@@ -209,6 +213,16 @@ def test_context_driver_methods_delegate_to_driver_manager(tmp_path):
 
 def test_shell_uses_plain_stdin_for_interactive_prompt():
     assert Shell.use_rawinput is False
+
+
+def test_source_url_matching_rejects_prefix_and_scheme_confusion():
+    base_url = 'https://www.morui.com/manga'
+
+    assert url_matches_base('https://www.morui.com/manga/123', base_url) is True
+    assert url_matches_base('https://www.morui.com/mangaevil/123', base_url) is False
+    assert url_matches_base('https://www.morui.com.evil.test/manga/123', base_url) is False
+    assert url_matches_base('http://www.morui.com/manga/123', base_url) is False
+    assert url_matches_base('not-a-url', base_url) is False
 
 
 class DriverBackedSource(ComicSource):
@@ -268,7 +282,221 @@ def test_shell_prompt_updates_when_source_switches(tmp_path):
     try:
         cast(Any, shell)._Shell__switch_source('morui')
 
-        assert shell.prompt == '动漫下载器[morui]> '
+        assert shell.prompt == '动漫下载器[摩锐漫画]> '
+    finally:
+        shell.context.destroy()
+
+
+def test_shell_source_display_names_resolve_to_chinese_not_code(tmp_path):
+    """欢迎/选源界面必须展示中文显示名（读漫屋），而非源代码名（dumanwu）。"""
+    shell = Shell(str(tmp_path))
+    try:
+        display_names = shell._source_display_names()
+
+        assert len(display_names) == len(shell.source_options)
+        # 源代码名（小写英文）不应出现在展示列表中
+        for code_name in (
+            'dumanwu',
+            'manhuafree',
+            'manhuagui',
+            'manhuazhan',
+            'morui',
+            'thmh',
+            'tuku',
+        ):
+            assert code_name not in display_names
+        # 已知中文名应出现
+        assert '摩锐漫画' in display_names
+        assert '读漫屋' in display_names
+    finally:
+        shell.context.destroy()
+
+
+def test_shell_source_views_expose_runtime_capabilities(tmp_path):
+    runtime_config = RuntimeConfig(sources={'morui': SourceRuntimeConfig(browser_mode='requests')})
+    shell = Shell(str(tmp_path), runtime_config=runtime_config)
+    try:
+        views = {view.source_name: view for view in shell._source_views()}
+
+        assert views['morui'].display_name == '摩锐漫画'
+        assert views['morui'].browser_mode == 'requests'
+        assert views['morui'].search_uses_driver is False
+        assert views['morui'].download_uses_driver is True
+        assert views['morui'].selected is False
+    finally:
+        shell.context.destroy()
+
+
+def test_shell_resolves_source_by_index_code_and_display_name(tmp_path):
+    shell = Shell(str(tmp_path))
+    try:
+        first_source = shell.source_options[0]
+        first_display_name = shell._source_display_name(first_source)
+
+        assert shell._resolve_source_selection('1') == first_source
+        assert shell._resolve_source_selection(first_source.upper()) == first_source
+        assert shell._resolve_source_selection(first_display_name) == first_source
+        assert shell._resolve_source_selection('999') is None
+        assert shell._resolve_source_selection('不存在') is None
+    finally:
+        shell.context.destroy()
+
+
+def test_shell_source_command_switches_directly_without_secondary_prompt(monkeypatch, tmp_path):
+    shell = Shell(str(tmp_path))
+    output = StringIO()
+    shell.presenter = TerminalPresenter(
+        Console(file=output, force_terminal=False, color_system=None, width=120)
+    )
+
+    def fail_prompt(prompt: str) -> str:
+        raise AssertionError(f'direct source selection should not prompt: {prompt}')
+
+    monkeypatch.setattr(shell, '_read_prompt_line', fail_prompt)
+    try:
+        shell.do_source('morui')
+
+        assert shell.current_source_name == 'morui'
+        assert '已切换到 摩锐漫画 (morui)' in output.getvalue()
+    finally:
+        shell.context.destroy()
+
+
+def test_shell_sources_command_renders_capability_catalog(tmp_path):
+    shell = Shell(str(tmp_path))
+    output = StringIO()
+    shell.presenter = TerminalPresenter(
+        Console(file=output, force_terminal=False, color_system=None, width=120)
+    )
+    try:
+        shell.do_sources('')
+
+        rendered = output.getvalue()
+        assert '动漫源' in rendered
+        assert '页面加载' in rendered
+        assert '搜索' in rendered
+        assert '下载' in rendered
+        assert '摩锐漫画' in rendered
+    finally:
+        shell.context.destroy()
+
+
+def test_shell_check_without_selection_only_reads_cached_state(monkeypatch, tmp_path):
+    shell = Shell(str(tmp_path))
+    output = StringIO()
+    shell.presenter = TerminalPresenter(
+        Console(file=output, force_terminal=False, color_system=None, width=120)
+    )
+
+    def fail_check(source_name: str) -> SourceVerification:
+        raise AssertionError(f'check without selection must not access {source_name}')
+
+    monkeypatch.setattr(shell, '_check_source', fail_check)
+    try:
+        shell.do_check('')
+
+        rendered = output.getvalue()
+        assert '未检查' in rendered
+        assert 'check all' in rendered
+        assert not shell.verification_store.store_path.exists()
+    finally:
+        shell.context.destroy()
+
+
+def test_shell_check_persists_result_and_updates_source_catalog(monkeypatch, tmp_path):
+    shell = Shell(str(tmp_path))
+    output = StringIO()
+    shell.presenter = TerminalPresenter(
+        Console(file=output, force_terminal=False, color_system=None, width=120)
+    )
+    result = SourceVerification(
+        status='healthy',
+        checked_at='2026-08-08T00:00:00+00:00',
+        latency_seconds=0.125,
+        http_status=200,
+        message='HTTP 200，连接正常。',
+        final_url='https://www.morui.com/',
+    )
+    monkeypatch.setattr(shell, '_check_source', lambda source_name: result)
+    try:
+        shell.do_check('morui')
+        shell.do_sources('')
+
+        rendered = output.getvalue()
+        assert '来源检查 · 1 个结果' in rendered
+        assert '正常 1 · 受限 0 · 不可用 0' in rendered
+        assert '0.125s' in rendered
+        assert '2026-08-08' in rendered
+        assert shell.verification_store.load_all()['morui'] == result
+        view = next(view for view in shell._source_views() if view.source_name == 'morui')
+        assert view.verification_status == 'healthy'
+        assert view.last_verified_at == '2026-08-08T00:00:00+00:00'
+    finally:
+        shell.context.destroy()
+
+
+def test_shell_resolves_retry_tasks_by_index_id_and_all(tmp_path):
+    shell = Shell(str(tmp_path))
+    tasks = [
+        DownloadTask(
+            task_id='abc123def456',
+            source_name='morui',
+            volume_name='chapter-1',
+            source_url='https://example.test/1',
+            target_path='comic/book/chapter-1',
+        ),
+        DownloadTask(
+            task_id='def456abc123',
+            source_name='morui',
+            volume_name='chapter-2',
+            source_url='https://example.test/2',
+            target_path='comic/book/chapter-2',
+        ),
+    ]
+    try:
+        assert shell._resolve_retry_tasks('all', tasks) == tasks
+        assert shell._resolve_retry_tasks('2', tasks) == [tasks[1]]
+        assert shell._resolve_retry_tasks('abc123', tasks) == [tasks[0]]
+        assert shell._resolve_retry_tasks('9', tasks) is None
+        assert shell._resolve_retry_tasks('unknown', tasks) is None
+    finally:
+        shell.context.destroy()
+
+
+def test_shell_retry_command_executes_selected_tasks_and_renders_summary(monkeypatch, tmp_path):
+    shell = Shell(str(tmp_path))
+    output = StringIO()
+    shell.presenter = TerminalPresenter(
+        Console(file=output, force_terminal=False, color_system=None, width=120)
+    )
+    task = DownloadTask(
+        task_id='abc123def456',
+        source_name='morui',
+        volume_name='chapter-1',
+        source_url='https://example.test/1',
+        target_path='comic/book/chapter-1',
+    )
+
+    class FakeTaskStore:
+        def list_pending(self):
+            return [task]
+
+    shell.task_store = cast(Any, FakeTaskStore())
+    monkeypatch.setattr(
+        shell,
+        '_retry_download_task',
+        lambda selected: VolumeDownloadResult(
+            name=selected.volume_name,
+            url=selected.source_url,
+            status='downloaded',
+        ),
+    )
+    try:
+        shell.do_retry('all')
+
+        rendered = output.getvalue()
+        assert '下载完成' in rendered
+        assert '成功 1' in rendered
     finally:
         shell.context.destroy()
 

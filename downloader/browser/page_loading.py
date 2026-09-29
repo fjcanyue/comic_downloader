@@ -294,7 +294,12 @@ class PageLoader:
             try:
                 save_screenshot(screenshot_path.name, folder=str(screenshot_path.parent))
             except TypeError:
-                save_screenshot(str(screenshot_path))
+                try:
+                    save_screenshot(str(screenshot_path))
+                except Exception:  # noqa: S112
+                    continue
+            except Exception:  # noqa: S112
+                continue
             if screenshot_path.exists():
                 return str(screenshot_path)
         return None

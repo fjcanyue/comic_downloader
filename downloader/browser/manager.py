@@ -12,6 +12,7 @@ from downloader.browser.drivers import CloakBrowserDriver, SeleniumBaseDriver
 from downloader.browser.modes import CLOAKBROWSER_MODE, SELENIUMBASE_MODE, normalize_browser_mode
 from downloader.comic import ComicSource
 from downloader.sources.profiles import SourceProfile
+from downloader.tui import ERROR, MUTED, SUCCESS
 
 
 class DriverPresenter(Protocol):
@@ -33,7 +34,7 @@ class DriverManager:
             self.current_driver = driver
             return True
 
-        self.presenter.print('正在初始化浏览器驱动...', style='dim')
+        self.presenter.print('正在初始化浏览器驱动...', style=MUTED)
         if not self.init_driver(source_or_class):
             return False
         self.drivers[cache_key] = self.current_driver
@@ -67,7 +68,7 @@ class DriverManager:
 
         self.presenter.print(
             '所有浏览器驱动初始化失败，请确保已安装 Firefox/Chrome/Edge 及其对应驱动。',
-            style='bold red',
+            style=f'bold {ERROR}',
         )
         return False
 
@@ -82,7 +83,7 @@ class DriverManager:
                 options.add_argument('--disable-dev-shm-usage')
 
             self.current_driver = driver_cls(options=options)
-            self.presenter.print(f'已初始化 {name} 浏览器驱动', style='green')
+            self.presenter.print(f'已初始化 {name} 浏览器驱动', style=SUCCESS)
             return True
         except Exception as e:
             logger.debug('初始化 {driver_name} 驱动失败: {error}', driver_name=name, error=e)
@@ -98,11 +99,11 @@ class DriverManager:
                 timeout_seconds=self._source_browser_wait_seconds(source_or_class),
                 launch_options=self._source_cloakbrowser_options(source_or_class),
             )
-            self.presenter.print('已初始化 CloakBrowser 浏览器驱动', style='green')
+            self.presenter.print('已初始化 CloakBrowser 浏览器驱动', style=SUCCESS)
             return True
         except Exception as e:
             logger.debug('初始化 CloakBrowser 驱动失败: {error}', error=e, exc_info=True)
-            self.presenter.print(f'CloakBrowser 浏览器驱动初始化失败: {e}', style='bold red')
+            self.presenter.print(f'CloakBrowser 浏览器驱动初始化失败: {e}', style=f'bold {ERROR}')
             return False
 
     def _try_init_seleniumbase_driver(
@@ -113,11 +114,11 @@ class DriverManager:
                 headless=self._source_browser_headless(source_or_class),
                 timeout_seconds=self._source_browser_wait_seconds(source_or_class),
             )
-            self.presenter.print('已初始化 SeleniumBase 浏览器会话', style='green')
+            self.presenter.print('已初始化 SeleniumBase 浏览器会话', style=SUCCESS)
             return True
         except Exception as e:
             logger.debug('初始化 SeleniumBase 驱动失败: {error}', error=e, exc_info=True)
-            self.presenter.print(f'SeleniumBase 浏览器会话初始化失败: {e}', style='bold red')
+            self.presenter.print(f'SeleniumBase 浏览器会话初始化失败: {e}', style=f'bold {ERROR}')
             return False
 
     def driver_cache_key(

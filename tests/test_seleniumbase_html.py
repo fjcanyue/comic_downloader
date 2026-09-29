@@ -355,6 +355,7 @@ def test_requests_html_block_status_switches_to_seleniumbase(monkeypatch, tmp_pa
         )
     ]
     assert source.browser_mode == REQUESTS_MODE
+    assert source.last_page_load_result is not None
     assert source.last_page_load_result.browser_mode == SELENIUMBASE_MODE
     assert fake_sb.activated_url == 'https://example.test/search'
     assert fake_sb.cdp.find_calls == [('.page-main', 5.0)]
@@ -397,6 +398,7 @@ def test_profiled_parse_html_uses_profile_base_url_and_keeps_fallback_non_sticky
     assert source.profile is profile
     assert profile.browser_mode == REQUESTS_MODE
     assert source.browser_mode == REQUESTS_MODE
+    assert source.last_page_load_result is not None
     assert source.last_page_load_result.browser_mode == SELENIUMBASE_MODE
     assert fake_sb.cdp.find_calls == [('.page-main', 5.0)]
     assert root is not None
@@ -647,7 +649,7 @@ class FakeSeleniumBaseDownloadDriver:
     def download_to_file(self, url, file_path, *, referer=None):
         self.downloads.append((url, referer))
         with open(file_path, 'wb') as f:
-            f.write(b'image-bytes')
+            f.write(b'\xff\xd8\xff\xe0' + (b'\x00' * 12) + b'\xff\xd9')
 
 
 def test_seleniumbase_image_download_uses_driver(tmp_path):

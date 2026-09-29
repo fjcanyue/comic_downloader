@@ -35,6 +35,7 @@ class FakeRichProgress:
 
 def test_noop_download_progress_accepts_all_operations():
     progress = NoopDownloadProgress()
+    task_id = None
 
     with progress as active:
         task_id = active.add_task('download', total=3)

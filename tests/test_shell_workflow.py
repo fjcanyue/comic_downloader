@@ -10,9 +10,11 @@ from rich.console import Console
 
 from downloader.browser.manager import DriverManager
 from downloader.comic import ComicSource
+from downloader.download.jobs import DownloadJob, JobVolume
 from downloader.download.progress import NoopDownloadProgress
 from downloader.models import Comic, ComicBook, ComicVolume, VolumeDownloadResult
 from downloader.shell import Shell, url_belongs_to_source
+from downloader.sources.metadata import SourceVerification
 from downloader.sources.profiles import SourceBinding, SourceProfile
 from downloader.tui import TerminalPresenter
 
@@ -92,6 +94,83 @@ def test_blank_line_does_not_repeat_download(shell, monkeypatch):
     shell.onecmd('')
     shell.onecmd('   ')
     assert calls == ['1']
+
+
+def test_retry_all_handles_plans_and_standalone_chapters_without_duplicate_attempts(
+    shell, monkeypatch
+):
+    job = DownloadJob(
+        'first',
+        '漫画',
+        'https://first.test/comic',
+        [
+            JobVolume('正篇', '第一话', 'https://first.test/1'),
+            JobVolume('正篇', '第二话', 'https://first.test/2'),
+        ],
+    )
+    shell.job_store.save(job)
+    tasks = [
+        shell.task_store.start(
+            source_name='first',
+            volume_name=f'第{index}话',
+            source_url=f'https://first.test/{index}',
+            target_path=shell.task_store.output_dir / f'comic/book/{index}',
+        )
+        for index in (1, 3)
+    ]
+    attempts = []
+
+    def retry_job(job_id):
+        attempts.append(('job', job_id))
+        shell.last_command_ok = False
+
+    def retry_chapter(task):
+        attempts.append(('chapter', task.task_id))
+        return VolumeDownloadResult(task.volume_name, task.source_url, 'downloaded')
+
+    monkeypatch.setattr(shell, '_retry_job', retry_job)
+    monkeypatch.setattr(shell, '_retry_download_task', retry_chapter)
+    shell.do_retry('all')
+    assert attempts == [('job', job.id), ('chapter', tasks[1].task_id)]
+    assert shell.last_command_ok is False
+
+
+def test_retry_without_selection_lists_both_record_types(shell):
+    job = DownloadJob(
+        'first',
+        '漫画',
+        'https://first.test/comic',
+        [
+            JobVolume('正篇', '第一话', 'https://first.test/1'),
+        ],
+    )
+    shell.job_store.save(job)
+    task = shell.task_store.start(
+        source_name='first',
+        volume_name='独立章节',
+        source_url='https://first.test/2',
+        target_path=shell.task_store.output_dir / 'comic/book/2',
+    )
+    assert main_module._run_command(shell, 'retry', []) == 0
+    rendered = shell.console.file.getvalue()
+    assert job.id[:12] in rendered
+    assert task.task_id in rendered
+
+
+@pytest.mark.parametrize(
+    ('status', 'exit_code'), [('healthy', 0), ('degraded', 1), ('unavailable', 1)]
+)
+def test_source_check_cli_reports_health_and_resets_previous_failure(
+    shell, monkeypatch, status, exit_code
+):
+    monkeypatch.setattr(
+        shell,
+        '_check_source',
+        lambda name: SourceVerification(status=status, checked_at='2026-09-29T00:00:00+00:00'),
+    )
+    shell.last_command_ok = False
+    assert main_module._run_command(shell, 'check', ['first']) == exit_code
+    assert main_module._run_command(shell, 'sources', []) == 0
 
 
 def test_eof_closes_context_and_stops_loop(shell, monkeypatch):
@@ -265,6 +344,7 @@ def test_shell_task_history_and_retry_after_new_session(shell, monkeypatch, tmp_
     try:
         assert main_module._run_command(restarted, 'retry', [job.id[:12]]) == 0
         assert restarted.context.comic is None
+        assert isinstance(restarted.context.source, WorkflowSource)
         assert restarted.context.source.downloaded_urls == [
             'https://first.test/3',
             'https://first.test/4',

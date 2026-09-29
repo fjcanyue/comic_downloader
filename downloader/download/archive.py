@@ -4,11 +4,11 @@ import os
 import re
 import tempfile
 import zipfile
-import zlib
 from pathlib import Path
 
 from loguru import logger
 
+from downloader.download.integrity import validate_comic_archive
 from downloader.download.progress import DownloadProgress
 from downloader.models import (
     ImageDownloadFailure,
@@ -27,7 +27,7 @@ class ArchiveMixin:
 
         target_zip_name = filter_dir_name(vol_name) + '.zip'
         target_zip_path = os.path.join(path, target_zip_name)
-        if self._archive_is_usable(target_zip_path):
+        if self._can_reuse_archive(target_zip_path):
             return target_zip_path
 
         base_name = filter_dir_name(vol_name)
@@ -40,35 +40,18 @@ class ArchiveMixin:
         for i in range(1, 3):
             padded_num = num_part.zfill(len(num_part) + i)
             padded_path = os.path.join(path, padded_num + rest_part + '.zip')
-            if self._archive_is_usable(padded_path):
+            if self._can_reuse_archive(padded_path):
                 logger.info('文件已存在(补零匹配)，跳过: {}', padded_path)
                 return padded_path
         return None
 
-    @staticmethod
-    def _archive_is_usable(path: str) -> bool:
-        if not os.path.isfile(path):
+    def _can_reuse_archive(self, archive_path: str) -> bool:
+        if not os.path.exists(archive_path):
             return False
-        try:
-            with zipfile.ZipFile(path) as archive:
-                files = [info for info in archive.infolist() if not info.is_dir()]
-                if (
-                    files
-                    and all(info.file_size > 0 for info in files)
-                    and archive.testzip() is None
-                ):
-                    return True
-        except (
-            OSError,
-            zipfile.BadZipFile,
-            RuntimeError,
-            NotImplementedError,
-            EOFError,
-            zlib.error,
-        ):
-            logger.warning('无法读取已有压缩包，将重新处理章节: {}', path)
-            return False
-        logger.warning('已有压缩包为空或校验失败，将重新处理章节: {}', path)
+        check = validate_comic_archive(archive_path)
+        if check.ok:
+            return True
+        logger.warning('已有归档校验失败，将重新下载: {} ({})', archive_path, check.reason)
         return False
 
     def _remove_progress_task(self, progress: DownloadProgress | None, task_id) -> None:
@@ -151,6 +134,9 @@ class ArchiveMixin:
                 for index in range(1, expected_count + 1):
                     name = f'{index:04d}.jpg'
                     archive.write(Path(path) / name, arcname=name)
+            archive_check = validate_comic_archive(temporary_path)
+            if not archive_check.ok:
+                raise RuntimeError(f'归档校验失败: {archive_check.reason}')
             os.replace(temporary_path, target)
             archive_path = str(target.resolve())
             logger.info('目录 {} 压缩完成.', path)

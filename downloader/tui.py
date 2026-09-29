@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
+from rich import box
 from rich.console import Console, Group
+from rich.markup import escape
 from rich.panel import Panel
 from rich.rule import Rule
 from rich.table import Table
@@ -10,7 +13,6 @@ from rich.text import Text
 
 from downloader.download.jobs import DownloadJob
 from downloader.models import Comic, DownloadSummary, SearchOutcome, VolumeDownloadResult
-from downloader.sources.profiles import SourceBinding
 
 # ---------------------------------------------------------------------------
 # 主题配色：集中管理，避免裸色字符串散落各处。
@@ -40,6 +42,63 @@ SEARCH_STATE_LABELS = {
     'partial': '部分结果',
     'skipped': '跳过',
 }
+MIN_SOURCE_CODE_COLUMN_WIDTH = 88
+MAX_COMMAND_PANEL_WIDTH = 96
+MAX_SOURCE_PANEL_WIDTH = 112
+
+
+@dataclass(frozen=True)
+class SourceStat:
+    """单个搜索源在一次搜索中的执行结果摘要，用于在搜索结果下方汇总展示。"""
+
+    display_name: str
+    ok: bool
+    duration: float
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class SourceView:
+    """面向终端展示的动漫源能力快照。"""
+
+    index: int
+    source_name: str
+    display_name: str
+    browser_mode: str
+    search_uses_driver: bool
+    download_uses_driver: bool
+    selected: bool = False
+    supports_search: bool = True
+    supports_info: bool = True
+    supports_download: bool = True
+    verification_status: str = 'unchecked'
+    last_verified_at: str | None = None
+
+
+@dataclass(frozen=True)
+class SourceCheckView:
+    index: int
+    source_name: str
+    display_name: str
+    status: str
+    checked_at: str
+    latency_seconds: float | None = None
+    http_status: int | None = None
+    message: str | None = None
+    final_url: str | None = None
+    error_type: str | None = None
+
+
+@dataclass(frozen=True)
+class RetryTaskView:
+    index: int
+    task_id: str
+    source_name: str
+    volume_name: str
+    status: str
+    attempts: int
+    updated_at: str
+    message: str | None = None
 
 
 class TerminalPresenter:
@@ -62,13 +121,13 @@ class TerminalPresenter:
         self.print(Text(str(message)))
 
     def success(self, message: Any) -> None:
-        self.print(Text(f'✔ {message}', style=f'bold {SUCCESS}'))
+        self.print(Text(f'成功 {message}', style=f'bold {SUCCESS}'))
 
     def warn(self, message: Any) -> None:
-        self.print(Text(f'⚠ {message}', style=f'bold {WARN}'))
+        self.print(Text(f'注意 {message}', style=f'bold {WARN}'))
 
     def error(self, message: Any) -> None:
-        self.print(Text(f'✖ {message}', style=f'bold {ERROR}'))
+        self.print(Text(f'错误 {message}', style=f'bold {ERROR}'))
 
     # ------------------------------------------------------------------
     # 提示符与路径
@@ -88,38 +147,72 @@ class TerminalPresenter:
         )
 
     # ------------------------------------------------------------------
+    # 命令速查：welcome 与 help 复用同一份文本，避免两处不一致。
+    # ------------------------------------------------------------------
+    def _command_cheatsheet(self) -> Table:
+        commands = Table.grid(padding=(0, 2))
+        commands.add_column(style=f'bold {ACCENT}', no_wrap=True)
+        commands.add_column(style=MUTED, no_wrap=True)
+        commands.add_column()
+        commands.add_row('s', '<关键词>', '从所有启用源搜索动漫')
+        commands.add_row('i', '<序号/URL>', '查看动漫详情')
+        commands.add_row('p', '[页码]', '翻看缓存搜索结果')
+        commands.add_row('ch', '<分组> [页码]', '翻看漫画章节')
+        commands.add_row('status', '', '查看当前漫画、路径和覆盖模式')
+        commands.add_row('tasks', '[任务ID]', '查看下载计划和失败详情')
+        commands.add_row('d', '[序号/URL]', '下载当前或指定动漫')
+        commands.add_row('v', '<章节> [范围]', '按范围下载章节')
+        commands.add_row('source', '[序号/代码名]', '查看并切换动漫源')
+        commands.add_row('sources', '', '查看动漫源能力概览')
+        commands.add_row('check', '[序号/代码名/all]', '显式检查动漫源连通性')
+        commands.add_row('retry', '[序号/任务ID/all]', '查看或重试未完成任务')
+        commands.add_row('help / ?', '', '查看命令速查')
+        commands.add_row('q', '', '退出')
+        return commands
+
+    def _command_panel_body(self) -> Group:
+        return Group(
+            Text('命令速查', style='bold'),
+            Text(''),
+            self._command_cheatsheet(),
+        )
+
+    # ------------------------------------------------------------------
     # 欢迎与退出
     # ------------------------------------------------------------------
     def welcome(self, source_names: list[str] | None = None) -> None:
-        title = Text(BRAND, style=f'bold {ACCENT}')
-        commands = (
-            '[bold]命令速查[/]\n'
-            f'  [{ACCENT}]s[/]  <关键词>       从所有源搜索动漫\n'
-            f'  [{ACCENT}]i[/]  <序号/URL>     查看动漫详情\n'
-            f'  [{ACCENT}]p[/]  [页码]         翻看搜索结果，序号保持不变\n'
-            f'  [{ACCENT}]ch[/] <分组> [页码]  翻看章节，例如 ch 1 2\n'
-            f'  [{ACCENT}]d[/]  [序号/URL]     全量下载；不填则下载当前漫画\n'
-            f'  [{ACCENT}]v[/]  <分组> [范围]  如 v 1 5 10，下载第 5～10 话\n'
-            f'  [{ACCENT}]source[/] [源名/序号] 切换下载源；搜索仍使用所有启用源\n'
-            f'  [{ACCENT}]status[/]            查看当前漫画、路径和覆盖模式\n'
-            f'  [{ACCENT}]tasks[/] [任务ID]     查看保存的下载任务和失败详情\n'
-            f'  [{ACCENT}]retry[/] <任务ID>     继续未完成章节（支持重启后恢复）\n'
-            f'  [{ACCENT}]help[/] [命令]       查看用法，例如 help v\n'
-            f'  [{ACCENT}]q[/]                 退出'
-        )
-        body_lines = [commands]
+        source_summary = '尚未加载动漫源'
         if source_names:
-            joined = '  · '.join(source_names)
-            body_lines.append(f'\n[{MUTED}]支持源: {joined}')
-        body_lines.append('\n流程：s 关键词 → i 1 → v 1 5 10 或 d。所有序号从 1 开始。')
+            source_summary = f'已启用 {len(source_names)} 个动漫源，输入 sources 查看能力概览'
 
         self.print(
             Panel(
-                Group(title, Text(''), *body_lines),
+                Group(
+                    Text(BRAND, style=f'bold {ACCENT}'),
+                    Text('多源搜索 · 按章节下载 · 自动复用已下载图片', style=MUTED),
+                    Text(''),
+                    self._command_panel_body(),
+                    Text(''),
+                    Text(source_summary, style=MUTED),
+                ),
                 border_style=ACCENT,
-                padding=(0, 2),
-                title=f'欢迎使用 {BRAND}',
+                padding=(1, 2),
+                title='开始使用',
                 title_align='left',
+                width=min(self.console.width, MAX_COMMAND_PANEL_WIDTH),
+            )
+        )
+
+    def help(self) -> None:
+        """随时可调用的命令速查面板，交互过程中也能查看。"""
+        self.print(
+            Panel(
+                self._command_panel_body(),
+                border_style=ACCENT,
+                padding=(1, 2),
+                title='命令速查',
+                title_align='left',
+                width=min(self.console.width, MAX_COMMAND_PANEL_WIDTH),
             )
         )
 
@@ -131,33 +224,274 @@ class TerminalPresenter:
     # ------------------------------------------------------------------
     # 源选择
     # ------------------------------------------------------------------
-    def source_options(
-        self,
-        source_names: list[str],
-        bindings: dict[str, SourceBinding] | None = None,
-        current_source: str | None = None,
-    ) -> None:
-        lines = []
-        for index, source_name in enumerate(source_names):
-            detail = ''
-            if bindings and source_name in bindings:
-                binding = bindings[source_name]
-                driver = '需要浏览器' if binding.profile.uses_driver_for_download() else 'HTTP 下载'
-                detail = f' · {getattr(binding.source_class, "name", source_name)} · {driver}'
-                if getattr(binding.source_class, 'search_unavailable_reason', None):
-                    detail += ' · 仅支持 URL'
-            selected = ' ← 当前' if source_name == current_source else ''
-            lines.append(Text(f'  {index + 1:>2}. {source_name}{detail}{selected}'))
+    def source_catalog(self, sources: list[SourceView], *, selection_mode: bool = False) -> None:
+        """展示动漫源、页面加载方式以及搜索/下载所需能力。"""
+        panel_width = min(self.console.width, MAX_SOURCE_PANEL_WIDTH)
+        if not sources:
+            self.print(
+                Panel(
+                    Group(
+                        Text('没有启用的动漫源。', style=f'bold {WARN}'),
+                        Text('请检查运行配置中的 sources.<名称>.enabled。', style=MUTED),
+                    ),
+                    border_style=WARN,
+                    padding=(1, 2),
+                    title='动漫源',
+                    title_align='left',
+                    width=panel_width,
+                )
+            )
+            return
+
+        table = Table(
+            box=None,
+            collapse_padding=True,
+            expand=True,
+            header_style=f'bold {ACCENT}',
+            pad_edge=False,
+            row_styles=['none', MUTED],
+        )
+        table.add_column('', width=1, justify='center', no_wrap=True)
+        table.add_column('#', width=3, justify='right', style=ACCENT, no_wrap=True)
+        table.add_column('动漫源', min_width=8, overflow='ellipsis', no_wrap=True)
+        if self.console.width >= MIN_SOURCE_CODE_COLUMN_WIDTH:
+            table.add_column('代码名', min_width=8, style=MUTED, no_wrap=True)
+        table.add_column('页面加载', min_width=8, no_wrap=True)
+        table.add_column('搜索', min_width=6, no_wrap=True)
+        table.add_column('详情', min_width=6, no_wrap=True)
+        table.add_column('下载', min_width=6, no_wrap=True)
+        table.add_column('验证', min_width=6, no_wrap=True)
+
+        for source in sources:
+            row = [
+                f'[{ACCENT}]>[/]' if source.selected else '',
+                str(source.index),
+                source.display_name,
+            ]
+            if self.console.width >= MIN_SOURCE_CODE_COLUMN_WIDTH:
+                row.append(source.source_name)
+            row.extend(
+                [
+                    self._browser_mode_label(source.browser_mode),
+                    self._access_label(source.supports_search, source.search_uses_driver),
+                    self._access_label(
+                        source.supports_info,
+                        source.browser_mode != 'requests',
+                    ),
+                    self._access_label(source.supports_download, source.download_uses_driver),
+                    self._verification_label(
+                        source.verification_status,
+                        source.last_verified_at,
+                    ),
+                ]
+            )
+            table.add_row(*row, style='bold' if source.selected else None)
+
+        hint = (
+            '输入序号、代码名或动漫源名称进行切换；回车 / q 取消。'
+            if selection_mode
+            else '使用 source <序号/代码名> 切换；使用 check <序号/代码名/all> 显式验证。'
+        )
         self.print(
             Panel(
-                Group('请选择动漫下载网站源（回车 / q 取消）:', Text(''), *lines),
+                Group(table, Text(''), Text(hint, style=MUTED)),
                 border_style=ACCENT,
-                padding=(0, 1),
+                padding=(1, 2),
+                title=f'动漫源 · {len(sources)} 个已启用',
+                title_align='left',
+                width=panel_width,
             )
         )
 
-    def source_switching(self, source_name: str) -> None:
-        self.print(f'[{ACCENT}]⟳[/] 正在切换到 [bold]{source_name}[/] 动漫下载源...')
+    @staticmethod
+    def _browser_mode_label(browser_mode: str) -> str:
+        labels = {
+            'requests': 'HTTP',
+            'seleniumbase': 'SeleniumBase',
+            'cloakbrowser': 'CloakBrowser',
+        }
+        return labels.get(browser_mode, browser_mode)
+
+    @staticmethod
+    def _access_label(supported: bool, uses_driver: bool) -> str:
+        if not supported:
+            return f'[{MUTED}]不支持[/]'
+        if uses_driver:
+            return f'[{WARN}]浏览器[/]'
+        return f'[{SUCCESS}]HTTP[/]'
+
+    @staticmethod
+    def _verification_label(status: str, checked_at: str | None) -> str:
+        labels = {
+            'unchecked': f'[{MUTED}]未检查[/]',
+            'healthy': f'[{SUCCESS}]正常[/]',
+            'degraded': f'[{WARN}]受限[/]',
+            'unavailable': f'[{ERROR}]不可用[/]',
+        }
+        label = labels.get(status, escape(status))
+        if not checked_at or status == 'unchecked':
+            return label
+        return f'{label} [{MUTED}]{escape(checked_at[:10])}[/]'
+
+    def source_selected(self, display_name: str, source_name: str) -> None:
+        self.success(f'已切换到 {display_name} ({source_name})')
+
+    def source_unchanged(self, display_name: str) -> None:
+        self.info(f'当前动漫源已经是 {display_name}。')
+
+    def source_not_found(self, selection: str, max_index: int) -> None:
+        self.warn(
+            f'未找到动漫源 "{selection}"。请输入 1 到 {max_index} 的序号，'
+            '或使用 sources 查看代码名。'
+        )
+
+    def source_check_started(self, count: int) -> None:
+        self.info(f'正在检查 {count} 个动漫源；本操作会显式访问各来源首页。')
+
+    def source_check_summary(
+        self,
+        checks: list[SourceCheckView],
+        *,
+        persisted: bool = True,
+    ) -> None:
+        panel_width = min(self.console.width, MAX_SOURCE_PANEL_WIDTH)
+        table = Table(
+            box=box.SIMPLE_HEAD,
+            expand=True,
+            show_edge=False,
+            pad_edge=False,
+            header_style=f'bold {MUTED}',
+        )
+        table.add_column('#', width=3, justify='right', style=ACCENT, no_wrap=True)
+        table.add_column('动漫源', min_width=8, overflow='ellipsis', no_wrap=True)
+        table.add_column('状态', min_width=6, no_wrap=True)
+        table.add_column('HTTP', width=5, justify='right', no_wrap=True)
+        table.add_column('耗时', width=8, justify='right', no_wrap=True)
+        table.add_column('检查时间', width=19, no_wrap=True)
+        if self.console.width >= MIN_SOURCE_CODE_COLUMN_WIDTH:
+            table.add_column('诊断摘要', min_width=18, overflow='ellipsis')
+
+        for check in checks:
+            row = [
+                str(check.index),
+                escape(check.display_name),
+                self._verification_label(check.status, None),
+                str(check.http_status) if check.http_status is not None else '-',
+                (f'{check.latency_seconds:.3f}s' if check.latency_seconds is not None else '-'),
+                escape(check.checked_at.replace('T', ' ')[:19]),
+            ]
+            if self.console.width >= MIN_SOURCE_CODE_COLUMN_WIDTH:
+                detail = check.message or check.error_type or check.final_url or '-'
+                row.append(escape(detail))
+            table.add_row(*row)
+
+        healthy = sum(check.status == 'healthy' for check in checks)
+        degraded = sum(check.status == 'degraded' for check in checks)
+        unavailable = sum(check.status == 'unavailable' for check in checks)
+        persistence_message = (
+            '结果已保存到 .comic_downloader/source-verifications.json'
+            if persisted
+            else '结果未能保存；请处理上方记录错误后重试'
+        )
+        self.print(
+            Panel(
+                Group(
+                    table,
+                    Text(''),
+                    Text(
+                        f'正常 {healthy} · 受限 {degraded} · 不可用 {unavailable} · '
+                        + persistence_message,
+                        style=MUTED,
+                    ),
+                ),
+                border_style=ERROR if unavailable else WARN if degraded else SUCCESS,
+                padding=(1, 2),
+                title=f'来源检查 · {len(checks)} 个结果',
+                title_align='left',
+                width=panel_width,
+            )
+        )
+
+    def source_verification_store_error(self, message: str) -> None:
+        self.error(f'无法读取或写入来源验证记录: {message}')
+
+    # ------------------------------------------------------------------
+    # 可恢复下载任务
+    # ------------------------------------------------------------------
+    def retry_tasks(self, tasks: list[RetryTaskView]) -> None:
+        panel_width = min(self.console.width, MAX_SOURCE_PANEL_WIDTH)
+        if not tasks:
+            self.print(
+                Panel(
+                    Group(
+                        Text('没有待恢复的下载任务。', style=f'bold {SUCCESS}'),
+                        Text('失败或中断的任务会自动记录在下载目录中。', style=MUTED),
+                    ),
+                    border_style=SUCCESS,
+                    padding=(1, 2),
+                    title='下载恢复',
+                    title_align='left',
+                    width=panel_width,
+                )
+            )
+            return
+
+        table = Table(
+            box=None,
+            expand=True,
+            header_style=f'bold {ACCENT}',
+            pad_edge=False,
+            row_styles=['none', MUTED],
+        )
+        table.add_column('#', width=3, justify='right', style=ACCENT, no_wrap=True)
+        table.add_column('动漫源', min_width=8, no_wrap=True)
+        table.add_column('章节', min_width=12, overflow='ellipsis', no_wrap=True)
+        table.add_column('状态', min_width=6, no_wrap=True)
+        table.add_column('尝试', width=4, justify='right', no_wrap=True)
+        if self.console.width >= MIN_SOURCE_CODE_COLUMN_WIDTH:
+            table.add_column('任务 ID', width=12, style=MUTED, no_wrap=True)
+            table.add_column('说明', min_width=12, overflow='ellipsis', style=MUTED)
+        for task in tasks:
+            row = [
+                str(task.index),
+                escape(task.source_name),
+                escape(task.volume_name),
+                self._retry_status_label(task.status),
+                str(task.attempts),
+            ]
+            if self.console.width >= MIN_SOURCE_CODE_COLUMN_WIDTH:
+                row.extend([escape(task.task_id), escape(task.message or '-')])
+            table.add_row(*row)
+
+        self.print(
+            Panel(
+                Group(
+                    table,
+                    Text(''),
+                    Text('使用 retry <序号> 重试单个任务，或 retry all 重试全部。', style=MUTED),
+                ),
+                border_style=ACCENT,
+                padding=(1, 2),
+                title=f'下载恢复 · {len(tasks)} 个待处理',
+                title_align='left',
+                width=panel_width,
+            )
+        )
+
+    @staticmethod
+    def _retry_status_label(status: str) -> str:
+        labels = {
+            'in_progress': f'[{WARN}]已中断[/]',
+            'partial': f'[{WARN}]部分失败[/]',
+            'failed': f'[{ERROR}]失败[/]',
+        }
+        return labels.get(status, escape(status))
+
+    def retry_selection_not_found(self, selection: str) -> None:
+        self.warn(f'未找到下载任务 "{selection}"。输入 retry 查看待恢复任务。')
+
+    def retry_store_error(self, message: str) -> None:
+        self.error(f'无法读取下载任务记录: {message}')
 
     def session_status(
         self,
@@ -276,9 +610,11 @@ class TerminalPresenter:
         *,
         page: int = 1,
         page_size: int | None = SEARCH_PAGE_SIZE,
+        source_stats: list[SourceStat] | None = None,
     ) -> None:
         if not comics:
             self.warn(f'未找到与 "{keyword}" 相关的结果。')
+            self._print_source_stats(source_stats)
             return
 
         self.print(Rule(Text(f'搜索结果 · {keyword}', style='bold'), style=ACCENT))
@@ -319,6 +655,22 @@ class TerminalPresenter:
         if compact:
             self.info('窄屏模式：使用 i <序号> 查看作者和完整 URL。')
         self.info('下一步：i <序号> 查看分组；d <序号> 全量下载。')
+        self._print_source_stats(source_stats)
+
+    def _print_source_stats(self, source_stats: list[SourceStat] | None) -> None:
+        """在结果下方渲染一行紧凑的各源执行状态，帮助用户一眼看出哪个源失败了。"""
+        if not source_stats:
+            return
+        parts: list[str] = []
+        for stat in source_stats:
+            if stat.ok:
+                parts.append(f'[{SUCCESS}]成功[/] {stat.display_name} ({stat.duration:.1f}s)')
+            else:
+                detail = stat.error or '失败'
+                if len(detail) > MAX_URL_DISPLAY_WIDTH:
+                    detail = detail[: MAX_URL_DISPLAY_WIDTH - 1] + '…'
+                parts.append(f'[{ERROR}]失败[/] {stat.display_name} ({detail})')
+        self.print(f'[{MUTED}]源状态: {"  ".join(parts)}[/]')
 
     # ------------------------------------------------------------------
     # 动漫详情
@@ -430,10 +782,10 @@ class TerminalPresenter:
         detail.add_column('说明', overflow='fold', style=MUTED)
 
         status_badges = {
-            'downloaded': f'[{SUCCESS}]✓ 已下载[/]',
-            'skipped': f'[{MUTED}]⊘ 已跳过[/]',
-            'partial': f'[{WARN}]△ 部分失败[/]',
-            'failed': f'[{ERROR}]✗ 失败[/]',
+            'downloaded': f'[{SUCCESS}]已下载[/]',
+            'skipped': f'[{MUTED}]已跳过[/]',
+            'partial': f'[{WARN}]部分失败[/]',
+            'failed': f'[{ERROR}]失败[/]',
         }
 
         shown_failures = 0
@@ -477,10 +829,10 @@ class TerminalPresenter:
 
 # 向后兼容：保持旧的 status badge 字典可见（如外部引用）。
 STATUS_BADGES = {
-    'downloaded': f'[{SUCCESS}]✓[/]',
-    'skipped': f'[{MUTED}]⊘[/]',
-    'partial': f'[{WARN}]△[/]',
-    'failed': f'[{ERROR}]✗[/]',
+    'downloaded': f'[{SUCCESS}]成功[/]',
+    'skipped': f'[{MUTED}]跳过[/]',
+    'partial': f'[{WARN}]部分[/]',
+    'failed': f'[{ERROR}]失败[/]',
 }
 
 JOB_STATE_LABELS = {
