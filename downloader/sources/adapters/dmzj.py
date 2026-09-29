@@ -1,3 +1,5 @@
+from urllib.parse import quote
+
 import requests
 
 from downloader.comic import Comic, ComicBook, ComicSource, ComicVolume, logger
@@ -22,7 +24,7 @@ class DmzjComic(ComicSource):
 
     def search(self, keyword):
         logger.info('开始在 动漫之家 搜索: {}', keyword)
-        search_url = f'http://sacg.dmzj.com/comicsum/search.php?s={keyword}'
+        search_url = f'http://sacg.dmzj.com/comicsum/search.php?s={quote(keyword, safe="")}'
         arr = []
         try:
             r = self.http.get(search_url, timeout=30)
@@ -33,9 +35,11 @@ class DmzjComic(ComicSource):
                 logger.info("动漫之家 搜索 '{}' 无结果或解析JS失败.", keyword)
                 return arr
         except requests.exceptions.RequestException as e:
+            self.search_error = str(e) or type(e).__name__
             logger.error('请求动漫之家搜索接口失败: {}, 错误: {}', search_url, e)
             return arr
         except Exception as e:
+            self.search_error = str(e) or type(e).__name__
             logger.error('执行动漫之家搜索脚本失败: {}, 错误: {}', search_url, e, exc_info=True)
             return arr
 

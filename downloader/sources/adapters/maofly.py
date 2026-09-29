@@ -1,4 +1,5 @@
 import re
+from urllib.parse import quote
 
 import requests
 from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
@@ -41,15 +42,17 @@ class MaoflyComic(ComicSource):
 
     def search(self, keyword):
         logger.info('开始在 {} 搜索: {}', self.name, keyword)
-        search_url = f'{self.base_url}/search.html?q={keyword}'
+        search_url = f'{self.base_url}/search.html?q={quote(keyword, safe="")}'
         arr = []
         try:
             root = self.__parse_html__(search_url)
             if root is None:
+                self.search_error = '无法获取或解析搜索页面'
                 logger.error("搜索 '{}' 失败，无法获取或解析页面: {}", keyword, search_url)
                 return arr
             main_nodes = root.xpath('//div[contains(@class,"comic-main-section")]')
             if not main_nodes:
+                self.search_error = '未找到搜索内容区域，页面结构可能已变化'
                 logger.info(
                     "在 {} 搜索 '{}' 时未找到主要内容区域，可能无结果或页面结构变更.",
                     self.name,
@@ -63,16 +66,18 @@ class MaoflyComic(ComicSource):
             else:
                 logger.info('未找到结果数量信息.')
         except Exception as e:
+            self.search_error = str(e) or type(e).__name__
             logger.error("在 {} 搜索 '{}' 过程中发生错误: {}", self.name, keyword, e, exc_info=True)
             return arr
         book_list = main.xpath('//div[contains(@class,"comicbook-index")]')
         arr = []
         for book in book_list:
-            b = book.xpath('a')[0]
-            comic = Comic()
             try:
+                b = book.xpath('a')[0]
+                comic = Comic()
                 comic.url = b.attrib.get('href')
                 if not comic.url:
+                    self.search_error = '部分搜索条目缺少漫画地址，已保留其余有效结果'
                     logger.warning('解析到一个没有URL的漫画条目，已跳过。')
                     continue
                 if not comic.url.startswith('http'):
@@ -88,6 +93,7 @@ class MaoflyComic(ComicSource):
                 logger.debug('找到漫画: {}, 作者: {}, URL: {}', comic.name, comic.author, comic.url)
                 arr.append(comic)
             except Exception as e:
+                self.search_error = f'部分搜索条目解析失败: {e}'
                 logger.error('解析漫画条目时出错: {}', e, exc_info=True)
                 continue
         logger.info("{} 搜索 '{}' 完成, 共找到 {} 条结果.", self.name, keyword, len(arr))

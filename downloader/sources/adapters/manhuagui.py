@@ -1,3 +1,5 @@
+from urllib.parse import quote, urljoin
+
 from selenium.webdriver.support.ui import WebDriverWait
 
 from downloader.comic import Comic, ComicBook, ComicSource, ComicVolume, logger
@@ -21,10 +23,11 @@ class ManhuaguiComic(ComicSource):
 
     def search(self, keyword):
         logger.info('开始在 看漫画 搜索: {}', keyword)
-        search_url = f'{self.base_url}/s/{keyword}.html'
+        search_url = f'{self.base_url}/s/{quote(keyword, safe="")}.html'
         root = self.__parse_html__(search_url)
         arr = []
         if root is None:
+            self.search_error = '无法获取或解析搜索页面'
             logger.error('搜索失败，无法获取页面内容: {}', search_url)
             return arr
 
@@ -44,6 +47,8 @@ class ManhuaguiComic(ComicSource):
                     else '未找到明确的无结果提示'
                 )
                 logger.info("搜索 '{}' 无结果: {}", keyword, no_result_text)
+            else:
+                self.search_error = '未找到搜索结果区域或无结果提示，页面结构可能已变化'
             return arr
 
         main = main_nodes[0]
@@ -51,17 +56,25 @@ class ManhuaguiComic(ComicSource):
         # print('共 %s 条相关的结果' % result)
         book_list = main.xpath('li')
         for book in book_list:
-            b = book.xpath('div/a')[0]
-            comic = Comic()
-            comic.url = f'{self.base_url}{b.attrib.get("href")}'
-            author_list = book.xpath('div[contains(@class,"book-detail")]/dl/dd[3]/span/a')
-            authors = [author.text for author in author_list]
-            comic.author = ', '.join(authors)
-            comic.name = b.attrib.get('title')
-            logger.debug('找到漫画: {}, 作者: {}, URL: {}', comic.name, comic.author, comic.url)
-            arr.append(comic)
+            try:
+                arr.append(self._parse_search_book(book))
+            except Exception as exc:  # noqa: PERF203 - preserve other valid search entries
+                self.search_error = f'部分搜索条目解析失败: {exc}'
+                logger.exception('解析搜索条目失败，保留其他结果')
         logger.info("看漫画 搜索 '{}' 完成, 共找到 {} 条结果.", keyword, len(arr))
         return arr
+
+    def _parse_search_book(self, book):
+        link = book.xpath('div/a')[0]
+        href = link.attrib.get('href')
+        if not href:
+            raise ValueError('搜索条目缺少漫画地址')
+        comic = Comic()
+        comic.url = urljoin(self.base_url, href)
+        authors = book.xpath('div[contains(@class,"book-detail")]/dl/dd[3]/span/a')
+        comic.author = ', '.join(author.text for author in authors if author.text)
+        comic.name = link.attrib.get('title') or '未知漫画'
+        return comic
 
     def info(self, url):
         logger.info('开始获取 看漫画 动漫详细信息: {}', url)

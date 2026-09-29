@@ -18,10 +18,11 @@ from downloader.browser.manager import DriverManager
 from downloader.comic import Comic, ComicSource
 from downloader.download.job_store import JobStore
 from downloader.download.jobs import DownloadJob, JobVolume, run_download_job
+from downloader.models import SearchOutcome, SourceSearchResult
 from downloader.runtime_config import RuntimeConfig
 from downloader.sources import load_source_bindings
 from downloader.sources.profiles import SourceBinding, SourceProfile
-from downloader.tui import TerminalPresenter
+from downloader.tui import CHAPTER_PAGE_SIZE, SEARCH_PAGE_SIZE, TerminalPresenter
 
 FULL_VOLUME_ARG_COUNT = 1
 VOLUME_TO_ARG_COUNT = 2
@@ -85,23 +86,22 @@ class SearchTask:
     source_name: str
     source_class: type[ComicSource]
     profile: SourceProfile
-    search_func: Callable[[str], list]
+    search_func: Callable[[str], list | SourceSearchResult]
     uses_driver: bool
     display_name: str
+    unavailable_reason: str | None = None
 
 
-@dataclass
-class SearchOutcome:
-    source_name: str
-    results: list
-    error_message: str | None
-    duration: float
+class SearchUnavailableError(RuntimeError):
+    pass
 
 
 def _execute_search_task(
-    task: SearchTask, keyword: str, per_source_limit: int, driver_lock: threading.Lock | None
+    task: SearchTask, keyword: str, per_source_limit: int | None, driver_lock: threading.Lock | None
 ) -> SearchOutcome:
     start = time.perf_counter()
+    if task.unavailable_reason:
+        return SearchOutcome(task.source_name, [], task.unavailable_reason, 0, skipped=True)
     try:
         # Selenium driver 不是线程安全的，访问时强制串行化
         if task.uses_driver:
@@ -112,43 +112,64 @@ def _execute_search_task(
         else:
             results = task.search_func(keyword)
 
+        response = (
+            results if isinstance(results, SourceSearchResult) else SourceSearchResult(results)
+        )
         trimmed = []
-        for comic in results:
-            if len(trimmed) >= per_source_limit:
+        for comic in response.comics:
+            if per_source_limit is not None and len(trimmed) >= per_source_limit:
                 break
             comic.source = task.source_name
             trimmed.append(comic)
 
         duration = time.perf_counter() - start
-        return SearchOutcome(task.source_name, trimmed, None, duration)
+        return SearchOutcome(
+            task.source_name,
+            trimmed,
+            response.error_message,
+            duration,
+            total_count=len(response.comics),
+        )
+    except SearchUnavailableError as e:
+        return SearchOutcome(
+            task.source_name, [], str(e), time.perf_counter() - start, skipped=True
+        )
     except Exception as e:
         duration = time.perf_counter() - start
         logger.exception('搜索任务失败: {source_name}', source_name=task.source_name)
-        return SearchOutcome(task.source_name, [], str(e), duration)
+        return SearchOutcome(task.source_name, [], str(e) or type(e).__name__, duration)
 
 
 def _run_search_serial(
     tasks: list[SearchTask],
     keyword: str,
-    per_source_limit: int,
+    per_source_limit: int | None,
     driver_lock: threading.Lock | None,
+    on_complete: Callable[[SearchOutcome], None] | None = None,
 ) -> list[SearchOutcome]:
-    return [_execute_search_task(task, keyword, per_source_limit, driver_lock) for task in tasks]
+    outcomes = []
+    for task in tasks:
+        outcome = _execute_search_task(task, keyword, per_source_limit, driver_lock)
+        outcomes.append(outcome)
+        if on_complete is not None:
+            on_complete(outcome)
+    return outcomes
 
 
-def _run_search_parallel(
+def _run_search_parallel(  # noqa: PLR0913 - compatibility with the existing search runner
     tasks: list[SearchTask],
     keyword: str,
-    per_source_limit: int,
+    per_source_limit: int | None,
     driver_lock: threading.Lock | None,
     max_workers: int | None = None,
+    on_complete: Callable[[SearchOutcome], None] | None = None,
 ) -> list[SearchOutcome]:
     if not tasks:
         return []
     if max_workers is None:
         max_workers = min(8, len(tasks))
     if max_workers <= 1:
-        return _run_search_serial(tasks, keyword, per_source_limit, driver_lock)
+        return _run_search_serial(tasks, keyword, per_source_limit, driver_lock, on_complete)
 
     # 并行执行后按完成顺序收集，再在外层按源顺序合并
     outcomes = []
@@ -158,7 +179,11 @@ def _run_search_parallel(
             executor.submit(_execute_search_task, task, keyword, per_source_limit, driver_lock)
             for task in tasks
         ]
-        outcomes.extend(future.result() for future in concurrent.futures.as_completed(futures))
+        for future in concurrent.futures.as_completed(futures):
+            outcome = future.result()
+            outcomes.append(outcome)
+            if on_complete is not None:
+                on_complete(outcome)
         executor.shutdown(wait=True)
     except (KeyboardInterrupt, SystemExit):
         executor.shutdown(wait=False, cancel_futures=True)
@@ -208,6 +233,10 @@ class Shell(cmd.Cmd):
         self.source_options = list(self.source_bindings.keys())  # 存储源名称列表，方便按索引访问
         self.sources = {}
         self.last_command_ok = True
+        self.search_keyword = ''
+        self.search_duration = 0.0
+        self.search_outcomes: list[SearchOutcome] = []
+        self.paginate_output = True
 
     def emptyline(self) -> bool:
         """空行不重复执行上一条下载命令。"""
@@ -250,6 +279,54 @@ class Shell(cmd.Cmd):
             len(self.context.searched_results),
             self.overwrite,
         )
+        if self.search_outcomes:
+            self.presenter.search_report(self.search_outcomes)
+
+    def do_results(self, arg):
+        """results [页码]：翻看最近一次搜索结果，每页 20 条，序号保持不变，不重新请求网站。"""
+        self.last_command_ok = False
+        if not self.search_keyword:
+            self.presenter.warn('请先使用 s <关键词> 搜索。')
+            return
+        try:
+            page = self._read_page(arg, len(self.context.searched_results), SEARCH_PAGE_SIZE)
+        except ValueError as exc:
+            self.presenter.warn(str(exc))
+            return
+        self._print_search_table(self.search_keyword, self.search_duration, page=page)
+        self.last_command_ok = True
+
+    def do_chapters(self, arg):
+        """chapters <分组> [页码]：翻看当前漫画的章节，每页 60 话；下载使用原有话序号。"""
+        self.last_command_ok = False
+        if self.context.comic is None:
+            self.presenter.warn('请先使用 i <序号/URL> 查看漫画详情。')
+            return
+        args = arg.split()
+        if not 1 <= len(args) <= VOLUME_TO_ARG_COUNT:
+            self.presenter.warn('用法：chapters <分组> [页码]，例如 chapters 1 2。')
+            return
+        try:
+            book_index = parse_1_based_index(args[0], len(self.context.comic.books), '分组')
+            book = self.context.comic.books[book_index]
+            page = self._read_page(
+                args[1] if len(args) == VOLUME_TO_ARG_COUNT else '',
+                len(book.vols),
+                CHAPTER_PAGE_SIZE,
+            )
+        except ValueError as exc:
+            self.presenter.warn(str(exc))
+            return
+        self.presenter.chapter_page(book_index, book, page)
+        self.last_command_ok = True
+
+    @staticmethod
+    def _read_page(arg: str, total: int, page_size: int) -> int:
+        pages = max(1, (total + page_size - 1) // page_size)
+        try:
+            return parse_1_based_index(arg.strip() or '1', pages, '页码') + 1
+        except ValueError:
+            raise ValueError(f'页码必须是 1～{pages} 的整数。') from None
 
     def do_tasks(self, arg):
         """tasks [任务ID]：列出当前保存路径中的下载任务，或查看某个任务的章节与错误。"""
@@ -417,22 +494,29 @@ class Shell(cmd.Cmd):
 
     def _build_search_func(
         self, binding: SourceBinding, uses_driver: bool
-    ) -> Callable[[str], list]:
-        def _search(keyword: str) -> list:
-            driver = None
-            if uses_driver:
-                if not self.context.ensure_driver(binding.profile):
-                    raise RuntimeError('Browser driver was not initialized')
-                driver = self.context.driver
-            with self.context.create_http_session() as http:
-                source = binding.source_class(
-                    self.context.output_path,
-                    http,
-                    driver,
-                    overwrite=self.overwrite,
-                    profile=binding.profile,
-                )
-                return source.search(keyword)
+    ) -> Callable[[str], SourceSearchResult]:
+        def _search(keyword: str) -> SourceSearchResult:
+            # Browser APIs may require creation, use and cleanup on the same thread.
+            manager = DriverManager(self.presenter) if uses_driver else None
+            try:
+                if self.context._closed.is_set():
+                    raise SearchUnavailableError('搜索已取消')
+                if manager is not None and not manager.ensure_driver(binding.profile):
+                    raise SearchUnavailableError('浏览器驱动未就绪，请检查安装或源配置。')
+                if self.context._closed.is_set():
+                    raise SearchUnavailableError('搜索已取消')
+                with self.context.create_http_session() as http:
+                    source = binding.source_class(
+                        self.context.output_path,
+                        http,
+                        manager.current_driver if manager is not None else None,
+                        overwrite=self.overwrite,
+                        profile=binding.profile,
+                    )
+                    return source.search_with_diagnostics(keyword)
+            finally:
+                if manager is not None:
+                    manager.destroy()
 
         return _search
 
@@ -450,31 +534,11 @@ class Shell(cmd.Cmd):
                     search_func=self._build_search_func(binding, uses_driver),
                     uses_driver=uses_driver,
                     display_name=getattr(source_class, 'name', source_name),
+                    unavailable_reason=getattr(source_class, 'search_unavailable_reason', None),
                 )
             )
 
-            if source_name not in self.sources:
-                self.sources[source_name] = source_class(
-                    self.context.output_path,
-                    self.context.http,
-                    self.context.get_driver(binding.profile),
-                    overwrite=self.overwrite,
-                    profile=binding.profile,
-                )
         return tasks
-
-    def _filter_ready_search_tasks(self, tasks: list[SearchTask]) -> list[SearchTask]:
-        ready_tasks = []
-        skipped_sources = set()
-        for task in tasks:
-            if not task.uses_driver or self.context.ensure_driver(task.profile):
-                ready_tasks.append(task)
-            else:
-                skipped_sources.add(task.source_name)
-        if not skipped_sources:
-            return ready_tasks
-        self.presenter.warn(f'已跳过需要浏览器驱动的搜索源: {", ".join(sorted(skipped_sources))}')
-        return ready_tasks
 
     def _merge_search_outcomes(self, outcomes: list[SearchOutcome]) -> None:
         outcomes_by_source = {outcome.source_name: outcome for outcome in outcomes}
@@ -482,20 +546,20 @@ class Shell(cmd.Cmd):
             outcome = outcomes_by_source.get(source_name)
             if not outcome:
                 continue
-            if outcome.error_message:
-                self.presenter.error(f'在 {source_name} 中搜索失败: {outcome.error_message}')
             self.context.searched_results.extend(outcome.results)
 
-    def _print_search_table(self, keyword: str, search_duration: float) -> None:
+    def _print_search_table(self, keyword: str, search_duration: float, *, page: int = 1) -> None:
         source_display_names = {
-            source_name: getattr(source_obj, 'name', source_name)
-            for source_name, source_obj in self.sources.items()
+            source_name: getattr(binding.source_class, 'name', source_name)
+            for source_name, binding in self.source_bindings.items()
         }
         self.presenter.search_results(
             keyword,
             self.context.searched_results,
             source_display_names,
             search_duration,
+            page=page,
+            page_size=SEARCH_PAGE_SIZE if self.paginate_output else None,
         )
 
     def do_s(self, arg):
@@ -508,30 +572,53 @@ class Shell(cmd.Cmd):
 
         self.context.reset_comic()
         self.context.searched_results = []
-        tasks = self._filter_ready_search_tasks(self._build_search_tasks())
+        self.search_keyword = arg
+        self.search_duration = 0
+        self.search_outcomes = []
+        tasks = self._build_search_tasks()
         if not tasks:
             self.presenter.warn('没有可用于搜索的源，请检查源配置或浏览器驱动。')
             return
 
-        task_lookup = {task.source_name: task for task in tasks}
-        console_status = self.presenter.status('正在搜索...', spinner='dots')
+        console_status = self.presenter.status(f'正在搜索 0/{len(tasks)} 个源...', spinner='dots')
         search_start = time.perf_counter()
-        with console_status:
-            outcomes = _run_search_parallel(
-                tasks, arg, 10, self.search_driver_lock, max_workers=min(8, len(tasks))
+
+        def completed(outcome: SearchOutcome) -> None:
+            self.search_outcomes.append(outcome)
+            console_status.update(
+                self.presenter.search_progress(outcome, len(self.search_outcomes), len(tasks))
             )
 
-            for outcome in outcomes:
-                task = task_lookup.get(outcome.source_name)
-                if task:
-                    console_status.update(f'完成 {task.display_name} 搜索')
+        with console_status:
+            outcomes = _run_search_parallel(
+                tasks,
+                arg,
+                None,
+                self.search_driver_lock,
+                max_workers=min(8, len(tasks)),
+                on_complete=completed,
+            )
 
         search_duration = time.perf_counter() - search_start
+        self.search_duration = search_duration
+        outcome_map = {outcome.source_name: outcome for outcome in outcomes}
+        self.search_outcomes = [
+            outcome_map[name] for name in self.source_options if name in outcome_map
+        ]
         self._merge_search_outcomes(outcomes)
-        self.last_command_ok = any(outcome.error_message is None for outcome in outcomes)
+        self.presenter.search_report(self.search_outcomes)
+        self.last_command_ok = any(outcome.ok for outcome in outcomes)
+        if self.last_command_ok and any(not outcome.ok for outcome in outcomes):
+            self.presenter.warn('部分源未参与或未完成搜索，结果可能不完整，请查看上方说明。')
         if not self.last_command_ok:
-            self.presenter.error('所有搜索源均失败，请检查网络或使用 --debug 查看原因后重试。')
-            return
+            message = (
+                '没有源完成搜索'
+                if any(outcome.skipped for outcome in outcomes)
+                else '所有搜索源均失败'
+            )
+            self.presenter.error(f'{message}，请检查源状态或使用 --debug 查看原因后重试。')
+            if not self.context.searched_results:
+                return
         logger.info(
             '搜索完成: keyword={keyword}, sources={sources}, results={results}, duration={duration:.2f}s',
             keyword=arg,
@@ -601,7 +688,7 @@ class Shell(cmd.Cmd):
         return None
 
     def _print_comic_info(self, comic: Comic) -> None:
-        self.presenter.comic_info(comic)
+        self.presenter.comic_info(comic, paginate=self.paginate_output)
 
     def _print_chapter_tables(self, comic: Comic) -> None:
         for book_index, book in enumerate(comic.books):
@@ -776,6 +863,7 @@ class Context:
     """
 
     def __init__(self, presenter_or_console):
+        self._closed = threading.Event()
         self.output_path: str = ''
         '本机存储路径'
         self.http: requests.Session = self.create_http_session()
@@ -837,7 +925,13 @@ class Context:
     def ensure_driver(
         self, source_or_class: SourceProfile | ComicSource | type[ComicSource] | None = None
     ) -> bool:
-        return self.driver_manager.ensure_driver(source_or_class)
+        if self._closed.is_set():
+            return False
+        ready = self.driver_manager.ensure_driver(source_or_class)
+        if self._closed.is_set():
+            self.driver_manager.destroy()
+            return False
+        return ready
 
     def get_driver(
         self, source_or_class: SourceProfile | ComicSource | type[ComicSource] | None = None
@@ -885,6 +979,7 @@ class Context:
         return self.driver_manager._source_cloakbrowser_options(source_or_class)
 
     def destroy(self):
+        self._closed.set()
         self.driver_manager.destroy()
         self.http.close()
 

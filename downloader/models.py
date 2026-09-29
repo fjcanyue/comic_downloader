@@ -32,6 +32,34 @@ class Comic:
         self.books: list[ComicBook] = []
 
 
+@dataclass
+class SourceSearchResult:
+    comics: list[Comic]
+    error_message: str | None = None
+
+
+@dataclass
+class SearchOutcome:
+    source_name: str
+    results: list[Comic]
+    error_message: str | None
+    duration: float
+    skipped: bool = False
+    total_count: int = 0
+
+    @property
+    def ok(self) -> bool:
+        return not self.skipped and self.error_message is None
+
+    @property
+    def state(self) -> str:
+        if self.skipped:
+            return 'skipped'
+        if self.error_message:
+            return 'partial' if self.results else 'failed'
+        return 'success' if self.results else 'empty'
+
+
 @dataclass(frozen=True)
 class ImageDownloadFailure:
     index: int

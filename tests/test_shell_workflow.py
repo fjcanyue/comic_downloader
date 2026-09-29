@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import threading
+from dataclasses import replace
 from io import StringIO
 
 import main as main_module
 import pytest
 from rich.console import Console
 
+from downloader.browser.manager import DriverManager
 from downloader.comic import ComicSource
 from downloader.download.progress import NoopDownloadProgress
 from downloader.models import Comic, ComicBook, ComicVolume, VolumeDownloadResult
@@ -313,3 +316,196 @@ def test_retry_missing_source_preserves_job(shell):
     shell.onecmd(f'retry {job.id[:12]}')
     assert shell.last_command_ok is False
     assert shell.job_store.load(job.id).state == 'interrupted'
+
+
+def make_search_results(source, count):
+    results = []
+    for index in range(1, count + 1):
+        comic = Comic()
+        comic.name = f'{source.profile.source_name}-{index:03d}'
+        comic.url = f'{source.base_url}/{index}'
+        results.append(comic)
+    return results
+
+
+def test_search_pagination_keeps_all_results_and_original_selection_indices(shell, monkeypatch):
+    searches = []
+
+    def search(self, keyword):
+        searches.append(self.profile.source_name)
+        return make_search_results(self, 25)
+
+    monkeypatch.setattr(WorkflowSource, 'search', search)
+    shell.onecmd('s 漫画')
+    assert len(shell.context.searched_results) == 50
+    assert 'first-020' in shell.console.file.getvalue()
+    assert 'first-021' not in shell.console.file.getvalue()
+    shell.onecmd('results 2')
+    assert 'first-021' in shell.console.file.getvalue()
+    shell.onecmd('i 21')
+    assert shell.context.comic.url == 'https://first.test/21'
+    assert sorted(searches) == ['first', 'second']
+
+
+def test_long_chapter_pagination_preserves_download_range(shell):
+    shell.onecmd('i https://first.test/comic')
+    book = shell.context.comic.books[0]
+    book.vols = [ComicVolume(f'V{i:04d}', f'https://first.test/{i}') for i in range(1, 126)]
+    shell._print_comic_info(shell.context.comic)
+    assert 'V0060' in shell.console.file.getvalue()
+    assert 'V0061' not in shell.console.file.getvalue()
+    shell.onecmd('chapters 1 2')
+    assert 'V0061' in shell.console.file.getvalue()
+    assert 'V0120' in shell.console.file.getvalue()
+    assert 'V0121' not in shell.console.file.getvalue()
+    shell.onecmd('v 1 61 62')
+    assert shell.context.source.downloaded_urls == [
+        'https://first.test/61',
+        'https://first.test/62',
+    ]
+
+
+@pytest.mark.parametrize(
+    'command',
+    [
+        'results 0',
+        'results x',
+        'results 99',
+        'chapters',
+        'chapters 1 0',
+        'chapters 2',
+        'chapters 1 x',
+    ],
+)
+def test_invalid_page_does_not_clear_current_selection(shell, command):
+    shell.onecmd('s 漫画')
+    shell.onecmd('i 1')
+    comic = shell.context.comic
+    results = list(shell.context.searched_results)
+    assert not shell.onecmd(command)
+    assert shell.last_command_ok is False
+    assert shell.context.comic is comic
+    assert shell.context.searched_results == results
+
+
+def test_direct_search_command_prints_all_results_without_interactive_pagination(
+    shell, monkeypatch
+):
+    monkeypatch.setattr(
+        WorkflowSource, 'search', lambda self, keyword: make_search_results(self, 25)
+    )
+    assert main_module._run_command(shell, 'search', ['漫画']) == 0
+    assert 'first-025' in shell.console.file.getvalue()
+    assert 'second-025' in shell.console.file.getvalue()
+    assert '第 1/3 页' not in shell.console.file.getvalue()
+
+
+def test_direct_info_command_prints_all_chapters(shell, monkeypatch):
+    def info(self, url):
+        comic = Comic()
+        comic.url = url
+        comic.name = '漫画'
+        book = ComicBook()
+        book.name = '正篇'
+        book.vols = [ComicVolume(f'V{i:04d}', f'https://first.test/{i}') for i in range(1, 126)]
+        comic.books = [book]
+        return comic
+
+    monkeypatch.setattr(WorkflowSource, 'info', info)
+    assert main_module._run_command(shell, 'info', ['https://first.test/comic']) == 0
+    assert 'V0125' in shell.console.file.getvalue()
+
+
+def test_slow_browser_initialization_does_not_block_http_progress(shell, monkeypatch):
+    binding = shell.source_bindings['first']
+    shell.source_bindings['first'] = replace(
+        binding, profile=replace(binding.profile, search_requires_driver=True)
+    )
+    entered = threading.Event()
+    release = threading.Event()
+    updates = []
+
+    def ensure_driver(manager, profile):
+        entered.set()
+        assert release.wait(3), 'HTTP progress was blocked by browser initialization'
+        return True
+
+    def search(self, keyword):
+        if self.profile.source_name == 'second':
+            assert entered.wait(3)
+        return make_search_results(self, 1)
+
+    class Status:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def update(self, message):
+            updates.append(str(message))
+            if 'second' in str(message):
+                release.set()
+
+    monkeypatch.setattr(DriverManager, 'ensure_driver', ensure_driver)
+    monkeypatch.setattr(WorkflowSource, 'search', search)
+    monkeypatch.setattr(shell.presenter, 'status', lambda *a, **kw: Status())
+    shell.onecmd('s 漫画')
+    assert shell.last_command_ok is True
+    assert 'second' in updates[0]
+    assert [comic.source for comic in shell.context.searched_results] == ['first', 'second']
+
+
+@pytest.mark.parametrize('fail', [False, True])
+def test_search_browser_lifetime_stays_on_worker_thread(shell, monkeypatch, fail):
+    binding = shell.source_bindings['first']
+    shell.source_bindings['first'] = replace(
+        binding, profile=replace(binding.profile, search_requires_driver=True)
+    )
+    events = []
+
+    class Driver:
+        def quit(self):
+            events.append(('close', threading.get_ident()))
+
+    def init_driver(manager, profile):
+        events.append(('create', threading.get_ident()))
+        manager.current_driver = Driver()
+        return True
+
+    def search(source, keyword):
+        if source.driver is not None:
+            events.append(('search', threading.get_ident()))
+            if fail:
+                raise RuntimeError('search failure')
+        return []
+
+    monkeypatch.setattr(DriverManager, 'init_driver', init_driver)
+    monkeypatch.setattr(WorkflowSource, 'search', search)
+    shell.onecmd('s 漫画')
+    assert [action for action, _ in events] == ['create', 'search', 'close']
+    assert len({thread for _, thread in events}) == 1
+    assert events[0][1] != threading.get_ident()
+    assert shell.context.driver is None
+    assert shell.context.drivers == {}
+
+
+def test_known_unavailable_sources_are_reported_and_not_counted_as_success(shell, monkeypatch):
+    monkeypatch.setattr(WorkflowSource, 'search_unavailable_reason', '需要验证码')
+    monkeypatch.setattr(WorkflowSource, 'search', lambda *a: pytest.fail('should not search'))
+    shell.onecmd('s 漫画')
+    assert shell.last_command_ok is False
+    assert all(outcome.state == 'skipped' for outcome in shell.search_outcomes)
+    assert '需要验证码' in shell.console.file.getvalue()
+
+
+def test_partial_results_are_visible_even_when_no_source_fully_succeeds(shell, monkeypatch):
+    def partial(self, keyword):
+        self.search_error = '部分条目损坏'
+        return make_search_results(self, 1)
+
+    monkeypatch.setattr(WorkflowSource, 'search', partial)
+    assert main_module._run_command(shell, 'search', ['漫画']) == 1
+    assert len(shell.context.searched_results) == 2
+    assert 'first-001' in shell.console.file.getvalue()
+    assert '部分结果' in shell.console.file.getvalue()

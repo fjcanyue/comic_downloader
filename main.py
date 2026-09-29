@@ -188,6 +188,7 @@ def _validate_command(subcommand: str | None, args: list[str]) -> None:
 
 
 def _run_command(shell: Shell, subcommand: str | None, subcommand_args: list[str]) -> int:
+    shell.paginate_output = subcommand is None
     if subcommand == 'search':
         shell.do_s(' '.join(subcommand_args))
     elif subcommand == 'info':

@@ -59,6 +59,9 @@ PROXY_ENVIRONMENT_KEYS = (
 
 
 class HtmlParsingMixin:
+    last_parse_error: str | None = None
+    last_page_load_result: PageLoadResult | None = None
+
     def parse_xpath_list(self, root, xpath, extract_map):
         """通用XPath列表解析方法
 
@@ -75,6 +78,7 @@ class HtmlParsingMixin:
             nodes = root.xpath(xpath)
             results.extend(self._extract_xpath_item(node, extract_map) for node in nodes)
         except Exception as e:
+            self.last_parse_error = f'XPath 解析失败: {e}'
             self.logger.error('XPath解析失败: {xpath}, 错误: {error}', xpath=xpath, error=e)
         return results
 
@@ -109,6 +113,7 @@ class HtmlParsingMixin:
                 else text_node
             )
         except Exception as e:
+            self.last_parse_error = f'字段 {key} 解析失败: {e}'
             self.logger.debug('提取 {key} 时出错: {error}', key=key, error=e)
             return None
 
@@ -126,10 +131,12 @@ class HtmlParsingMixin:
         try:
             # 简单验证JS代码，避免明显注入
             if not js_code or 'eval(' in js_code:
+                self.last_parse_error = '搜索脚本不可执行'
                 self.logger.warning('潜在不安全JS代码: {js_code}', js_code=js_code)
                 return fallback
             return driver.execute_script(js_code)
         except Exception as e:
+            self.last_parse_error = f'脚本执行失败: {e}'
             self.logger.error('JS执行失败: {js_code}, 错误: {error}', js_code=js_code, error=e)
             return fallback
 
@@ -659,6 +666,7 @@ class HtmlParsingMixin:
 
         options = self._resolve_html_parse_options(method, data, encoding)
         if options is None:
+            self.last_page_load_result = PageLoadResult(failure_reason='无效的页面加载参数')
             return None
 
         request = PageLoadRequest(
@@ -673,7 +681,14 @@ class HtmlParsingMixin:
             wait_seconds=self._browser_wait_seconds(),
             diagnostics_dir=Path(self.output_dir or '.') / SELENIUMBASE_DIAGNOSTIC_DIR,
         )
-        result = self._load_page_for_legacy_parse_html(request)
+        try:
+            result = self._load_page_for_legacy_parse_html(request)
+        except Exception as exc:
+            self.last_page_load_result = PageLoadResult(
+                failure_reason='page_load_failed',
+                error_message=str(exc) or type(exc).__name__,
+            )
+            raise
         self.last_page_load_result = result
         return result.root if result.ok else None
 

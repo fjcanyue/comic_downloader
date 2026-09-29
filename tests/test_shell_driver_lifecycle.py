@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from io import StringIO
 from typing import Any, cast
 
@@ -292,3 +293,41 @@ def test_context_destroy_suppresses_driver_cleanup_interrupt():
     assert driver.quit_calls == 1
     assert context.driver is None
     assert context.drivers == {}
+
+
+def test_context_closes_driver_initialized_after_shutdown(monkeypatch, tmp_path):
+    started = threading.Event()
+    release = threading.Event()
+    ready = []
+
+    class LateDriver:
+        quit_calls = 0
+
+        def quit(self):
+            self.quit_calls += 1
+
+    driver = LateDriver()
+
+    def delayed_init(manager, source_or_class=None):
+        started.set()
+        assert release.wait(5)
+        manager.current_driver = driver
+        return True
+
+    monkeypatch.setattr(DriverManager, 'init_driver', delayed_init)
+    context = Context(quiet_console())
+    context.create(str(tmp_path))
+    worker = threading.Thread(target=lambda: ready.append(context.ensure_driver()))
+    worker.start()
+    try:
+        assert started.wait(5)
+        context.destroy()
+    finally:
+        release.set()
+        worker.join(5)
+
+    assert not worker.is_alive()
+    assert ready == [False]
+    assert driver.quit_calls == 1
+    assert context.drivers == {}
+    assert context.ensure_driver() is False

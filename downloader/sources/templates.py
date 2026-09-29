@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin
 
 from loguru import logger
 from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
@@ -56,7 +56,9 @@ class ConfigurableSearchMixin(SourceUrlMixin):
     def _build_search_url(self, keyword: str) -> str:
         if not self.search_url_template:
             raise RuntimeError(f'{type(self).__name__} must define search_url_template')
-        return self.search_url_template.format(base_url=self.base_url, keyword=keyword)
+        return self.search_url_template.format(
+            base_url=self.base_url, keyword=quote(keyword, safe='')
+        )
 
     def _search_root(self, root):
         if not self.search_root_xpath:
@@ -83,11 +85,13 @@ class ConfigurableSearchMixin(SourceUrlMixin):
         try:
             root = self._parse_html_with_encoding(search_url, self.search_encoding)
             if root is None:
+                self.search_error = '无法获取或解析搜索页面'
                 logger.error("Search '{}' failed, could not parse page: {}", keyword, search_url)
                 return results
 
             main = self._search_root(root)
             if main is None:
+                self.search_error = '未找到搜索内容区域，页面结构可能已变化'
                 logger.info(
                     "No main search content found on {} for '{}'",
                     self.name,
@@ -106,6 +110,7 @@ class ConfigurableSearchMixin(SourceUrlMixin):
                 if comic is not None:
                     results.append(comic)
         except Exception as e:
+            self.search_error = str(e) or type(e).__name__
             logger.error(
                 "Error while searching {} for '{}': {}",
                 self.name,
@@ -121,6 +126,7 @@ class ConfigurableSearchMixin(SourceUrlMixin):
         url_part = item.get('url')
         comic_url = self.absolute_url(url_part)
         if not comic_url:
+            self.search_error = '部分搜索条目缺少漫画地址，已保留其余有效结果'
             logger.warning('Parsed comic item without URL, skipped')
             return None
 

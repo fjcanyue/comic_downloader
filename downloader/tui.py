@@ -9,7 +9,7 @@ from rich.table import Table
 from rich.text import Text
 
 from downloader.download.jobs import DownloadJob
-from downloader.models import Comic, DownloadSummary, VolumeDownloadResult
+from downloader.models import Comic, DownloadSummary, SearchOutcome, VolumeDownloadResult
 from downloader.sources.profiles import SourceBinding
 
 # ---------------------------------------------------------------------------
@@ -31,6 +31,15 @@ MAX_FAILURE_DETAIL_ROWS = 5
 MAX_URL_DISPLAY_WIDTH = 50
 COMPACT_SEARCH_WIDTH = 80
 COMPACT_TASK_WIDTH = 60
+SEARCH_PAGE_SIZE = 20
+CHAPTER_PAGE_SIZE = 60
+SEARCH_STATE_LABELS = {
+    'success': '有结果',
+    'empty': '未检出',
+    'failed': '失败',
+    'partial': '部分结果',
+    'skipped': '跳过',
+}
 
 
 class TerminalPresenter:
@@ -87,6 +96,8 @@ class TerminalPresenter:
             '[bold]命令速查[/]\n'
             f'  [{ACCENT}]s[/]  <关键词>       从所有源搜索动漫\n'
             f'  [{ACCENT}]i[/]  <序号/URL>     查看动漫详情\n'
+            f'  [{ACCENT}]results[/] [页码]     翻看搜索结果，序号保持不变\n'
+            f'  [{ACCENT}]chapters[/] <分组> [页码] 翻看章节，例如 chapters 1 2\n'
             f'  [{ACCENT}]d[/]  [序号/URL]     全量下载；不填则下载当前漫画\n'
             f'  [{ACCENT}]v[/]  <分组> [范围]  如 v 1 5 10，下载第 5～10 话\n'
             f'  [{ACCENT}]source[/] [源名/序号] 切换下载源；搜索仍使用所有启用源\n'
@@ -133,6 +144,8 @@ class TerminalPresenter:
                 binding = bindings[source_name]
                 driver = '需要浏览器' if binding.profile.uses_driver_for_download() else 'HTTP 下载'
                 detail = f' · {getattr(binding.source_class, "name", source_name)} · {driver}'
+                if getattr(binding.source_class, 'search_unavailable_reason', None):
+                    detail += ' · 仅支持 URL'
             selected = ' ← 当前' if source_name == current_source else ''
             lines.append(Text(f'  {index + 1:>2}. {source_name}{detail}{selected}'))
         self.print(
@@ -220,12 +233,49 @@ class TerminalPresenter:
     # ------------------------------------------------------------------
     # 搜索结果
     # ------------------------------------------------------------------
-    def search_results(
+    @staticmethod
+    def search_progress(outcome: SearchOutcome, completed: int, total: int) -> Text:
+        return Text(
+            f'搜索 {completed}/{total} · {outcome.source_name} '
+            f'{SEARCH_STATE_LABELS[outcome.state]} · {len(outcome.results)} 条 · {outcome.duration:.1f}s'
+        )
+
+    def search_report(self, outcomes: list[SearchOutcome]) -> None:
+        table = Table(title='本次搜索源状态', header_style=f'bold {ACCENT}', border_style=MUTED)
+        compact = self.console.width < COMPACT_SEARCH_WIDTH
+        titles = (
+            ('源', '状态', '结果', '耗时') if compact else ('源', '状态', '结果', '耗时', '说明')
+        )
+        for title in titles:
+            table.add_column(title, overflow='fold')
+        for outcome in outcomes:
+            note = outcome.error_message or ''
+            cells = [
+                Text(outcome.source_name),
+                Text(SEARCH_STATE_LABELS[outcome.state], style=SUCCESS if outcome.ok else WARN),
+                Text(str(len(outcome.results))),
+                Text(f'{outcome.duration:.1f}s'),
+            ]
+            if not compact:
+                cells.append(Text(note))
+            table.add_row(*cells)
+        self.print(table)
+        if compact:
+            for outcome in outcomes:
+                if outcome.error_message:
+                    self.warn(f'{outcome.source_name}: {outcome.error_message}')
+        if any(outcome.state == 'empty' for outcome in outcomes):
+            self.info('未检出：本次没有找到条目；若预期有结果，可重试或改用漫画 URL。')
+
+    def search_results(  # noqa: PLR0913 - presentation data plus optional pagination
         self,
         keyword: str,
         comics: list[Comic],
         source_display_names: dict[str | None, str],
         duration: float,
+        *,
+        page: int = 1,
+        page_size: int | None = SEARCH_PAGE_SIZE,
     ) -> None:
         if not comics:
             self.warn(f'未找到与 "{keyword}" 相关的结果。')
@@ -247,7 +297,9 @@ class TerminalPresenter:
         if not compact:
             table.add_column('URL', overflow='fold', style=MUTED)
 
-        for index, comic in enumerate(comics):
+        size = page_size or len(comics)
+        start = (page - 1) * size
+        for index, comic in enumerate(comics[start : start + size], start=start):
             cells = [
                 Text(str(index + 1)),
                 Text(source_display_names.get(comic.source, comic.source or 'N/A')),
@@ -261,6 +313,9 @@ class TerminalPresenter:
 
         footer = f'共 [{ACCENT}]{len(comics)}[/] 条结果，用时 [{ACCENT}]{duration:.1f}s[/]'
         self.print(Group(table, Text(''), footer))
+        pages = max(1, (len(comics) + size - 1) // size)
+        if pages > 1:
+            self.info(f'第 {page}/{pages} 页；results <页码> 翻页。i / d 使用表中原序号。')
         if compact:
             self.info('窄屏模式：使用 i <序号> 查看作者和完整 URL。')
         self.info('下一步：i <序号> 查看分组；d <序号> 全量下载。')
@@ -268,7 +323,7 @@ class TerminalPresenter:
     # ------------------------------------------------------------------
     # 动漫详情
     # ------------------------------------------------------------------
-    def comic_info(self, comic: Comic) -> None:
+    def comic_info(self, comic: Comic, *, paginate: bool = True) -> None:
         self.print(Rule(style=ACCENT))
         header_parts = [Text(comic.name or '未知漫画', style=f'bold {ACCENT}')]
         if comic.author:
@@ -286,13 +341,34 @@ class TerminalPresenter:
         self.print(Panel(Group(*body_lines), border_style=ACCENT, padding=(0, 1)))
 
         for book_index, book in enumerate(comic.books):
-            self.print(self.chapter_table(book_index, book))
+            if paginate:
+                self.chapter_page(book_index, book)
+            else:
+                self.print(self.chapter_table(book_index, book))
         if not any(book.vols for book in comic.books):
             self.warn('未找到可下载章节，可稍后重试详情或更换源。')
         else:
             self.info('下一步：v <分组> [截止] 或 v <分组> <起始> <截止>；d 下载全部。')
 
-    def chapter_table(self, book_index: int, book) -> Table:
+    def chapter_page(self, book_index: int, book, page: int = 1) -> None:
+        pages = max(1, (len(book.vols) + CHAPTER_PAGE_SIZE - 1) // CHAPTER_PAGE_SIZE)
+        self.print(
+            self.chapter_table(
+                book_index,
+                book,
+                start=(page - 1) * CHAPTER_PAGE_SIZE,
+                limit=CHAPTER_PAGE_SIZE,
+            )
+        )
+        if pages > 1:
+            self.info(
+                f'分组 {book_index + 1} · 第 {page}/{pages} 页；'
+                f'chapters {book_index + 1} <页码> 翻页，v 使用原话序号。'
+            )
+
+    def chapter_table(
+        self, book_index: int, book, *, start: int = 0, limit: int | None = None
+    ) -> Table:
         table = Table(
             title=Text(f'分组 {book_index + 1}: {book.name or "默认章节"}（{len(book.vols)} 话）'),
             show_header=False,
@@ -308,7 +384,8 @@ class TerminalPresenter:
             table.add_column('Name', overflow='fold')
 
         row_buffer = []
-        for index, vol in enumerate(book.vols):
+        stop = None if limit is None else start + limit
+        for index, vol in enumerate(book.vols[start:stop], start=start):
             row_buffer.extend([Text(str(index + 1)), Text(vol.name)])
             if len(row_buffer) == columns * 2:
                 table.add_row(*row_buffer)

@@ -36,6 +36,7 @@ class DumanwuComic(ComicSource):
         try:
             root = self.__parse_html__(search_url, 'POST', {'k': keyword})
             if root is None:
+                self.search_error = '无法获取或解析搜索页面'
                 self.logger.error(
                     "搜索 '{keyword}' 失败，无法获取或解析页面: {search_url}",
                     keyword=keyword,
@@ -44,6 +45,7 @@ class DumanwuComic(ComicSource):
                 return arr
             main_nodes = root.xpath('//div[contains(@class,"view-item")]')
             if not main_nodes:
+                self.search_error = '未找到搜索内容区域，页面结构可能已变化'
                 self.logger.info(
                     "在 {source_name} 搜索 '{keyword}' 时未找到主要内容区域，可能无结果或页面结构变更.",
                     source_name=self.name,
@@ -57,7 +59,8 @@ class DumanwuComic(ComicSource):
                 self.logger.info('共 {result_text} 条相关的结果', result_text=result_text)
             else:
                 self.logger.info('未找到结果数量信息.')
-        except Exception:
+        except Exception as e:
+            self.search_error = str(e) or type(e).__name__
             self.logger.exception(
                 '在 {source_name} 搜索 "{keyword}" 过程中发生错误',
                 source_name=self.name,
@@ -66,11 +69,12 @@ class DumanwuComic(ComicSource):
             return arr
         book_list = main.xpath('//div[@class="itemnar"]')
         for book in book_list:
-            b = book.xpath('p/a')[0]
-            comic = Comic()
             try:
+                b = book.xpath('p/a')[0]
+                comic = Comic()
                 url_part = b.attrib.get('href')
                 if not url_part:
+                    self.search_error = '部分搜索条目缺少漫画地址，已保留其余有效结果'
                     self.logger.warning('解析到一个没有URL的漫画条目，已跳过。')
                     continue
                 comic.url = f'{self.base_url}{url_part}'
@@ -85,6 +89,7 @@ class DumanwuComic(ComicSource):
                 )
                 arr.append(comic)
             except Exception as e:
+                self.search_error = f'部分搜索条目解析失败: {e}'
                 self.logger.exception('解析漫画条目时出错: {ex}', ex=e)
                 continue
         self.logger.info(

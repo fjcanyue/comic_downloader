@@ -12,9 +12,30 @@ from downloader.models import (
     ComicVolume,
     DownloadSummary,
     ImageDownloadFailure,
+    SearchOutcome,
     VolumeDownloadResult,
 )
 from downloader.tui import TerminalPresenter
+
+
+@pytest.mark.parametrize('width', [40, 80, 120])
+def test_search_report_keeps_error_literal_and_explains_empty_results(width):
+    output = StringIO()
+    presenter = TerminalPresenter(Console(file=output, width=width, color_system=None))
+    presenter.search_report(
+        [
+            SearchOutcome('broken', [], '[red]HTTP 500[/]', 1.2),
+            SearchOutcome('empty', [], None, 0.2),
+            SearchOutcome('captcha', [], '使用 URL', 0, skipped=True),
+        ]
+    )
+    rendered = output.getvalue()
+    assert 'broken' in rendered
+    assert '[red]HTTP 500[/]' in rendered
+    assert '未检出' in rendered
+    assert '跳过' in rendered
+    assert '使用 URL' in rendered
+    assert '可重试或改用漫画URL' in ''.join(rendered.split())
 
 
 @pytest.mark.parametrize('width', [40, 80, 120])

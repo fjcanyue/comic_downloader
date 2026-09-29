@@ -75,11 +75,12 @@ class ManhuafreeComic(ComicSource):
 
     def search(self, keyword):
         logger.info('开始在 {} 搜索: {}', self.name, keyword)
-        search_url = f'{self.base_url}/s/{quote(keyword)}'
+        search_url = f'{self.base_url}/s/{quote(keyword, safe="")}'
         arr = []
         try:
             root = self.__parse_html__(search_url)
             if root is None:
+                self.search_error = '无法获取或解析搜索页面'
                 logger.error("搜索 '{}' 失败，无法获取或解析页面: {}", keyword, search_url)
                 return arr
 
@@ -99,6 +100,7 @@ class ManhuafreeComic(ComicSource):
                 if comic:
                     arr.append(comic)
         except Exception as e:
+            self.search_error = str(e) or type(e).__name__
             logger.error("在 {} 搜索 '{}' 期间发生错误: {}", self.name, keyword, e, exc_info=True)
             return arr
         logger.info("{} 搜索 '{}' 完成, 共找到 {} 条结果.", self.name, keyword, len(arr))
@@ -109,6 +111,7 @@ class ManhuafreeComic(ComicSource):
         try:
             url_part = item.get('url')
             if not url_part:
+                self.search_error = '部分搜索条目缺少漫画地址，已保留其余有效结果'
                 logger.warning('解析到一个没有URL的漫画条目，已跳过。')
                 return None
             comic = Comic()
@@ -119,6 +122,7 @@ class ManhuafreeComic(ComicSource):
             logger.debug('找到漫画: {}, URL: {}', comic.name, comic.url)
             return comic
         except Exception as e:
+            self.search_error = f'部分搜索条目解析失败: {e}'
             logger.error('解析漫画条目时出错: {}, 错误: {}', item, e, exc_info=True)
             return None
 

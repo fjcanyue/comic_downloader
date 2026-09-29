@@ -25,6 +25,8 @@ class ManhuazhanComic(GroupedChapterInfoMixin, JsDictImageSourceMixin, ComicSour
         logger.info('跳过 {} 搜索: {}', self.name, keyword)
         return []
 
+    search_unavailable_reason = '该源的搜索需要验证码，请使用 i <完整漫画URL> 查看详情。'
+
     def _append_metadata(self, root, comic):
         meta_table = root.xpath(self.config['info_meta_xpath'])
         try:
