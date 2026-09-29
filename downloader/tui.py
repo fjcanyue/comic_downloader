@@ -3,13 +3,13 @@ from __future__ import annotations
 from typing import Any
 
 from rich.console import Console, Group
-from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
 
 from downloader.models import Comic, DownloadSummary, VolumeDownloadResult
+from downloader.sources.profiles import SourceBinding
 
 # ---------------------------------------------------------------------------
 # 主题配色：集中管理，避免裸色字符串散落各处。
@@ -28,6 +28,7 @@ MUTED = 'dim'
 BRAND = '动漫下载器'
 MAX_FAILURE_DETAIL_ROWS = 5
 MAX_URL_DISPLAY_WIDTH = 50
+COMPACT_SEARCH_WIDTH = 80
 
 
 class TerminalPresenter:
@@ -47,16 +48,16 @@ class TerminalPresenter:
     # 语义化提示：调用方只传语义，不传样式
     # ------------------------------------------------------------------
     def info(self, message: Any) -> None:
-        self.print(message)
+        self.print(Text(str(message)))
 
     def success(self, message: Any) -> None:
-        self.print(f'[bold {SUCCESS}]✔ {message}')
+        self.print(Text(f'✔ {message}', style=f'bold {SUCCESS}'))
 
     def warn(self, message: Any) -> None:
-        self.print(f'[bold {WARN}]⚠ {message}')
+        self.print(Text(f'⚠ {message}', style=f'bold {WARN}'))
 
     def error(self, message: Any) -> None:
-        self.print(f'[bold {ERROR}]✖ {message}')
+        self.print(Text(f'✖ {message}', style=f'bold {ERROR}'))
 
     # ------------------------------------------------------------------
     # 提示符与路径
@@ -69,7 +70,7 @@ class TerminalPresenter:
     def output_path(self, path: str) -> None:
         self.print(
             Panel.fit(
-                f'本机存储路径  [{ACCENT}]{path}',
+                Text(f'本机存储路径  {path}', style=ACCENT),
                 border_style=MUTED,
                 padding=(0, 1),
             )
@@ -84,15 +85,18 @@ class TerminalPresenter:
             '[bold]命令速查[/]\n'
             f'  [{ACCENT}]s[/]  <关键词>       从所有源搜索动漫\n'
             f'  [{ACCENT}]i[/]  <序号/URL>     查看动漫详情\n'
-            f'  [{ACCENT}]d[/]  <序号/URL>     全量下载动漫\n'
-            f'  [{ACCENT}]v[/]  <章节> [范围]  按范围下载章节\n'
-            f'  [{ACCENT}]source[/]            手动切换下载源\n'
+            f'  [{ACCENT}]d[/]  [序号/URL]     全量下载；不填则下载当前漫画\n'
+            f'  [{ACCENT}]v[/]  <分组> [范围]  如 v 1 5 10，下载第 5～10 话\n'
+            f'  [{ACCENT}]source[/] [源名/序号] 切换下载源；搜索仍使用所有启用源\n'
+            f'  [{ACCENT}]status[/]            查看当前漫画、路径和覆盖模式\n'
+            f'  [{ACCENT}]help[/] [命令]       查看用法，例如 help v\n'
             f'  [{ACCENT}]q[/]                 退出'
         )
         body_lines = [commands]
         if source_names:
-            joined = f'  · '.join(source_names)
+            joined = '  · '.join(source_names)
             body_lines.append(f'\n[{MUTED}]支持源: {joined}')
+        body_lines.append('\n流程：s 关键词 → i 1 → v 1 5 10 或 d。所有序号从 1 开始。')
 
         self.print(
             Panel(
@@ -112,13 +116,24 @@ class TerminalPresenter:
     # ------------------------------------------------------------------
     # 源选择
     # ------------------------------------------------------------------
-    def source_options(self, source_names: list[str]) -> None:
+    def source_options(
+        self,
+        source_names: list[str],
+        bindings: dict[str, SourceBinding] | None = None,
+        current_source: str | None = None,
+    ) -> None:
         lines = []
         for index, source_name in enumerate(source_names):
-            lines.append(f'  [{ACCENT}]{index + 1:>2}.[/] {source_name}')
+            detail = ''
+            if bindings and source_name in bindings:
+                binding = bindings[source_name]
+                driver = '需要浏览器' if binding.profile.uses_driver_for_download() else 'HTTP 下载'
+                detail = f' · {getattr(binding.source_class, "name", source_name)} · {driver}'
+            selected = ' ← 当前' if source_name == current_source else ''
+            lines.append(Text(f'  {index + 1:>2}. {source_name}{detail}{selected}'))
         self.print(
             Panel(
-                Group('请选择动漫下载网站源:', Text(''), *lines),
+                Group('请选择动漫下载网站源（回车 / q 取消）:', Text(''), *lines),
                 border_style=ACCENT,
                 padding=(0, 1),
             )
@@ -126,6 +141,23 @@ class TerminalPresenter:
 
     def source_switching(self, source_name: str) -> None:
         self.print(f'[{ACCENT}]⟳[/] 正在切换到 [bold]{source_name}[/] 动漫下载源...')
+
+    def session_status(
+        self,
+        path: str,
+        source: str | None,
+        comic: Comic | None,
+        result_count: int,
+        overwrite: bool,
+    ) -> None:
+        rows = [
+            f'保存路径：{path}',
+            f'当前源：{source or "未选择（查看详情时自动匹配）"}',
+            f'当前漫画：{comic.name if comic else "未加载，请使用 i <序号/URL>"}',
+            f'搜索结果：{result_count} 条；s 始终搜索所有启用源',
+            f'文件策略：{"覆盖已有文件" if overwrite else "跳过已有压缩包，复用已下载图片"}',
+        ]
+        self.print(Panel(Text('\n'.join(rows)), title='当前状态', border_style=ACCENT))
 
     # ------------------------------------------------------------------
     # 搜索结果
@@ -141,7 +173,7 @@ class TerminalPresenter:
             self.warn(f'未找到与 "{keyword}" 相关的结果。')
             return
 
-        self.print(Rule(f'搜索结果 · [bold]{keyword}[/]', style=ACCENT))
+        self.print(Rule(Text(f'搜索结果 · {keyword}', style='bold'), style=ACCENT))
         table = Table(
             show_header=True,
             header_style=f'bold {ACCENT}',
@@ -150,21 +182,30 @@ class TerminalPresenter:
         )
         table.add_column('序号', justify='right', no_wrap=True, style=ACCENT)
         table.add_column('动漫源')
-        table.add_column('作者')
-        table.add_column('名称')
-        table.add_column('URL', overflow='fold', style=MUTED)
+        compact = self.console.width < COMPACT_SEARCH_WIDTH
+        if not compact:
+            table.add_column('作者')
+        table.add_column('名称', overflow='fold')
+        if not compact:
+            table.add_column('URL', overflow='fold', style=MUTED)
 
         for index, comic in enumerate(comics):
-            table.add_row(
-                str(index + 1),
-                source_display_names.get(comic.source, comic.source or 'N/A'),
-                comic.author or '[未提供]',
-                comic.name or '[未提供]',
-                comic.url or 'N/A',
-            )
+            cells = [
+                Text(str(index + 1)),
+                Text(source_display_names.get(comic.source, comic.source or 'N/A')),
+            ]
+            if not compact:
+                cells.append(Text(comic.author or '[未提供]'))
+            cells.append(Text(comic.name or '[未提供]'))
+            if not compact:
+                cells.append(Text(comic.url or 'N/A'))
+            table.add_row(*cells)
 
         footer = f'共 [{ACCENT}]{len(comics)}[/] 条结果，用时 [{ACCENT}]{duration:.1f}s[/]'
         self.print(Group(table, Text(''), footer))
+        if compact:
+            self.info('窄屏模式：使用 i <序号> 查看作者和完整 URL。')
+        self.info('下一步：i <序号> 查看分组；d <序号> 全量下载。')
 
     # ------------------------------------------------------------------
     # 动漫详情
@@ -176,44 +217,48 @@ class TerminalPresenter:
             header_parts.append(Text(f'  作者: {comic.author}', style=MUTED))
         if comic.source:
             header_parts.append(Text(f'  源: {comic.source}', style=MUTED))
+        if comic.url:
+            header_parts.append(Text(f'  URL: {comic.url}', style=MUTED))
 
         body_lines: list[Any] = [Group(*header_parts)]
         if comic.metadata:
-            md_lines = ['## 详情', '']
-            for meta in comic.metadata:
-                md_lines.append(f'- **{meta["k"]}**: {meta["v"]}')
             body_lines.append(Text(''))
-            body_lines.append(Markdown('\n'.join(md_lines)))
+            body_lines.extend(Text(f'{meta["k"]}: {meta["v"]}') for meta in comic.metadata)
 
         self.print(Panel(Group(*body_lines), border_style=ACCENT, padding=(0, 1)))
 
         for book_index, book in enumerate(comic.books):
             self.print(self.chapter_table(book_index, book))
+        if not any(book.vols for book in comic.books):
+            self.warn('未找到可下载章节，可稍后重试详情或更换源。')
+        else:
+            self.info('下一步：v <分组> [截止] 或 v <分组> <起始> <截止>；d 下载全部。')
 
     def chapter_table(self, book_index: int, book) -> Table:
         table = Table(
-            title=f'[{ACCENT}]{book_index + 1}[/]: {book.name}',
+            title=Text(f'分组 {book_index + 1}: {book.name or "默认章节"}（{len(book.vols)} 话）'),
             show_header=False,
             box=None,
-            padding=(0, 2),
+            expand=True,
+            padding=(0, 1),
             title_style='bold',
         )
 
-        columns = 3
+        columns = max(1, min(3, self.console.width // 32))
         for _ in range(columns):
             table.add_column('Index', justify='right', style=ACCENT)
-            table.add_column('Name', style='white')
+            table.add_column('Name', overflow='fold')
 
         row_buffer = []
         for index, vol in enumerate(book.vols):
-            row_buffer.extend([str(index + 1), vol.name])
+            row_buffer.extend([Text(str(index + 1)), Text(vol.name)])
             if len(row_buffer) == columns * 2:
                 table.add_row(*row_buffer)
                 row_buffer = []
 
         if row_buffer:
             while len(row_buffer) < columns * 2:
-                row_buffer.extend(['', ''])
+                row_buffer.extend([Text(''), Text('')])
             table.add_row(*row_buffer)
 
         return table
@@ -267,16 +312,15 @@ class TerminalPresenter:
                 imgs = '-'
 
             note = self._volume_note(result)
-            detail.add_row(result.name, badge, imgs, note)
+            detail.add_row(Text(result.name), badge, imgs, Text(note))
 
             if result.failed_images and shown_failures < MAX_FAILURE_DETAIL_ROWS:
                 for img in result.failed_images[: MAX_FAILURE_DETAIL_ROWS - shown_failures]:
-                    detail.add_row(
-                        '', '', '', f'[{MUTED}]第 {img.index} 张: {img.error}[/]'
-                    )
+                    detail.add_row('', '', '', Text(f'第 {img.index} 张: {img.error}', style=MUTED))
                     shown_failures += 1
 
         self.print(detail)
+        self.info('重试：重新执行同一下载命令；默认复用已下载图片并跳过已有压缩包。')
 
     @staticmethod
     def _volume_note(result: VolumeDownloadResult) -> str:

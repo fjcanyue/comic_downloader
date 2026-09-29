@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from io import StringIO
 
+import pytest
 from rich.console import Console
 
 from downloader.models import (
@@ -13,6 +14,58 @@ from downloader.models import (
     VolumeDownloadResult,
 )
 from downloader.tui import TerminalPresenter
+
+
+def test_external_text_is_rendered_literally():
+    presenter, output = presenter_with_output()
+    comic = Comic()
+    comic.name = '[red]漫画[/red]'
+    comic.author = '作者[/]'
+    presenter.search_results('[bold]关键词[/bold]', [comic], {}, 0.1)
+    presenter.output_path('D:/[red]漫画[/red]')
+    presenter.error('网络[/]错误')
+    rendered = output.getvalue()
+    assert '[red]漫画[/red]' in rendered
+    assert '[bold]关键词[/bold]' in rendered
+    assert '作者[/]' in rendered
+    assert 'D:/[red]漫画[/red]' in rendered
+    assert '网络[/]错误' in rendered
+
+
+def test_narrow_search_keeps_selection_readable_and_details_expose_url():
+    output = StringIO()
+    presenter = TerminalPresenter(Console(file=output, width=40, color_system=None))
+    comic = Comic()
+    comic.name = '漫画名'
+    comic.author = '作者名'
+    comic.source = 'test'
+    comic.url = 'https://example.test/comic'
+    presenter.search_results('漫画', [comic], {'test': '测试源'}, 0.1)
+    rendered = output.getvalue()
+    assert '漫画名' in rendered
+    assert '测试源' in rendered
+    assert '窄屏模式' in rendered
+    assert comic.url not in rendered
+    presenter.comic_info(comic)
+    assert comic.url in output.getvalue()
+    assert comic.author in output.getvalue()
+
+
+@pytest.mark.parametrize('width, expected_columns', [(40, 2), (80, 4), (120, 6)])
+def test_chapter_table_adapts_to_terminal_width(width, expected_columns):
+    output = StringIO()
+    presenter = TerminalPresenter(Console(file=output, width=width, color_system=None))
+    book = ComicBook()
+    book.name = '[正篇]'
+    book.vols = [ComicVolume(f'第{i}话', 'url') for i in range(1, 8)]
+    table = presenter.chapter_table(0, book)
+    presenter.print(table)
+    assert len(table.columns) == expected_columns
+    rendered = output.getvalue()
+    assert '7 话' in rendered
+    assert '[正篇]' in rendered
+    for i in range(1, 8):
+        assert f'第{i}话' in rendered
 
 
 def presenter_with_output() -> tuple[TerminalPresenter, StringIO]:
@@ -137,9 +190,7 @@ def test_download_summary_renders_success_counts_for_clean_run():
     summary.add(
         VolumeDownloadResult(name='第1话', url='https://example.test/1', status='downloaded')
     )
-    summary.add(
-        VolumeDownloadResult(name='第2话', url='https://example.test/2', status='skipped')
-    )
+    summary.add(VolumeDownloadResult(name='第2话', url='https://example.test/2', status='skipped'))
 
     presenter.download_summary(summary)
 
@@ -155,25 +206,37 @@ def test_download_summary_renders_detail_table_with_badges_when_failures_exist()
     summary = DownloadSummary()
     summary.add(
         VolumeDownloadResult(
-            name='第1话', url='https://example.test/1', status='downloaded',
-            image_count=10, downloaded_count=10,
+            name='第1话',
+            url='https://example.test/1',
+            status='downloaded',
+            image_count=10,
+            downloaded_count=10,
         )
     )
     summary.add(
         VolumeDownloadResult(
-            name='第2话', url='https://example.test/2', status='skipped',
-            archive_path='/tmp/第2话.zip',
+            name='第2话',
+            url='https://example.test/2',
+            status='skipped',
+            archive_path='/downloads/第2话.zip',
         )
     )
     summary.add(
         VolumeDownloadResult(
-            name='第3话', url='https://example.test/3', status='failed', image_count=8,
-            downloaded_count=0, message='未解析到任何图片',
+            name='第3话',
+            url='https://example.test/3',
+            status='failed',
+            image_count=8,
+            downloaded_count=0,
+            message='未解析到任何图片',
         )
     )
     summary.add(
         VolumeDownloadResult(
-            name='第4话', url='https://example.test/4', status='partial', image_count=5,
+            name='第4话',
+            url='https://example.test/4',
+            status='partial',
+            image_count=5,
             downloaded_count=3,
             failed_images=[ImageDownloadFailure(index=4, url='u', file_path='p', error='超时')],
         )
@@ -294,6 +357,6 @@ def test_source_options_renders_indexed_list_in_panel():
 def test_output_path_renders_path_in_panel():
     presenter, output = presenter_with_output()
 
-    presenter.output_path('/tmp/comics')
+    presenter.output_path('/downloads/comics')
 
-    assert '/tmp/comics' in output.getvalue()
+    assert '/downloads/comics' in output.getvalue()

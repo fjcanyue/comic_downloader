@@ -7,6 +7,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
 import requests
 from loguru import logger
@@ -23,6 +24,29 @@ from downloader.tui import TerminalPresenter
 FULL_VOLUME_ARG_COUNT = 1
 VOLUME_TO_ARG_COUNT = 2
 VOLUME_RANGE_ARG_COUNT = 3
+
+
+def url_belongs_to_source(url: str, base_url: str) -> bool:
+    """Match a supported host and port without accepting lookalikes or credentials."""
+    try:
+        target, base = urlsplit(url), urlsplit(base_url)
+        default_ports = {'http': 80, 'https': 443}
+        target_port = target.port
+        base_port = base.port
+        if target_port == default_ports.get(target.scheme):
+            target_port = None
+        if base_port == default_ports.get(base.scheme):
+            base_port = None
+        return bool(
+            target.scheme in {'http', 'https'}
+            and target.hostname
+            and target.hostname == base.hostname
+            and target_port == base_port
+            and target.username is None
+            and target.password is None
+        )
+    except ValueError:
+        return False
 
 
 def parse_1_based_index(value: str, length: int, label: str) -> int:
@@ -180,6 +204,49 @@ class Shell(cmd.Cmd):
         }
         self.source_options = list(self.source_bindings.keys())  # 存储源名称列表，方便按索引访问
         self.sources = {}
+        self.last_command_ok = True
+
+    def emptyline(self) -> bool:
+        """空行不重复执行上一条下载命令。"""
+        return False
+
+    def default(self, line: str) -> None:
+        self.last_command_ok = False
+        self.presenter.warn(f'未知命令：{line}。输入 help 查看命令和示例。')
+
+    def onecmd(self, line: str):
+        try:
+            return super().onecmd(line)
+        except Exception as exc:
+            self.last_command_ok = False
+            logger.exception('命令执行失败: {}', line)
+            self.presenter.error(f'操作失败：{exc}。可重试；详细信息见 comic_downloader.log。')
+            return False
+
+    def do_EOF(self, arg):  # noqa: N802 - cmd.Cmd dispatches the literal EOF command
+        """输入结束时退出（Windows: Ctrl+Z 回车；Unix: Ctrl+D）。"""
+        return self.do_q(arg)
+
+    def do_help(self, arg):
+        """显示命令速查；help v 查看范围下载用法。"""
+        if not arg.strip():
+            self.presenter.welcome(self.source_options)
+            return
+        handler = getattr(self, f'do_{arg.strip()}', None)
+        if handler and handler.__doc__:
+            self.presenter.info(handler.__doc__)
+        else:
+            self.presenter.warn('没有该命令的帮助。输入 help 查看命令速查。')
+
+    def do_status(self, arg):
+        """查看保存路径、当前源、漫画、搜索结果数和覆盖模式。"""
+        self.presenter.session_status(
+            self.context.output_path,
+            self.current_source_name,
+            self.context.comic,
+            len(self.context.searched_results),
+            self.overwrite,
+        )
 
     def preloop(self) -> None:
         """交互式 shell 启动时渲染一次欢迎界面。子命令模式不经过 cmdloop，不会触发。"""
@@ -248,33 +315,47 @@ class Shell(cmd.Cmd):
     def _match_source_for_url(self, url: str) -> str | None:
         for source_name, binding in self.all_source_bindings.items():
             base_url = binding.profile.base_url
-            if base_url and url.startswith(base_url):
+            if base_url and url_belongs_to_source(url, base_url):
                 return source_name
         return None
 
     def do_source(self, arg):
-        """选择动漫下载网站源。输入 source  后，根据提示选择源序号。"""
-        self.presenter.source_options(self.source_options)
+        """source [源名/序号]：切换下载源；无参数时显示菜单，回车或 q 取消。搜索仍覆盖所有启用源。"""
+        self.last_command_ok = False
+        if not self.source_options:
+            self.presenter.warn('没有启用的动漫源，请检查运行配置文件。')
+            return
+        if arg.strip():
+            self._select_source(arg.strip())
+            return
+        self.presenter.source_options(
+            self.source_options, self.source_bindings, self.current_source_name
+        )
+        try:
+            while True:
+                selection = self._read_prompt_line('请输入源名或序号（回车 / q 取消）: ').strip()
+                if not selection or selection.lower() == 'q':
+                    self.presenter.info('已取消源选择。')
+                    return
+                if self._select_source(selection):
+                    return
+        except (EOFError, KeyboardInterrupt):
+            self.presenter.print()
 
-        while True:
+    def _select_source(self, selection: str) -> bool:
+        if selection in self.source_bindings:
+            source_name = selection
+        else:
             try:
-                source_index_str = self._read_prompt_line('请输入网站源序号: ')
-                if not source_index_str:  # 用户直接回车，重新显示列表
-                    self.presenter.source_options(self.source_options)
-                    continue  # 继续下一次循环，等待用户输入
-                source_index = int(source_index_str) - 1  # 序号从1开始，索引从0开始
-                if 0 <= source_index < len(self.source_options):
-                    source_name = self.source_options[source_index]
-                    self.__switch_source(source_name)
-                    break  # 选择成功，退出循环
-                self.presenter.warn(
-                    f'无效的序号，请输入 1 到 {len(self.source_options)} 之间的序号。'
-                )
-            except EOFError:
-                self.presenter.print()
-                return
+                index = parse_1_based_index(selection, len(self.source_options), '源')
             except ValueError:
-                self.presenter.warn('请输入有效的数字序号。')
+                self.presenter.warn(f'请输入源名或 1 到 {len(self.source_options)} 的序号。')
+                return False
+            source_name = self.source_options[index]
+        self.__switch_source(source_name)
+        self.last_command_ok = True
+        self.presenter.success(f'当前下载源：{source_name}。使用 i <序号/URL> 查看详情。')
+        return True
 
     def __switch_source(self, source_name):
         """切换动漫源"""
@@ -293,6 +374,7 @@ class Shell(cmd.Cmd):
                 profile=binding.profile,
             )
 
+        self.context.comic = None
         self.context.source = self.sources[source_name]
         self.current_source_name = source_name
         self.prompt = self.presenter.prompt(self.current_source_name)
@@ -306,15 +388,15 @@ class Shell(cmd.Cmd):
                 if not self.context.ensure_driver(binding.profile):
                     raise RuntimeError('Browser driver was not initialized')
                 driver = self.context.driver
-            http = self.context.create_http_session()
-            source = binding.source_class(
-                self.context.output_path,
-                http,
-                driver,
-                overwrite=self.overwrite,
-                profile=binding.profile,
-            )
-            return source.search(keyword)
+            with self.context.create_http_session() as http:
+                source = binding.source_class(
+                    self.context.output_path,
+                    http,
+                    driver,
+                    overwrite=self.overwrite,
+                    profile=binding.profile,
+                )
+                return source.search(keyword)
 
         return _search
 
@@ -355,9 +437,7 @@ class Shell(cmd.Cmd):
                 skipped_sources.add(task.source_name)
         if not skipped_sources:
             return ready_tasks
-        self.presenter.warn(
-            f'已跳过需要浏览器驱动的搜索源: {", ".join(sorted(skipped_sources))}'
-        )
+        self.presenter.warn(f'已跳过需要浏览器驱动的搜索源: {", ".join(sorted(skipped_sources))}')
         return ready_tasks
 
     def _merge_search_outcomes(self, outcomes: list[SearchOutcome]) -> None:
@@ -384,6 +464,8 @@ class Shell(cmd.Cmd):
 
     def do_s(self, arg):
         """搜索动漫，输入s <搜索关键字>，例如：s 猎人"""
+        self.last_command_ok = False
+        arg = arg.strip()
         if not arg:
             self.presenter.warn('请输入搜索关键字！')
             return
@@ -391,6 +473,9 @@ class Shell(cmd.Cmd):
         self.context.reset_comic()
         self.context.searched_results = []
         tasks = self._filter_ready_search_tasks(self._build_search_tasks())
+        if not tasks:
+            self.presenter.warn('没有可用于搜索的源，请检查源配置或浏览器驱动。')
+            return
 
         task_lookup = {task.source_name: task for task in tasks}
         console_status = self.presenter.status('正在搜索...', spinner='dots')
@@ -407,6 +492,10 @@ class Shell(cmd.Cmd):
 
         search_duration = time.perf_counter() - search_start
         self._merge_search_outcomes(outcomes)
+        self.last_command_ok = any(outcome.error_message is None for outcome in outcomes)
+        if not self.last_command_ok:
+            self.presenter.error('所有搜索源均失败，请检查网络或使用 --debug 查看原因后重试。')
+            return
         logger.info(
             '搜索完成: keyword={keyword}, sources={sources}, results={results}, duration={duration:.2f}s',
             keyword=arg,
@@ -417,7 +506,10 @@ class Shell(cmd.Cmd):
         self._print_search_table(arg, search_duration)
 
     def do_i(self, arg):
-        """查看动漫详情，输入i <搜索结果序号/动漫URL地址>，例如：d 12，或者d https://www.maofly.com/manga/13954.html"""
+        """i <搜索结果序号/URL>：查看动漫详情和分组，例如 i 1。"""
+        self.last_command_ok = False
+        self.context.comic = None
+        arg = arg.strip()
         if not arg:
             self.presenter.warn('请输入动漫URL地址或者搜索结果序号！')
             return
@@ -440,6 +532,7 @@ class Shell(cmd.Cmd):
             return
 
         self._print_comic_info(self.context.comic)
+        self.last_command_ok = True
 
     def _resolve_info_url(self, arg: str) -> str | None:
         if arg.isdigit():
@@ -452,10 +545,6 @@ class Shell(cmd.Cmd):
         except ValueError:
             self.presenter.warn('请先搜索动漫，或输入正确的搜索结果序号！')
             return None
-        if not self.context.searched_results:
-            self.presenter.warn('请先搜索动漫，或输入正确的搜索结果序号！')
-            return None
-
         comic = self.context.searched_results[idx]
         if comic.source:
             self.__switch_source(comic.source)
@@ -469,7 +558,7 @@ class Shell(cmd.Cmd):
         if (
             self.context.source
             and hasattr(self.context.source, 'base_url')
-            and url.startswith(self.context.source.base_url)
+            and url_belongs_to_source(url, self.context.source.base_url)
         ):
             return url
         self.presenter.warn('请输入完整的动漫地址，且确保该地址属于支持的动漫源！')
@@ -485,12 +574,13 @@ class Shell(cmd.Cmd):
     def _build_chapter_table(self, book_index: int, book):
         return self.presenter.chapter_table(book_index, book)
 
-    def do_v(self, arg):
-        """下载动漫，输入v <章节序号> <起始序号> <截止序号>，例如：v 1 11 12"""
+    def do_v(self, arg):  # noqa: PLR0911 - user-facing validation guards
+        """v <分组> [截止] 或 v <分组> <起始> <截止>：序号从 1 开始，含截止话。例如 v 1 5 10。不填范围则下载该分组全部话。"""
+        self.last_command_ok = False
         if not self.context.source:
             self.presenter.warn('请您先选择动漫下载网站源！')
             return
-        if not arg:
+        if not arg.strip():
             self.presenter.warn('请输入动漫章节序号！')
             return
         if self.context.comic is None:
@@ -506,6 +596,9 @@ class Shell(cmd.Cmd):
             self.presenter.warn(str(e))
             return
         vols = book.vols[vol_slice]
+        if not vols:
+            self.presenter.warn('该分组没有可下载的话，请选择其他分组。')
+            return
         if not self._ensure_source_download_ready():
             return
         source = self.context.source
@@ -571,7 +664,7 @@ class Shell(cmd.Cmd):
         elif (
             self.context.source
             and hasattr(self.context.source, 'base_url')
-            and arg.startswith(self.context.source.base_url)
+            and url_belongs_to_source(arg, self.context.source.base_url)
         ):
             pass
         else:
@@ -582,6 +675,8 @@ class Shell(cmd.Cmd):
 
     def do_d(self, arg):
         """全量下载动漫，输入d <搜索结果序号/动漫URL地址>，例如：d 12，或者d https://www.maofly.com/manga/38316.html"""
+        self.last_command_ok = False
+        arg = arg.strip()
         if not arg:
             summary = self._download_loaded_comic()
         elif arg.isdigit():
@@ -589,12 +684,12 @@ class Shell(cmd.Cmd):
         else:
             summary = self._download_direct_url(arg)
 
-        # self.context.searched_results.clear() # Maybe don't clear results so user can download another one?
         if summary:
             self.__print_download_summary(summary)
 
     def __print_download_summary(self, summary):
         self.presenter.download_summary(summary)
+        self.last_command_ok = summary.ok
 
     def do_q(self, arg):
         """退出动漫下载器"""
@@ -646,7 +741,6 @@ class Context:
     def create(self, output_path):
         self.output_path = output_path
         self.presenter.output_path(output_path)
-        self.http = self.create_http_session()
 
     def create_http_session(self):
         retry_strategy = Retry(
@@ -720,6 +814,7 @@ class Context:
 
     def destroy(self):
         self.driver_manager.destroy()
+        self.http.close()
 
     def reset(self):
         self.source = None

@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 
 import main as main_module
+import pytest
 
 
 class FakeContext:
@@ -125,3 +126,49 @@ def test_missing_config_path_exits_before_shell_creation(monkeypatch, capsys):
     output = capsys.readouterr().out
     assert exit_code == main_module.CONFIG_ERROR_EXIT_CODE
     assert '--config 需要指定配置文件路径' in output
+
+
+@pytest.mark.parametrize(
+    'args',
+    [
+        ['--overwite'],
+        ['search'],
+        ['info', '1'],
+        ['info', 'https://example.test/comic', 'extra'],
+        ['download'],
+        ['download_vols', 'https://example.test/comic'],
+        ['download_vols', 'https://example.test/comic', '0'],
+        ['download_vols', 'https://example.test/comic', 'first'],
+        ['download_vols', 'https://example.test/comic', '1', '5', '2'],
+        ['download_vols', 'https://example.test/comic', '1', '2', '3', '4'],
+        ['output', 'typo', 'argument'],
+        ['--config=a.json', '--config=b.json'],
+    ],
+)
+def test_invalid_arguments_fail_before_shell_creation(monkeypatch, capsys, args):
+    monkeypatch.setattr(main_module, 'Shell', lambda *a, **kw: pytest.fail('unexpected Shell'))
+    monkeypatch.setattr(sys, 'argv', ['comic_downloader', *args])
+    assert main_module.main() == 2
+    assert '参数错误' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('range_args', [['1'], ['1', '3'], ['1', '2', '3']])
+def test_cli_accepts_all_documented_range_forms(range_args):
+    args = ['download_vols', 'https://example.test/comic', *range_args]
+    _, command, parsed_args = main_module._parse_command(args)
+    assert command == 'download_vols'
+    assert parsed_args == args[1:]
+
+
+def test_cli_exception_reports_failure_and_releases_resources(monkeypatch, capsys):
+    shell = FakeShell('output')
+
+    def fail_info(arg):
+        raise OSError('网络连接失败')
+
+    shell.do_i = fail_info
+    monkeypatch.setattr(main_module, 'Shell', lambda *a, **kw: shell)
+    monkeypatch.setattr(sys, 'argv', ['comic_downloader', 'info', 'https://example.test/comic'])
+    assert main_module.main() == 1
+    assert shell.context.destroyed is True
+    assert '网络连接失败' in capsys.readouterr().out
