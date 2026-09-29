@@ -340,7 +340,7 @@ def test_search_pagination_keeps_all_results_and_original_selection_indices(shel
     assert len(shell.context.searched_results) == 50
     assert 'first-020' in shell.console.file.getvalue()
     assert 'first-021' not in shell.console.file.getvalue()
-    shell.onecmd('results 2')
+    shell.onecmd('p 2')
     assert 'first-021' in shell.console.file.getvalue()
     shell.onecmd('i 21')
     assert shell.context.comic.url == 'https://first.test/21'
@@ -354,7 +354,7 @@ def test_long_chapter_pagination_preserves_download_range(shell):
     shell._print_comic_info(shell.context.comic)
     assert 'V0060' in shell.console.file.getvalue()
     assert 'V0061' not in shell.console.file.getvalue()
-    shell.onecmd('chapters 1 2')
+    shell.onecmd('ch 1 2')
     assert 'V0061' in shell.console.file.getvalue()
     assert 'V0120' in shell.console.file.getvalue()
     assert 'V0121' not in shell.console.file.getvalue()
@@ -368,13 +368,13 @@ def test_long_chapter_pagination_preserves_download_range(shell):
 @pytest.mark.parametrize(
     'command',
     [
-        'results 0',
-        'results x',
-        'results 99',
-        'chapters',
-        'chapters 1 0',
-        'chapters 2',
-        'chapters 1 x',
+        'p 0',
+        'p x',
+        'p 99',
+        'ch',
+        'ch 1 0',
+        'ch 2',
+        'ch 1 x',
     ],
 )
 def test_invalid_page_does_not_clear_current_selection(shell, command):

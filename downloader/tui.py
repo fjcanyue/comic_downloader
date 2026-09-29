@@ -96,8 +96,8 @@ class TerminalPresenter:
             '[bold]命令速查[/]\n'
             f'  [{ACCENT}]s[/]  <关键词>       从所有源搜索动漫\n'
             f'  [{ACCENT}]i[/]  <序号/URL>     查看动漫详情\n'
-            f'  [{ACCENT}]results[/] [页码]     翻看搜索结果，序号保持不变\n'
-            f'  [{ACCENT}]chapters[/] <分组> [页码] 翻看章节，例如 chapters 1 2\n'
+            f'  [{ACCENT}]p[/]  [页码]         翻看搜索结果，序号保持不变\n'
+            f'  [{ACCENT}]ch[/] <分组> [页码]  翻看章节，例如 ch 1 2\n'
             f'  [{ACCENT}]d[/]  [序号/URL]     全量下载；不填则下载当前漫画\n'
             f'  [{ACCENT}]v[/]  <分组> [范围]  如 v 1 5 10，下载第 5～10 话\n'
             f'  [{ACCENT}]source[/] [源名/序号] 切换下载源；搜索仍使用所有启用源\n'
@@ -315,7 +315,7 @@ class TerminalPresenter:
         self.print(Group(table, Text(''), footer))
         pages = max(1, (len(comics) + size - 1) // size)
         if pages > 1:
-            self.info(f'第 {page}/{pages} 页；results <页码> 翻页。i / d 使用表中原序号。')
+            self.info(f'第 {page}/{pages} 页；p <页码> 翻页。i / d 使用表中原序号。')
         if compact:
             self.info('窄屏模式：使用 i <序号> 查看作者和完整 URL。')
         self.info('下一步：i <序号> 查看分组；d <序号> 全量下载。')
@@ -363,7 +363,7 @@ class TerminalPresenter:
         if pages > 1:
             self.info(
                 f'分组 {book_index + 1} · 第 {page}/{pages} 页；'
-                f'chapters {book_index + 1} <页码> 翻页，v 使用原话序号。'
+                f'ch {book_index + 1} <页码> 翻页，v 使用原话序号。'
             )
 
     def chapter_table(

@@ -282,8 +282,8 @@ class Shell(cmd.Cmd):
         if self.search_outcomes:
             self.presenter.search_report(self.search_outcomes)
 
-    def do_results(self, arg):
-        """results [页码]：翻看最近一次搜索结果，每页 20 条，序号保持不变，不重新请求网站。"""
+    def do_p(self, arg):
+        """p [页码]：翻看最近一次搜索结果，每页 20 条，序号保持不变，不重新请求网站。"""
         self.last_command_ok = False
         if not self.search_keyword:
             self.presenter.warn('请先使用 s <关键词> 搜索。')
@@ -296,15 +296,15 @@ class Shell(cmd.Cmd):
         self._print_search_table(self.search_keyword, self.search_duration, page=page)
         self.last_command_ok = True
 
-    def do_chapters(self, arg):
-        """chapters <分组> [页码]：翻看当前漫画的章节，每页 60 话；下载使用原有话序号。"""
+    def do_ch(self, arg):
+        """ch <分组> [页码]：翻看当前漫画的章节，每页 60 话；下载使用原有话序号。"""
         self.last_command_ok = False
         if self.context.comic is None:
             self.presenter.warn('请先使用 i <序号/URL> 查看漫画详情。')
             return
         args = arg.split()
         if not 1 <= len(args) <= VOLUME_TO_ARG_COUNT:
-            self.presenter.warn('用法：chapters <分组> [页码]，例如 chapters 1 2。')
+            self.presenter.warn('用法：ch <分组> [页码]，例如 ch 1 2。')
             return
         try:
             book_index = parse_1_based_index(args[0], len(self.context.comic.books), '分组')
