@@ -3,6 +3,7 @@ import json
 import os
 import sys
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -343,7 +344,12 @@ class ComicSource(ImageDownloadMixin, ArchiveMixin, HtmlParsingMixin, ABC):
         return self.__parse_imgs__(url)
 
     def download_vols(
-        self, comic_name: str, book_name: str, vols: list[ComicVolume]
+        self,
+        comic_name: str,
+        book_name: str,
+        vols: list[ComicVolume],
+        *,
+        on_result: Callable[[VolumeDownloadResult], None] | None = None,
     ) -> DownloadSummary:
         """按指定范围下载动漫
 
@@ -375,6 +381,8 @@ class ComicSource(ImageDownloadMixin, ArchiveMixin, HtmlParsingMixin, ABC):
                         message=str(e),
                     )
                 summary.add(result)
+                if on_result is not None:
+                    on_result(result)
                 progress.advance(task_id)
         return summary
 

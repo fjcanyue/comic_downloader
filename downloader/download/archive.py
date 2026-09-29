@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
+import tempfile
+import zipfile
+import zlib
+from pathlib import Path
 
 from loguru import logger
 
@@ -16,13 +19,15 @@ from downloader.models import (
 
 
 class ArchiveMixin:
+    overwrite: bool
+
     def _find_existing_archive(self, path: str, vol_name: str) -> str | None:
         if self.overwrite:
             return None
 
         target_zip_name = filter_dir_name(vol_name) + '.zip'
         target_zip_path = os.path.join(path, target_zip_name)
-        if os.path.exists(target_zip_path):
+        if self._archive_is_usable(target_zip_path):
             return target_zip_path
 
         base_name = filter_dir_name(vol_name)
@@ -35,10 +40,36 @@ class ArchiveMixin:
         for i in range(1, 3):
             padded_num = num_part.zfill(len(num_part) + i)
             padded_path = os.path.join(path, padded_num + rest_part + '.zip')
-            if os.path.exists(padded_path):
+            if self._archive_is_usable(padded_path):
                 logger.info('文件已存在(补零匹配)，跳过: {}', padded_path)
                 return padded_path
         return None
+
+    @staticmethod
+    def _archive_is_usable(path: str) -> bool:
+        if not os.path.isfile(path):
+            return False
+        try:
+            with zipfile.ZipFile(path) as archive:
+                files = [info for info in archive.infolist() if not info.is_dir()]
+                if (
+                    files
+                    and all(info.file_size > 0 for info in files)
+                    and archive.testzip() is None
+                ):
+                    return True
+        except (
+            OSError,
+            zipfile.BadZipFile,
+            RuntimeError,
+            NotImplementedError,
+            EOFError,
+            zlib.error,
+        ):
+            logger.warning('无法读取已有压缩包，将重新处理章节: {}', path)
+            return False
+        logger.warning('已有压缩包为空或校验失败，将重新处理章节: {}', path)
+        return False
 
     def _remove_progress_task(self, progress: DownloadProgress | None, task_id) -> None:
         if progress is None or task_id is None:
@@ -76,9 +107,15 @@ class ArchiveMixin:
         expected_count: int,
         failed_images: list[ImageDownloadFailure],
     ) -> VolumeDownloadResult:
-        actual_files = sorted(os.listdir(path))
+        expected_files = [f'{index:04d}.jpg' for index in range(1, expected_count + 1)]
+        actual_files = [
+            name
+            for name in expected_files
+            if os.path.isfile(os.path.join(path, name))
+            and os.path.getsize(os.path.join(path, name)) > 0
+        ]
         actual_count = len(actual_files)
-        downloaded_count = expected_count - len(failed_images)
+        downloaded_count = min(actual_count, expected_count - len(failed_images))
         if expected_count == actual_count and not failed_images:
             return self._archive_volume(
                 path, vol_name, source_url, expected_count, downloaded_count
@@ -100,8 +137,22 @@ class ArchiveMixin:
         self, path: str, vol_name: str, source_url: str, expected_count: int, downloaded_count: int
     ) -> VolumeDownloadResult:
         logger.info('开始压缩目录: {}', path)
+        temporary_path = None
         try:
-            archive_path = shutil.make_archive(path, 'zip', path)
+            target = Path(path).with_name(Path(path).name + '.zip')
+            with tempfile.NamedTemporaryFile(
+                dir=target.parent,
+                prefix=f'.{target.stem}-',
+                suffix='.zip.tmp',
+                delete=False,
+            ) as stream:
+                temporary_path = Path(stream.name)
+            with zipfile.ZipFile(temporary_path, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+                for index in range(1, expected_count + 1):
+                    name = f'{index:04d}.jpg'
+                    archive.write(Path(path) / name, arcname=name)
+            os.replace(temporary_path, target)
+            archive_path = str(target.resolve())
             logger.info('目录 {} 压缩完成.', path)
             return VolumeDownloadResult(
                 name=vol_name,
@@ -121,6 +172,9 @@ class ArchiveMixin:
                 downloaded_count=downloaded_count,
                 message=f'压缩目录失败: {e}',
             )
+        finally:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
 
     def _partial_volume_result(
         self,

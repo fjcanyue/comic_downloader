@@ -5,6 +5,7 @@ from io import StringIO
 import pytest
 from rich.console import Console
 
+from downloader.download.jobs import DownloadJob, JobVolume
 from downloader.models import (
     Comic,
     ComicBook,
@@ -14,6 +15,24 @@ from downloader.models import (
     VolumeDownloadResult,
 )
 from downloader.tui import TerminalPresenter
+
+
+@pytest.mark.parametrize('width', [40, 80, 120])
+def test_task_list_and_details_show_recovery_actions(width):
+    output = StringIO()
+    presenter = TerminalPresenter(Console(file=output, width=width, color_system=None))
+    volume = JobVolume('正篇', '[red]第一话[/]', 'https://example.test/1')
+    volume.result = VolumeDownloadResult(volume.name, volume.url, 'failed', message='网络超时')
+    job = DownloadJob('test', '测试漫画', 'https://example.test/comic', [volume], state='failed')
+    presenter.download_jobs([job])
+    assert job.id[:12] in output.getvalue()
+    presenter.download_job(job)
+    rendered = output.getvalue()
+    assert job.id[:12] in rendered
+    assert '测试漫画' in rendered
+    assert '网络超时' in rendered
+    assert 'retry' in rendered
+    assert '0/1' in rendered
 
 
 def test_external_text_is_rendered_literally():

@@ -23,6 +23,8 @@ USAGE = """用法:
   comic_downloader [下载路径] info <漫画URL>
   comic_downloader [下载路径] download <漫画URL>
   comic_downloader [下载路径] download_vols <漫画URL> <章节序号> [起始序号] [截止序号]
+  comic_downloader [下载路径] tasks [任务ID]
+  comic_downloader [下载路径] retry <任务ID>
 
 选项:
   -d, --debug     输出调试日志到终端
@@ -134,7 +136,7 @@ def _pop_config_path(args: list[str]) -> str | None:
 
 
 def _parse_command(args: list[str]) -> tuple[str, str | None, list[str]]:
-    subcommands = {'search', 'info', 'download', 'download_vols'}
+    subcommands = {'search', 'info', 'download', 'download_vols', 'tasks', 'retry'}
     subcommand = None
     subcommand_args = []
     output_path = os.getcwd()
@@ -158,6 +160,10 @@ def _parse_command(args: list[str]) -> tuple[str, str | None, list[str]]:
 
 def _validate_command(subcommand: str | None, args: list[str]) -> None:
     if subcommand is None:
+        return
+    if subcommand in {'tasks', 'retry'}:
+        if len(args) > 1 or (subcommand == 'retry' and not args):
+            raise CommandUsageError('用法：tasks [任务ID] 或 retry <任务ID>。')
         return
     if not args or not ' '.join(args).strip():
         raise CommandUsageError(f'{subcommand} 缺少参数。')
@@ -190,6 +196,10 @@ def _run_command(shell: Shell, subcommand: str | None, subcommand_args: list[str
         shell.do_d(' '.join(subcommand_args))
     elif subcommand == 'download_vols':
         _run_download_vols(shell, subcommand_args)
+    elif subcommand == 'tasks':
+        shell.do_tasks(' '.join(subcommand_args))
+    elif subcommand == 'retry':
+        shell.do_retry(' '.join(subcommand_args))
     else:
         shell.cmdloop()
         return 0

@@ -16,6 +16,8 @@ from urllib3.util.retry import Retry
 
 from downloader.browser.manager import DriverManager
 from downloader.comic import Comic, ComicSource
+from downloader.download.job_store import JobStore
+from downloader.download.jobs import DownloadJob, JobVolume, run_download_job
 from downloader.runtime_config import RuntimeConfig
 from downloader.sources import load_source_bindings
 from downloader.sources.profiles import SourceBinding, SourceProfile
@@ -185,6 +187,7 @@ class Shell(cmd.Cmd):
         self.console = self.presenter.console
         self.context = Context(self.presenter)
         self.context.create(output_path)
+        self.job_store = JobStore(output_path)
         self.overwrite = overwrite
         self.runtime_config = runtime_config
         self.search_driver_lock = threading.Lock()
@@ -247,6 +250,39 @@ class Shell(cmd.Cmd):
             len(self.context.searched_results),
             self.overwrite,
         )
+
+    def do_tasks(self, arg):
+        """tasks [任务ID]：列出当前保存路径中的下载任务，或查看某个任务的章节与错误。"""
+        self.last_command_ok = False
+        if arg.strip():
+            self.presenter.download_job(self.job_store.load(arg.strip()))
+            self.last_command_ok = True
+            return
+        jobs, errors = self.job_store.list_jobs()
+        self.presenter.download_jobs(jobs)
+        for error in errors:
+            self.presenter.warn(f'无法读取任务记录：{error}')
+        self.last_command_ok = not errors
+
+    def do_retry(self, arg):
+        """retry <任务ID>：继续失败、部分失败或尚未开始的章节；保留已成功的章节。"""
+        self.last_command_ok = False
+        if not arg.strip():
+            self.presenter.warn('请输入任务 ID；使用 tasks 查看可恢复的任务。')
+            return
+        job = self.job_store.load(arg.strip())
+        if not job.remaining:
+            run_download_job(self.job_store, job.id, None)
+            self.presenter.success('该任务已全部完成，无需重试。')
+            self.last_command_ok = True
+            return
+        if job.source_name not in self.all_source_bindings:
+            self.presenter.warn(f'任务使用的源 {job.source_name} 不可用，请检查源配置。')
+            return
+        self.__switch_source(job.source_name)
+        summary = self._execute_job(job)
+        if summary is not None:
+            self.__print_download_summary(summary)
 
     def preloop(self) -> None:
         """交互式 shell 启动时渲染一次欢迎界面。子命令模式不经过 cmdloop，不会触发。"""
@@ -574,7 +610,7 @@ class Shell(cmd.Cmd):
     def _build_chapter_table(self, book_index: int, book):
         return self.presenter.chapter_table(book_index, book)
 
-    def do_v(self, arg):  # noqa: PLR0911 - user-facing validation guards
+    def do_v(self, arg):
         """v <分组> [截止] 或 v <分组> <起始> <截止>：序号从 1 开始，含截止话。例如 v 1 5 10。不填范围则下载该分组全部话。"""
         self.last_command_ok = False
         if not self.context.source:
@@ -599,17 +635,12 @@ class Shell(cmd.Cmd):
         if not vols:
             self.presenter.warn('该分组没有可下载的话，请选择其他分组。')
             return
-        if not self._ensure_source_download_ready():
-            return
-        source = self.context.source
-        if source is None:
-            return
-        summary = source.download_vols(
-            self.context.comic.name or '未知漫画',
-            book.name or '默认章节',
-            vols,
+        summary = self._start_job(
+            self.context.comic,
+            [JobVolume(book.name or '默认章节', vol.name, vol.url) for vol in vols],
         )
-        self.__print_download_summary(summary)
+        if summary is not None:
+            self.__print_download_summary(summary)
 
     def _download_loaded_comic(self):
         if self.context.comic is None:
@@ -618,9 +649,43 @@ class Shell(cmd.Cmd):
         if not self.context.source:
             self.presenter.warn('当前没有选中的动漫源！')
             return None
-        if not self._ensure_source_download_ready():
+        return self._start_job(
+            self.context.comic,
+            [
+                JobVolume(book.name or '默认章节', vol.name, vol.url)
+                for book in self.context.comic.books
+                for vol in book.vols
+            ],
+        )
+
+    def _start_job(self, comic: Comic, volumes: list[JobVolume]):
+        if not volumes:
+            self.presenter.warn('没有可下载章节，未创建任务。')
             return None
-        return self.context.source.download_full(self.context.comic)
+        if not self.current_source_name:
+            self.presenter.warn('无法确定下载源，请重新查看漫画详情。')
+            return None
+        job = DownloadJob(
+            self.current_source_name,
+            comic.name or '未知漫画',
+            comic.url or '',
+            volumes,
+        )
+        self.job_store.save(job)
+        self.presenter.info(f'下载任务已保存：{job.id[:12]}，共 {len(volumes)} 话。')
+        return self._execute_job(job)
+
+    def _execute_job(self, job: DownloadJob):
+        self.presenter.info(
+            f'任务 {job.id[:12]}：剩余 {len(job.remaining)}/{len(job.volumes)} 话。'
+            f'中断或失败后使用 retry {job.id[:12]} 继续。'
+        )
+        if not self._ensure_source_download_ready() or self.context.source is None:
+            return None
+        result = run_download_job(self.job_store, job.id, self.context.source)
+        self.presenter.info(f'任务 {result.id[:12]} 已保存；tasks {result.id[:12]} 查看详情。')
+        self.presenter.info('以下为任务累计结果，包含此前已完成的章节。')
+        return result.summary
 
     def _download_search_result(self, arg: str):
         comic = self._get_search_result(arg)
@@ -649,12 +714,19 @@ class Shell(cmd.Cmd):
         if not self.context.source:
             self.presenter.warn('无法确定源，无法下载。')
             return None
-        if not self._ensure_source_download_ready():
+        self.context.comic = None
+        if not self._ensure_source_page_ready():
             return None
         source = self.context.source
         if source is None:
             return None
-        return source.download_full_by_url(url)
+        with self.presenter.status('正在获取下载计划...', spinner='dots'):
+            self.context.comic = source.info(url)
+        if self.context.comic is None:
+            self.presenter.error('未能获取动漫详情，无法创建下载任务。')
+            return None
+        self.context.comic.url = url
+        return self._download_loaded_comic()
 
     def _download_direct_url(self, arg: str):
         matched_source = self._match_source_for_url(arg)

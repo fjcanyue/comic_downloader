@@ -25,6 +25,7 @@ site/
 htmlcov/
 
 downloaded_files/
+.comic_downloader/
 seleniumbase_diagnostics/
 **/geckodriver.log
 **/comic_downloader.log

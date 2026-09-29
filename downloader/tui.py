@@ -8,6 +8,7 @@ from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
 
+from downloader.download.jobs import DownloadJob
 from downloader.models import Comic, DownloadSummary, VolumeDownloadResult
 from downloader.sources.profiles import SourceBinding
 
@@ -29,6 +30,7 @@ BRAND = '动漫下载器'
 MAX_FAILURE_DETAIL_ROWS = 5
 MAX_URL_DISPLAY_WIDTH = 50
 COMPACT_SEARCH_WIDTH = 80
+COMPACT_TASK_WIDTH = 60
 
 
 class TerminalPresenter:
@@ -89,6 +91,8 @@ class TerminalPresenter:
             f'  [{ACCENT}]v[/]  <分组> [范围]  如 v 1 5 10，下载第 5～10 话\n'
             f'  [{ACCENT}]source[/] [源名/序号] 切换下载源；搜索仍使用所有启用源\n'
             f'  [{ACCENT}]status[/]            查看当前漫画、路径和覆盖模式\n'
+            f'  [{ACCENT}]tasks[/] [任务ID]     查看保存的下载任务和失败详情\n'
+            f'  [{ACCENT}]retry[/] <任务ID>     继续未完成章节（支持重启后恢复）\n'
             f'  [{ACCENT}]help[/] [命令]       查看用法，例如 help v\n'
             f'  [{ACCENT}]q[/]                 退出'
         )
@@ -158,6 +162,60 @@ class TerminalPresenter:
             f'文件策略：{"覆盖已有文件" if overwrite else "跳过已有压缩包，复用已下载图片"}',
         ]
         self.print(Panel(Text('\n'.join(rows)), title='当前状态', border_style=ACCENT))
+
+    def download_jobs(self, jobs: list[DownloadJob]) -> None:
+        if not jobs:
+            self.info('当前保存路径没有下载任务。执行 d 或 v 后会自动保存任务。')
+            return
+        table = Table(title='下载任务', header_style=f'bold {ACCENT}', border_style=MUTED)
+        table.add_column('任务 ID', no_wrap=True, min_width=12)
+        table.add_column('漫画', overflow='fold')
+        compact = self.console.width < COMPACT_TASK_WIDTH
+        if compact:
+            table.add_column('进度', overflow='fold')
+        else:
+            table.add_column('完成', justify='right')
+            table.add_column('状态')
+        for job in jobs:
+            count = f'{len(job.volumes) - len(job.remaining)}/{len(job.volumes)}'
+            cells = [Text(job.id[:12]), Text(job.comic_name)]
+            if compact:
+                cells.append(Text(f'{JOB_STATE_LABELS[job.state]}\n{count}'))
+            else:
+                cells.extend([Text(count), Text(JOB_STATE_LABELS[job.state])])
+            table.add_row(*cells)
+        self.print(table)
+        self.info('tasks <任务ID> 查看章节与错误；retry <任务ID> 继续未完成章节。')
+        self.info('记录属于当前保存路径。未结束的任务可尝试 retry，正在运行的任务会提示占用。')
+
+    def download_job(self, job: DownloadJob) -> None:
+        self.print(
+            Panel(
+                Text(
+                    f'任务：{job.id}\n漫画：{job.comic_name}\n源：{job.source_name}\n'
+                    f'URL：{job.comic_url or "未记录"}\n状态：{JOB_STATE_LABELS[job.state]}\n'
+                    f'已完成：{len(job.volumes) - len(job.remaining)}/{len(job.volumes)}\n'
+                    f'更新时间（UTC）：{job.updated_at}'
+                ),
+                title='任务详情',
+                border_style=ACCENT,
+            )
+        )
+        if job.error:
+            self.warn(job.error)
+        table = Table(header_style=f'bold {ACCENT}', border_style=MUTED)
+        for title in ('分组', '卷/话', '状态', '说明'):
+            table.add_column(title, overflow='fold')
+        for volume in job.volumes:
+            result = volume.result
+            status = '待下载' if result is None else VOLUME_STATE_LABELS[result.status]
+            note = '' if result is None else (result.message or '')
+            if result and result.failed_images:
+                note = note or result.failed_images[0].error
+            table.add_row(Text(volume.book_name), Text(volume.name), status, Text(note))
+        self.print(table)
+        if job.remaining:
+            self.info(f'retry {job.id[:12]} 继续 {len(job.remaining)} 话；已成功的章节保持不变。')
 
     # ------------------------------------------------------------------
     # 搜索结果
@@ -320,7 +378,7 @@ class TerminalPresenter:
                     shown_failures += 1
 
         self.print(detail)
-        self.info('重试：重新执行同一下载命令；默认复用已下载图片并跳过已有压缩包。')
+        self.info('使用 tasks 查看任务，retry <任务ID> 继续未完成章节；默认复用已下载图片。')
 
     @staticmethod
     def _volume_note(result: VolumeDownloadResult) -> str:
@@ -346,4 +404,18 @@ STATUS_BADGES = {
     'skipped': f'[{MUTED}]⊘[/]',
     'partial': f'[{WARN}]△[/]',
     'failed': f'[{ERROR}]✗[/]',
+}
+
+JOB_STATE_LABELS = {
+    'pending': '待下载',
+    'running': '未结束',
+    'interrupted': '已中断',
+    'failed': '有失败',
+    'completed': '已完成',
+}
+VOLUME_STATE_LABELS = {
+    'downloaded': '已下载',
+    'skipped': '已跳过',
+    'partial': '部分失败',
+    'failed': '失败',
 }

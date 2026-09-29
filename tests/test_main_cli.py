@@ -143,6 +143,9 @@ def test_missing_config_path_exits_before_shell_creation(monkeypatch, capsys):
         ['download_vols', 'https://example.test/comic', '1', '2', '3', '4'],
         ['output', 'typo', 'argument'],
         ['--config=a.json', '--config=b.json'],
+        ['retry'],
+        ['retry', 'abcd', 'extra'],
+        ['tasks', 'abcd', 'extra'],
     ],
 )
 def test_invalid_arguments_fail_before_shell_creation(monkeypatch, capsys, args):

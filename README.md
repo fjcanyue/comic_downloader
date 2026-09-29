@@ -67,6 +67,8 @@ uv run pyinstaller downloader.spec
 | `v <参数>` | 按范围下载章节 | `v 1` `v 1 12` `v 1 5 10` |
 | `source [源名/序号]` | 切换下载源；无参数时显示菜单，回车或 q 取消 | `source dumanwu` |
 | `status` | 查看路径、当前漫画、搜索结果数和覆盖模式 | `status` |
+| `tasks [任务ID]` | 查看下载任务，或某个任务的章节和错误 | `tasks` |
+| `retry <任务ID>` | 继续未完成章节，支持程序重启后恢复 | `retry a1b2c3d4` |
 | `help [命令]` | 命令速查和具体用法 | `help v` |
 | `q` | 退出 | `q` |
 
@@ -97,6 +99,8 @@ comic_downloader search <关键词>
 comic_downloader info <URL>
 comic_downloader download <URL>
 comic_downloader download_vols <URL> <章节序号> [起始] [截止]
+comic_downloader tasks [任务ID]
+comic_downloader retry <任务ID>
 ```
 
 直接子命令没有上一次搜索的会话状态，`info` / `download` 必须使用完整 URL。
@@ -107,7 +111,30 @@ comic_downloader download_vols <URL> <章节序号> [起始] [截止]
 包括下载部分失败、没有下载任何章节、所有搜索任务报错；`2` 表示参数错误；
 `130` 表示 Ctrl+C 中断。部分搜索源失败时仍保留其他源结果并显示错误。
 
-下载失败后可重新执行相同命令；默认复用已下载图片并跳过已有压缩包。
+### 下载任务与恢复
+
+每次 `d` / `v`（或 `download` / `download_vols`）在获取章节计划后自动保存任务，
+显示任务 ID，并在每话处理结束后更新进度。输入 `tasks` 查看记录，
+`tasks <任务ID>` 查看各话状态与错误，`retry <任务ID>` 继续失败、部分失败或未开始的章节。
+成功与已跳过的章节不会再次执行；未完成章节中的已有图片默认继续复用。
+
+重启后使用**相同的保存路径**即可恢复，无需重新搜索、获取漫画详情或输入范围。例如：
+
+```shell
+comic_downloader D:\Comics tasks
+comic_downloader D:\Comics retry a1b2c3d4
+```
+
+将示例 ID 换成 `tasks` 中显示的 ID，也可以使用至少 4 位且不重复的前缀。
+任务记录位于保存路径下的 `.comic_downloader/jobs/`。相同任务同时运行时会提示占用；
+进程退出后系统会释放锁。记录损坏时会显示错误，其余任务仍可查看。
+
+`retry` 使用当前运行配置和覆盖选项，但只作用于未完成章节。
+若要重新下载已经完成的章节，使用 `--overwrite` 重新执行 `download` / `download_vols` 创建新任务。
+任务记录不是文件校验清单：手动删除已经完成的文件后，应创建新下载任务。
+
+ZIP 完整写入临时文件后才替换最终文件，已有 ZIP 需通过可读性、非空与 CRC 校验才会跳过。
+打包只包含本次预期的编号图片，目录中的笔记和临时文件会保留在原地。
 
 ### 选项
 
