@@ -160,6 +160,7 @@ class TerminalPresenter:
             ('ch', '<分组> [页码]', '翻看章节，也支持 next / prev'),
             ('status', '', '查看当前漫画、路径和覆盖模式'),
             ('tasks', '[状态/任务ID]', '筛选下载任务；next / prev 翻页'),
+            ('archive', '[list/任务ID/show/restore]', '归档已完成计划、查看或恢复归档'),
             ('d', '[序号/URL]', '下载当前或指定动漫'),
             ('v', '<章节> [范围]', '按范围下载章节'),
             ('source', '[序号/代码名]', '查看并切换动漫源'),
@@ -555,13 +556,24 @@ class TerminalPresenter:
             self.info('tasks unfinished 只看未完成；tasks failed 只看有失败；tasks 返回全部任务。')
 
     def download_jobs(
-        self, jobs: Sequence[DownloadJob | JobSummary], *, prefixes: dict[str, str] | None = None
+        self,
+        jobs: Sequence[DownloadJob | JobSummary],
+        *,
+        prefixes: dict[str, str] | None = None,
+        archived: bool = False,
     ) -> None:
         if not jobs:
-            self.info('当前列表没有任务。输入 tasks 返回全部任务；执行 d 或 v 创建任务。')
+            self.info(
+                '暂无归档。使用 archive <任务ID> 归档已完成计划；tasks 查看当前任务。'
+                if archived
+                else '当前列表没有任务。输入 tasks 返回全部任务；执行 d 或 v 创建任务。'
+            )
             return
         table = Table(
-            title='下载任务', header_style=f'bold {ACCENT}', border_style=MUTED, box=box.SIMPLE_HEAD
+            title='已归档计划' if archived else '下载任务',
+            header_style=f'bold {ACCENT}',
+            border_style=MUTED,
+            box=box.SIMPLE_HEAD,
         )
         table.add_column('任务 ID', overflow='fold', min_width=12)
         table.add_column('漫画', overflow='fold')
@@ -582,10 +594,27 @@ class TerminalPresenter:
                 cells.extend([Text(count), Text(JOB_STATE_LABELS[job.state])])
             table.add_row(*cells)
         self.print(table)
+        if archived:
+            self.info('archive show <任务ID> 查看章节；archive restore <任务ID> 恢复到任务列表。')
+            return
         self.info('tasks <任务ID> 查看章节与错误；retry <任务ID> 继续未完成章节。')
         self.info('记录属于当前保存路径。未结束的任务可尝试 retry，正在运行的任务会提示占用。')
+        self.info('archive <任务ID> 归档已完成计划；archive 查看归档。')
 
-    def download_job(self, job: DownloadJob, *, volume_indices: list[int] | None = None) -> None:
+    def archive_navigation(self, command: str, page: int, count: int, size: int) -> None:
+        pages = max(1, (count + size - 1) // size)
+        self.info(f'归档浏览 · 共 {count} 项 · 第 {page}/{pages} 页')
+        actions = []
+        if page > 1:
+            actions.append(f'{command} {page - 1} 上一页')
+        if page < pages:
+            actions.append(f'{command} {page + 1} 下一页')
+        if actions:
+            self.info('  ·  '.join(actions))
+
+    def download_job(
+        self, job: DownloadJob, *, volume_indices: list[int] | None = None, archived: bool = False
+    ) -> None:
         remaining = sum(not volume.complete for volume in job.volumes)
         self.print(
             Panel(
@@ -595,7 +624,7 @@ class TerminalPresenter:
                     f'已完成：{len(job.volumes) - remaining}/{len(job.volumes)}\n'
                     f'更新时间（UTC）：{job.updated_at}'
                 ),
-                title='任务详情',
+                title='归档计划详情' if archived else '任务详情',
                 border_style=ACCENT,
             )
         )
@@ -634,7 +663,9 @@ class TerminalPresenter:
             self.info(
                 f'没有符合当前筛选的章节。tasks {job.id} all 查看全部章节，或 tasks 返回任务列表。'
             )
-        if remaining:
+        if archived:
+            self.info(f'archive restore {job.id} 恢复到任务列表；archive 返回归档列表。')
+        elif remaining:
             self.info(f'retry {job.id} 继续 {remaining} 话；筛选不改变重试范围。')
 
     # ------------------------------------------------------------------

@@ -21,9 +21,44 @@ else:
 
 
 class JobStore:
-    def __init__(self, output_path: str):
-        self.directory = Path(output_path).resolve() / '.comic_downloader' / 'jobs'
+    def __init__(self, output_path: str, *, archived: bool = False):
+        self.output_path = str(Path(output_path).resolve())
+        self.lock_directory = Path(self.output_path) / '.comic_downloader' / 'jobs'
+        self.directory = self.lock_directory / 'archive' if archived else self.lock_directory
         self._summaries: dict[Path, tuple[tuple[int, int, int, int], JobSummary]] = {}
+        self._archive_store: JobStore | None = None
+
+    def archive_view(self) -> JobStore:
+        if self._archive_store is None:
+            self._archive_store = JobStore(self.output_path, archived=True)
+        return self._archive_store
+
+    def archive(self, job_id: str) -> DownloadJob:
+        return self._move_record(job_id, restoring=False)
+
+    def restore(self, job_id: str) -> DownloadJob:
+        return self._move_record(job_id, restoring=True)
+
+    def _move_record(self, job_id: str, *, restoring: bool) -> DownloadJob:
+        active = JobStore(self.output_path)
+        archived = self.archive_view()
+        source, destination = (archived, active) if restoring else (active, archived)
+        job = source.load(job_id)
+        with active.lock(job.id):
+            # Reload after locking: another process may have moved or changed the plan.
+            job = source.load(job.id)
+            if not restoring and (job.state != 'completed' or job.remaining):
+                raise ValueError('只能归档已完成的计划；未完成任务请先使用 retry 恢复。')
+            destination.directory.mkdir(parents=True, exist_ok=True)
+            target = destination.directory / f'{job.id}.json'
+            if target.exists():
+                raise ValueError('目标位置已存在相同 ID 的任务，未覆盖任何记录。')
+            original = source.directory / f'{job.id}.json'
+            # Both directories share the output filesystem and the same per-ID OS lock.
+            original.rename(target)
+            self._summaries.pop(original, None)
+            self._summaries.pop(target, None)
+        return job
 
     def save(self, job: DownloadJob) -> None:
         self._validate_id(job.id)
@@ -56,6 +91,8 @@ class JobStore:
             raise ValueError('任务 ID 应为至少 4 位的十六进制前缀；输入 tasks 查看。')
         matches = list(self.directory.glob(f'{job_id}*.json'))
         if not matches:
+            if self.directory != self.lock_directory:
+                raise ValueError('没有找到归档计划，请检查保存路径，或输入 archive 查看记录。')
             raise ValueError('没有找到任务，请检查保存路径，或输入 tasks 查看记录。')
         if len(matches) != 1:
             raise ValueError('任务 ID 前缀匹配多个任务，请输入更长的 ID。')
@@ -104,8 +141,8 @@ class JobStore:
     def lock(self, job_id: str):
         """The OS releases locks on process exit, including forced termination."""
         self._validate_id(job_id)
-        self.directory.mkdir(parents=True, exist_ok=True)
-        with (self.directory / f'{job_id}.lock').open('a+b') as stream:
+        self.lock_directory.mkdir(parents=True, exist_ok=True)
+        with (self.lock_directory / f'{job_id}.lock').open('a+b') as stream:
             stream.seek(0, os.SEEK_END)
             if stream.tell() == 0:
                 stream.write(b'0')

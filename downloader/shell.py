@@ -16,6 +16,7 @@ from urllib3.util.retry import Retry
 
 from downloader.browser.manager import DriverManager
 from downloader.comic import Comic, ComicSource
+from downloader.download.job_archive import parse_archive_query
 from downloader.download.job_browser import (
     TASK_PAGE_SIZE,
     TASK_VOLUME_PAGE_SIZE,
@@ -477,6 +478,57 @@ class Shell(cmd.Cmd):
         )
         self.last_command_ok = True
         return query
+
+    def do_archive(self, arg):
+        """archive [list [页码]] 查看归档；archive <任务ID> 归档已完成计划；archive show <任务ID> [页码] 查看详情；archive restore <任务ID> 恢复。仅移动计划记录，不改变漫画文件。"""
+        self.last_command_ok = False
+        try:
+            query = parse_archive_query(arg.split())
+            if query.action in {'archive', 'restore'}:
+                operation = (
+                    self.job_store.archive if query.action == 'archive' else self.job_store.restore
+                )
+                job = operation(query.job_id or '')
+                label = '已归档' if query.action == 'archive' else '已恢复到任务列表'
+                self.presenter.success(f'{label}：{job.comic_name}（{job.id}）')
+                self.presenter.info(
+                    f'archive restore {job.id} 可恢复；archive 查看归档。'
+                    if query.action == 'archive'
+                    else f'tasks {job.id} 查看详情。'
+                )
+                self.last_command_ok = True
+            else:
+                self._show_archive(query.job_id, query.page)
+        except (ValueError, OSError) as exc:
+            self.presenter.warn(str(exc))
+
+    def _show_archive(self, job_id: str | None, page: int) -> None:
+        store = self.job_store.archive_view()
+        if job_id:
+            job = store.load(job_id)
+            count = len(job.volumes)
+            size = TASK_VOLUME_PAGE_SIZE
+            self._read_page(str(page), count, size)
+            start = (page - 1) * size
+            self.presenter.download_job(
+                job, volume_indices=list(range(start, min(start + size, count))), archived=True
+            )
+            command = f'archive show {job.id}'
+            errors = []
+        else:
+            jobs, errors = store.list_summaries()
+            count = len(jobs)
+            size = TASK_PAGE_SIZE
+            self._read_page(str(page), count, size)
+            start = (page - 1) * size
+            self.presenter.download_jobs(
+                jobs[start : start + size], prefixes=unique_job_prefixes(jobs), archived=True
+            )
+            command = 'archive list'
+        self.presenter.archive_navigation(command, page, count, size)
+        for error in errors:
+            self.presenter.warn(f'无法读取归档记录：{error}')
+        self.last_command_ok = not errors
 
     def do_retry(self, arg):
         """retry [序号/任务ID/all]：查看或恢复下载；tasks 中的计划使用任务 ID，章节记录支持序号。"""

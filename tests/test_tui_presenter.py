@@ -20,6 +20,26 @@ from downloader.tui import RetryTaskView, SourceStat, SourceView, TerminalPresen
 
 
 @pytest.mark.parametrize('width', [40, 80, 120])
+def test_archive_views_show_literal_names_and_only_archive_navigation(width):
+    output = StringIO()
+    presenter = TerminalPresenter(Console(file=output, width=width, color_system=None))
+    volume = JobVolume('正篇', '第一话', 'https://example.test/1')
+    volume.result = VolumeDownloadResult(volume.name, volume.url, 'downloaded')
+    job = DownloadJob('fixture', '[red]漫画[/]', '', [volume], state='completed')
+    presenter.download_jobs([job], archived=True)
+    presenter.download_job(job, archived=True)
+    presenter.archive_navigation('archive list', 2, 45, 20)
+    text = output.getvalue()
+    plain = ''.join(text.replace('│', '').split())
+    assert '[red]漫画[/]' in plain
+    assert '已归档计划' in text
+    assert '归档计划详情' in text
+    assert f'archiverestore{job.id}' in plain
+    assert 'archivelist1' in plain and 'archivelist3' in plain
+    assert 'retry' not in text and 'tasks next' not in text
+
+
+@pytest.mark.parametrize('width', [40, 80, 120])
 def test_catalog_warnings_are_visible_literal_and_bounded(width):
     output = StringIO()
     presenter = TerminalPresenter(Console(file=output, width=width, color_system=None))

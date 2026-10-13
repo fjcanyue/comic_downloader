@@ -8,6 +8,7 @@ from loguru import logger
 # Disable Selenium Manager stats to Plausible
 os.environ['SE_AVOID_STATS'] = 'true'
 
+from downloader.download.job_archive import parse_archive_query
 from downloader.download.job_browser import parse_task_query
 from downloader.runtime_config import RuntimeConfig
 from downloader.shell import Shell
@@ -26,6 +27,10 @@ USAGE = """用法:
   comic_downloader [下载路径] download_vols <漫画URL> <章节序号> [起始序号] [截止序号]
   comic_downloader [下载路径] tasks [状态] [页码]
   comic_downloader [下载路径] tasks <任务ID> [状态] [页码]
+  comic_downloader [下载路径] archive [list [页码]]
+  comic_downloader [下载路径] archive <任务ID>
+  comic_downloader [下载路径] archive show <任务ID> [页码]
+  comic_downloader [下载路径] archive restore <任务ID>
   comic_downloader [下载路径] sources
   comic_downloader [下载路径] check [动漫源序号|代码名|all]
   comic_downloader [下载路径] retry [任务序号|任务ID|all]
@@ -40,6 +45,7 @@ USAGE = """用法:
 download_vols 的一个范围参数表示截止序号，两个表示起始和截止，均从 1 开始。
 tasks 状态：all / unfinished / failed / completed / pending；任务列表另支持 running / interrupted。
 tasks 默认第一页；next / prev 仅用于交互会话，直接子命令使用明确页码。
+archive 仅归档已完成计划，可恢复，不改变漫画文件；归档浏览使用明确页码。
 退出码: 0 成功；1 执行/配置失败；2 参数错误；130 用户中断。
 """
 
@@ -147,6 +153,7 @@ def _parse_command(args: list[str]) -> tuple[str, str | None, list[str]]:
         'download',
         'download_vols',
         'tasks',
+        'archive',
         'sources',
         'check',
         'retry',
@@ -177,6 +184,12 @@ def _validate_command(subcommand: str | None, args: list[str]) -> None:
         return
     if subcommand == 'tasks':
         _validate_task_command(args)
+        return
+    if subcommand == 'archive':
+        try:
+            parse_archive_query(args)
+        except ValueError as exc:
+            raise CommandUsageError(str(exc)) from exc
         return
     optional_commands = {'sources': 0, 'retry': 1, 'check': 1}
     if subcommand in optional_commands:
@@ -230,6 +243,8 @@ def _run_command(shell: Shell, subcommand: str | None, subcommand_args: list[str
         _run_download_vols(shell, subcommand_args)
     elif subcommand == 'tasks':
         shell.do_tasks(' '.join(subcommand_args))
+    elif subcommand == 'archive':
+        shell.do_archive(' '.join(subcommand_args))
     elif subcommand == 'sources':
         shell.do_sources('')
     elif subcommand == 'check':

@@ -77,6 +77,10 @@ uv run pyinstaller downloader.spec
 | `tasks [状态] [页码]` | 按状态浏览下载计划，每页 20 项 | `tasks unfinished` |
 | `tasks <任务ID> [状态] [页码]` | 查看某个计划的章节与错误，每页 30 话 | `tasks a1b2c3d4 failed` |
 | `tasks next` / `tasks prev` | 在当前任务列表或章节筛选中连续翻页 | `tasks next` |
+| `archive <任务ID>` | 归档一个已完成计划，保留漫画文件 | `archive a1b2c3d4` |
+| `archive [list [页码]]` | 查看已归档计划，每页 20 项 | `archive list 2` |
+| `archive show <任务ID> [页码]` | 查看归档详情，每页 30 话 | `archive show a1b2c3d4 2` |
+| `archive restore <任务ID>` | 将归档计划恢复到任务列表 | `archive restore a1b2c3d4` |
 | `retry [序号/任务ID/all]` | 查看或继续未完成下载，支持重启后恢复 | `retry a1b2c3d4` |
 | `help [命令]` | 命令速查和具体用法 | `help v` |
 | `q` | 退出 | `q` |
@@ -166,6 +170,10 @@ comic_downloader download <URL>
 comic_downloader download_vols <URL> <章节序号> [起始] [截止]
 comic_downloader tasks [状态] [页码]
 comic_downloader tasks <任务ID> [状态] [页码]
+comic_downloader archive [list [页码]]
+comic_downloader archive <任务ID>
+comic_downloader archive show <任务ID> [页码]
+comic_downloader archive restore <任务ID>
 comic_downloader retry [任务序号|任务ID|all]
 comic_downloader sources
 comic_downloader check [动漫源序号|代码名|all]
@@ -256,6 +264,46 @@ comic_downloader D:\Comics tasks a1b2c3d4 failed 2
 ZIP 完整写入临时文件后才替换最终文件，已有 ZIP 需通过可读性、非空与 CRC 校验才会跳过。
 打包只包含本次预期的编号图片，目录中的笔记和临时文件会保留在原地。
 
+### 已完成计划归档与恢复
+
+历史计划较多时，使用 `archive <任务ID>` 将一个**已完成计划**移出主任务列表。
+归档只移动计划记录，保留原始 ID、时间、章节结果和漫画文件；需要查看时进入归档列表，
+也可以随时恢复：
+
+```text
+tasks completed                  找到要归档的已完成计划
+archive a1b2c3d4                  归档一个计划
+archive                           查看归档第一页
+archive list 2                    查看归档第 2 页
+archive show a1b2c3d4              查看该归档计划的章节
+archive show a1b2c3d4 2            查看第 31～60 话
+archive restore a1b2c3d4           恢复到主任务列表
+```
+
+将示例 ID 替换为实际 ID，支持至少 4 位且不重复的十六进制前缀，包括纯数字前缀。
+归档列表每页 20 项，详情每页 30 话，按原更新时间从新到旧排列；归档和恢复不会重写
+更新时间。交互模式和直接子命令均使用明确页码，输出会提供上一页、下一页命令。
+
+直接执行时同样使用原来的下载路径：
+
+```shell
+comic_downloader D:\Comics archive a1b2c3d4
+comic_downloader D:\Comics archive list 2
+comic_downloader D:\Comics archive restore a1b2c3d4
+```
+
+归档记录位于 `<下载路径>/.comic_downloader/jobs/archive/`，从 `tasks` 和计划重试入口
+移出；恢复后仍是已完成状态，不会自动重新下载。归档不改变独立章节恢复记录
+`tasks.json`，也不校验或删除漫画文件。计划状态为待下载、未结束、已中断或有失败时，
+请先完成下载再归档；异常退出后已保存全部章节但状态未结束的计划可先 `retry <任务ID>`
+完成状态收尾。
+
+归档和恢复共用下载任务的进程锁，任务被占用时会拒绝操作。相同 ID 的目标记录已存在时
+不会覆盖；损坏记录会报告错误，其余归档仍可查看。归档没有自动到期或批量删除规则，
+也不会释放漫画文件所占空间。以下为实际 Rich 渲染的演示数据：
+
+![归档计划与恢复入口](docs/job-archive.svg)
+
 ### 动漫源概览
 
 在交互式 Shell 中输入 `sources`，或直接运行 `comic_downloader sources`，可以查看当前运行配置实际启用的动漫源。概览会展示：
@@ -341,11 +389,12 @@ UTC 时间戳，便于脚本或故障排查读取。该检查只验证首页的 
 5. **长列表操作与调度内存（已完成）**：加入本地多词筛选、稳定序号、连续翻页、分组页码记忆及窄屏帮助；图片队列改为有上限的滚动调度。详见[本轮代码分析、验证与后续方向](docs/ideation/2026-10-13-filter-navigation-performance.md)。
 6. **任务浏览规模化（已完成）**：加入计划和章节的状态筛选、分页、稳定 ID 与窄屏详情；轻量摘要缓存减少重复 JSON 解析。详见[任务浏览迭代与性能验证](docs/ideation/2026-10-13-task-browser.md)。
 7. **章节目录解析与离线回归（已完成）**：为 7 个默认启用源建立合成详情/API 样本，修复嵌套文本、地址拼接和分组匹配，保留部分可用章节并显示解析提示；追加章节请求限定在所属分组。详见[章节目录解析迭代与验证](docs/ideation/2026-10-13-source-catalog.md)。
+8. **已完成计划归档（已完成）**：新增按 ID 归档、归档分页、章节详情与恢复入口，保留任务内容及漫画文件，复用任务进程锁。详见[归档设计与验证](docs/ideation/2026-10-13-job-archive.md)。
 
 后续优先方向：
 
 - **源解析回归扩展**：已有合成目录样本不代表线上站点当前可用；后续积累有采集日期和来源记录的真实脱敏搜索/详情/章节快照，并扩展图片解析回归。
-- **任务归档管理**：分页和状态筛选已实现；后续明确历史计划的归档、保留期限和显式清理流程。
+- **历史任务管理扩展**：已完成单计划归档与恢复；后续评估批量操作预览、保留期限及显式清理流程。
 - **搜索范围扩展**：依据各源分页协议按需加载网站后续搜索页，并设计去重、限速与稳定序号策略。
 
 开发验证：`uv run pytest -o addopts= -q`；类型检查在 Windows 可使用

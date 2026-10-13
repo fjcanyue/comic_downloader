@@ -87,6 +87,83 @@ def test_search_info_range_download_stays_in_shell(shell):
     ]
 
 
+def test_archive_workflow_preserves_current_selection_and_uses_explicit_pages(shell):
+    shell.onecmd('i https://first.test/comic')
+    comic = shell.context.comic
+    for index in range(23):
+        volumes = [
+            JobVolume('正篇', f'V{number:03d}', f'https://first.test/{number}')
+            for number in range(1, 36)
+        ]
+        for volume in volumes:
+            volume.result = VolumeDownloadResult(volume.name, volume.url, 'downloaded')
+        job = DownloadJob('first', f'归档{index:03d}', comic.url, volumes, state='completed')
+        shell.job_store.save(job)
+        shell.onecmd(f'archive {job.id}')
+        assert shell.last_command_ok
+    job = shell.job_store.archive_view().list_jobs()[0][0]
+    assert shell.context.comic is comic
+    assert shell.job_store.list_jobs() == ([], [])
+    shell.console.file.seek(0)
+    shell.console.file.truncate()
+    shell.onecmd('archive')
+    text = shell.console.file.getvalue()
+    assert '第 1/2 页' in text
+    assert 'archive list 2' in text
+    assert 'tasks next' not in text
+    shell.onecmd('archive list 2')
+    assert shell.last_command_ok
+    shell.onecmd('archive list 3')
+    assert not shell.last_command_ok
+    shell.console.file.seek(0)
+    shell.console.file.truncate()
+    shell.onecmd(f'archive show {job.id[:12]}')
+    text = shell.console.file.getvalue()
+    assert 'V030' in text and 'V031' not in text
+    assert f'archive show {job.id} 2' in text
+    shell.onecmd(f'archive show {job.id[:12]} 2')
+    assert 'V035' in shell.console.file.getvalue()
+    assert main_module._run_command(shell, 'archive', ['restore', job.id]) == 0
+    assert len(shell.job_store.list_jobs()[0]) == 1
+    shell.onecmd('retry all')
+    assert shell.last_command_ok
+    assert getattr(shell.context.source, 'downloaded_urls', []) == []
+    assert shell.context.comic is comic
+
+
+def test_archive_corrupt_records_report_failure_without_hiding_valid_plans(shell):
+    shell.onecmd('d https://first.test/comic')
+    job = shell.job_store.list_jobs()[0][0]
+    shell.onecmd(f'archive {job.id}')
+    archived = shell.job_store.archive_view()
+    (archived.directory / ('f' * 32 + '.json')).write_text('broken', encoding='utf-8')
+    shell.console.file.seek(0)
+    shell.console.file.truncate()
+    assert main_module._run_command(shell, 'archive', []) == 1
+    text = shell.console.file.getvalue()
+    assert job.id[:12] in text
+    assert '无法读取归档记录' in text
+    assert main_module._run_command(shell, 'archive', ['show', job.id]) == 0
+
+
+def test_archive_errors_leave_shell_usable_and_produce_failure_exit_code(shell):
+    shell.onecmd('archive')
+    assert shell.last_command_ok
+    job = DownloadJob(
+        'first', '未完成计划', '', [JobVolume('正篇', '第一话', 'https://first.test/1')]
+    )
+    shell.job_store.save(job)
+    assert main_module._run_command(shell, 'archive', [job.id]) == 1
+    assert shell.job_store.load(job.id).state == 'pending'
+    assert main_module._run_command(shell, 'archive', ['restore', 'abcd']) == 1
+    shell.onecmd('archive list 0')
+    assert not shell.last_command_ok
+    shell.onecmd('help archive')
+    assert '不改变漫画文件' in shell.console.file.getvalue()
+    shell.onecmd('tasks')
+    assert shell.last_command_ok
+
+
 def test_blank_line_does_not_repeat_download(shell, monkeypatch):
     calls = []
     monkeypatch.setattr(shell, 'do_d', calls.append)
