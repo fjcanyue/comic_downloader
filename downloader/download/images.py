@@ -81,17 +81,32 @@ class ImageDownloadMixin:
         max_workers = max(1, min(self._source_max_download_workers(), len(imgs)))
         task_id = progress.add_task(description=f'[cyan]图片 · {vol_name}', total=len(imgs))
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
-        futures: list[concurrent.futures.Future] = []
+        futures: set[concurrent.futures.Future] = set()
+        remaining = iter(enumerate(imgs))
+
+        def fill_window() -> None:
+            # Bound queued work as well as worker count, even for very long chapters.
+            while len(futures) < max_workers * 2:
+                self._raise_if_image_download_cancelled(context)
+                item = next(remaining, None)
+                if item is None:
+                    break
+                index, img_url_part = item
+                futures.add(executor.submit(self._download_image, context, index, img_url_part))
+
         try:
-            futures = [
-                executor.submit(self._download_image, context, index, img_url_part)
-                for index, img_url_part in enumerate(imgs)
-            ]
-            for future in concurrent.futures.as_completed(futures):
-                failure = future.result()
-                if failure:
-                    failed_images.append(failure)
-                progress.advance(task_id)
+            fill_window()
+            while futures:
+                completed, _ = concurrent.futures.wait(
+                    futures, return_when=concurrent.futures.FIRST_COMPLETED
+                )
+                for future in completed:
+                    failure = future.result()
+                    futures.remove(future)
+                    if failure:
+                        failed_images.append(failure)
+                    progress.advance(task_id)
+                fill_window()
             executor.shutdown(wait=True)
         except (KeyboardInterrupt, SystemExit):
             context.cancel_event.set()
@@ -110,12 +125,12 @@ class ImageDownloadMixin:
             raise KeyboardInterrupt from exc
         except Exception:
             context.cancel_event.set()
-            executor.shutdown(wait=True)
+            executor.shutdown(wait=True, cancel_futures=True)
             raise
         finally:
             self._remove_progress_task(progress, task_id)
             self._close_image_http_sessions(context)
-        return failed_images
+        return sorted(failed_images, key=lambda failure: failure.index)
 
     def _raise_if_image_download_cancelled(self, context: ImageDownloadContext) -> None:
         if context.cancel_event.is_set():
@@ -279,7 +294,11 @@ class ImageDownloadMixin:
         session = self._image_http_session(context)
         self._raise_if_image_download_cancelled(context)
         response = session.get(full_img_url, timeout=30, headers=headers, stream=True)
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except BaseException:
+            response.close()
+            raise
         return response
 
     def _download_image_with_browser(

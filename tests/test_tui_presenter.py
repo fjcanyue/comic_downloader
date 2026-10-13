@@ -19,6 +19,57 @@ from downloader.tui import RetryTaskView, SourceStat, SourceView, TerminalPresen
 
 
 @pytest.mark.parametrize('width', [40, 80, 120])
+def test_filtered_search_shows_original_ids_literal_filter_and_navigation(width):
+    output = StringIO()
+    presenter = TerminalPresenter(Console(file=output, width=width, color_system=None))
+    comics = []
+    for index in range(50):
+        comic = Comic()
+        comic.name = f'漫画{index + 1:03d}'
+        comic.source = 'fixture'
+        comics.append(comic)
+    presenter.search_results(
+        '漫画',
+        comics,
+        {'fixture': '测试源'},
+        1.2,
+        result_indices=list(range(25, 50)),
+        filter_text='[red]',
+        page=2,
+    )
+    rendered = output.getvalue()
+    assert '[red]' in rendered
+    assert '匹配 25 / 50 条' in rendered
+    assert '漫画046' in rendered
+    assert '漫画050' in rendered
+    assert '漫画045' not in rendered
+    assert 'p prev' in rendered
+    assert 'p next' not in rendered
+    assert '46' in rendered
+    assert '第 2/2 页' in rendered
+
+
+def test_empty_filter_shows_clear_action_instead_of_network_search_failure():
+    output = StringIO()
+    presenter = TerminalPresenter(Console(file=output, width=80, color_system=None))
+    presenter.search_results('漫画', [Comic()], {}, 0.1, result_indices=[], filter_text='missing')
+    rendered = output.getvalue()
+    assert '匹配 0 / 1 条' in rendered
+    assert 'f 清除筛选' in rendered
+    assert '未找到与' not in rendered
+
+
+def test_narrow_help_keeps_command_descriptions_readable():
+    output = StringIO()
+    presenter = TerminalPresenter(Console(file=output, width=40, color_system=None))
+    presenter.welcome(['fixture'])
+    rendered = output.getvalue()
+    assert '…' not in rendered
+    assert 'next/prev' in rendered
+    assert '筛选缓存结果' in rendered
+
+
+@pytest.mark.parametrize('width', [40, 80, 120])
 def test_search_report_keeps_error_literal_and_explains_empty_results(width):
     output = StringIO()
     presenter = TerminalPresenter(Console(file=output, width=width, color_system=None))

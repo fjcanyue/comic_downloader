@@ -7,10 +7,12 @@ from typing import Any, ClassVar, cast
 from zipfile import ZipFile
 
 import pytest
+import requests
 
 from downloader import comic as comic_module
 from downloader.comic import ComicSource, ImageDownloadCancelledError, ImageDownloadContext
 from downloader.download.tasks import DownloadTaskStore
+from downloader.models import ImageDownloadFailure
 
 VALID_JPEG = b'\xff\xd8\xff\xe0' + (b'\x00' * 12) + b'\xff\xd9'
 
@@ -210,12 +212,16 @@ def test_keyboard_interrupt_cancels_running_image_download(monkeypatch, tmp_path
         released_download.set()
         raise ImageDownloadCancelledError('cancelled')
 
-    def interrupting_as_completed(futures):
-        assert entered_download.wait(1)
-        raise KeyboardInterrupt
+    original_wait = comic_module.concurrent.futures.wait
+
+    def interrupting_wait(futures, **kwargs):
+        if 'return_when' in kwargs:
+            assert entered_download.wait(1)
+            raise KeyboardInterrupt
+        return original_wait(futures, **kwargs)
 
     monkeypatch.setattr(source, '_download_image', blocking_download)
-    monkeypatch.setattr(comic_module.concurrent.futures, 'as_completed', interrupting_as_completed)
+    monkeypatch.setattr(comic_module.concurrent.futures, 'wait', interrupting_wait)
 
     with pytest.raises(KeyboardInterrupt):
         source.__download_vol_images__(
@@ -228,6 +234,113 @@ def test_keyboard_interrupt_cancels_running_image_download(monkeypatch, tmp_path
     assert contexts[0].cancel_event.is_set()
     assert released_download.wait(1)
     assert http.closed is True
+
+
+@pytest.mark.parametrize('count, workers', [(0, 3), (1, 3), (503, 3)])
+def test_image_queue_is_bounded_and_processes_every_result(monkeypatch, tmp_path, count, workers):
+    source = ResumeSource(str(tmp_path), cast(Any, NoNetworkHttp()), None)
+    source.max_download_workers = workers
+    context = ImageDownloadContext(str(tmp_path), False)
+    executor_class = comic_module.concurrent.futures.ThreadPoolExecutor
+    submitted = 0
+    acknowledged = 0
+    peak = 0
+    visited = []
+    visit_lock = threading.Lock()
+
+    class TrackingExecutor(executor_class):
+        def submit(self, fn, /, *args, **kwargs):
+            nonlocal submitted, peak
+            submitted += 1
+            peak = max(peak, submitted - acknowledged)
+            return super().submit(fn, *args, **kwargs)
+
+    class Progress:
+        def add_task(self, **kwargs):
+            assert kwargs['total'] == count
+            return 1
+
+        def advance(self, task_id, advance=1):
+            nonlocal acknowledged
+            acknowledged += advance
+
+        def remove_task(self, task_id):
+            assert task_id == 1
+
+    def download(context, index, url):
+        with visit_lock:
+            visited.append(index)
+        if index % 7 == 0:
+            return ImageDownloadFailure(index + 1, url, str(tmp_path), 'fixture failure')
+        return None
+
+    monkeypatch.setattr(comic_module.concurrent.futures, 'ThreadPoolExecutor', TrackingExecutor)
+    monkeypatch.setattr(source, '_download_image', download)
+    failures = source._run_image_downloads(
+        context,
+        [f'https://example.test/{i}' for i in range(count)],
+        cast(Any, Progress()),
+        'chapter',
+    )
+    assert sorted(visited) == list(range(count))
+    assert submitted == acknowledged == count
+    assert peak <= workers * 2
+    assert [failure.index for failure in failures] == list(range(1, count + 1, 7))
+
+
+def test_worker_cancellation_does_not_submit_the_rest_of_the_chapter(monkeypatch, tmp_path):
+    source = ResumeSource(str(tmp_path), cast(Any, ClosableNoNetworkHttp()), None)
+    source.max_download_workers = 1
+    context = ImageDownloadContext(str(tmp_path), False)
+    visited = []
+
+    def cancel(context, index, url):
+        visited.append(index)
+        raise ImageDownloadCancelledError('cancelled')
+
+    monkeypatch.setattr(source, '_download_image', cancel)
+    with pytest.raises(KeyboardInterrupt):
+        source._run_image_downloads(context, ['url'] * 1000, None, 'chapter')
+    assert len(visited) <= 2
+    assert context.cancel_event.is_set()
+
+
+def test_slow_image_does_not_block_refilling_other_workers(monkeypatch, tmp_path):
+    source = ResumeSource(str(tmp_path), cast(Any, NoNetworkHttp()), None)
+    source.max_download_workers = 2
+    context = ImageDownloadContext(str(tmp_path), False)
+    last_image_started = threading.Event()
+
+    def download(context, index, url):
+        if index == 0:
+            assert last_image_started.wait(3), 'queue waited for a slow image before refilling'
+        if index == 29:
+            last_image_started.set()
+
+    monkeypatch.setattr(source, '_download_image', download)
+    assert source._run_image_downloads(context, ['url'] * 30, None, 'chapter') == []
+
+
+def test_http_error_response_is_closed_before_retry(monkeypatch, tmp_path):
+    source = ResumeSource(str(tmp_path), cast(Any, NoNetworkHttp()), None)
+    context = ImageDownloadContext(str(tmp_path), False)
+    closed = []
+
+    class Response:
+        def raise_for_status(self):
+            raise requests.HTTPError('503 fixture failure')
+
+        def close(self):
+            closed.append(True)
+
+    class Session:
+        def get(self, *args, **kwargs):
+            return Response()
+
+    monkeypatch.setattr(source, '_image_http_session', lambda _: Session())
+    with pytest.raises(requests.HTTPError, match='503'):
+        source._request_image('https://example.test/image', context)
+    assert closed == [True]
 
 
 def test_download_rate_wait_is_cancelled_promptly(tmp_path):

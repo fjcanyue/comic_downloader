@@ -150,24 +150,38 @@ class TerminalPresenter:
     # 命令速查：welcome 与 help 复用同一份文本，避免两处不一致。
     # ------------------------------------------------------------------
     def _command_cheatsheet(self) -> Table:
-        commands = Table.grid(padding=(0, 2))
+        entries = [
+            ('s', '<关键词>', '从所有启用源搜索动漫'),
+            ('i', '<序号/URL>', '查看动漫详情'),
+            ('f', '[关键词]', '筛选缓存结果；不填则清除'),
+            ('p', '[页码/next/prev]', '翻看筛选结果；不填重显当前页'),
+            ('ch', '<分组> [页码]', '翻看章节，也支持 next / prev'),
+            ('status', '', '查看当前漫画、路径和覆盖模式'),
+            ('tasks', '[任务ID]', '查看下载计划和失败详情'),
+            ('d', '[序号/URL]', '下载当前或指定动漫'),
+            ('v', '<章节> [范围]', '按范围下载章节'),
+            ('source', '[序号/代码名]', '查看并切换动漫源'),
+            ('sources', '', '查看动漫源能力概览'),
+            ('check', '[序号/代码名/all]', '显式检查动漫源连通性'),
+            ('retry', '[序号/任务ID/all]', '查看或重试未完成任务'),
+            ('help / ?', '', '查看命令速查'),
+            ('q', '', '退出'),
+        ]
+        compact = self.console.width < COMPACT_SEARCH_WIDTH
+        commands = Table.grid(padding=(0, 1 if compact else 2))
         commands.add_column(style=f'bold {ACCENT}', no_wrap=True)
-        commands.add_column(style=MUTED, no_wrap=True)
-        commands.add_column()
-        commands.add_row('s', '<关键词>', '从所有启用源搜索动漫')
-        commands.add_row('i', '<序号/URL>', '查看动漫详情')
-        commands.add_row('p', '[页码]', '翻看缓存搜索结果')
-        commands.add_row('ch', '<分组> [页码]', '翻看漫画章节')
-        commands.add_row('status', '', '查看当前漫画、路径和覆盖模式')
-        commands.add_row('tasks', '[任务ID]', '查看下载计划和失败详情')
-        commands.add_row('d', '[序号/URL]', '下载当前或指定动漫')
-        commands.add_row('v', '<章节> [范围]', '按范围下载章节')
-        commands.add_row('source', '[序号/代码名]', '查看并切换动漫源')
-        commands.add_row('sources', '', '查看动漫源能力概览')
-        commands.add_row('check', '[序号/代码名/all]', '显式检查动漫源连通性')
-        commands.add_row('retry', '[序号/任务ID/all]', '查看或重试未完成任务')
-        commands.add_row('help / ?', '', '查看命令速查')
-        commands.add_row('q', '', '退出')
+        if compact:
+            commands.add_column(overflow='fold')
+        else:
+            commands.add_column(style=MUTED, no_wrap=True)
+            commands.add_column(overflow='fold')
+        for command, usage, description in entries:
+            if compact:
+                detail = Text(usage + '\n', style=MUTED) if usage else Text()
+                detail.append(description)
+                commands.add_row(command, detail)
+            else:
+                commands.add_row(command, usage, description)
         return commands
 
     def _command_panel_body(self) -> Group:
@@ -567,6 +581,13 @@ class TerminalPresenter:
     # ------------------------------------------------------------------
     # 搜索结果
     # ------------------------------------------------------------------
+    def search_position(self, filter_text: str, count: int, total: int, page: int) -> None:
+        pages = max(1, (count + SEARCH_PAGE_SIZE - 1) // SEARCH_PAGE_SIZE)
+        state = Text('本地筛选  ' if filter_text else '搜索缓存  ', style=f'bold {ACCENT}')
+        state.append(filter_text or '全部结果', style='bold')
+        state.append(f'\n匹配 {count} / {total} 条  ·  第 {page}/{pages} 页', style=MUTED)
+        self.print(Panel(state, border_style=MUTED, padding=(0, 1)))
+
     @staticmethod
     def search_progress(outcome: SearchOutcome, completed: int, total: int) -> Text:
         return Text(
@@ -611,7 +632,16 @@ class TerminalPresenter:
         page: int = 1,
         page_size: int | None = SEARCH_PAGE_SIZE,
         source_stats: list[SourceStat] | None = None,
+        result_indices: list[int] | None = None,
+        filter_text: str = '',
     ) -> None:
+        indices = range(len(comics)) if result_indices is None else result_indices
+        count = len(indices)
+        if filter_text:
+            self.search_position(filter_text, count, len(comics), page)
+        if not count and filter_text:
+            self.warn('没有匹配的缓存结果。输入 f 清除筛选，或 f <其他关键词> 重新筛选。')
+            return
         if not comics:
             self.warn(f'未找到与 "{keyword}" 相关的结果。')
             self._print_source_stats(source_stats)
@@ -622,7 +652,9 @@ class TerminalPresenter:
             show_header=True,
             header_style=f'bold {ACCENT}',
             border_style=MUTED,
+            box=box.SIMPLE_HEAD,
             pad_edge=False,
+            padding=(0, 1),
         )
         table.add_column('序号', justify='right', no_wrap=True, style=ACCENT)
         table.add_column('动漫源')
@@ -633,9 +665,10 @@ class TerminalPresenter:
         if not compact:
             table.add_column('URL', overflow='fold', style=MUTED)
 
-        size = page_size or len(comics)
+        size = page_size or count
         start = (page - 1) * size
-        for index, comic in enumerate(comics[start : start + size], start=start):
+        for index in indices[start : start + size]:
+            comic = comics[index]
             cells = [
                 Text(str(index + 1)),
                 Text(source_display_names.get(comic.source, comic.source or 'N/A')),
@@ -649,13 +682,30 @@ class TerminalPresenter:
 
         footer = f'共 [{ACCENT}]{len(comics)}[/] 条结果，用时 [{ACCENT}]{duration:.1f}s[/]'
         self.print(Group(table, Text(''), footer))
-        pages = max(1, (len(comics) + size - 1) // size)
-        if pages > 1:
-            self.info(f'第 {page}/{pages} 页；p <页码> 翻页。i / d 使用表中原序号。')
+        if page_size is not None:
+            self._search_navigation(page, size, count)
         if compact:
             self.info('窄屏模式：使用 i <序号> 查看作者和完整 URL。')
         self.info('下一步：i <序号> 查看分组；d <序号> 全量下载。')
         self._print_source_stats(source_stats)
+
+    def _search_navigation(self, page: int, size: int, count: int) -> None:
+        pages = max(1, (count + size - 1) // size)
+        start = (page - 1) * size
+        navigation = []
+        if page > 1:
+            navigation.append('p prev 上一页')
+        if page < pages:
+            navigation.append('p next 下一页')
+        self.print(
+            Text(
+                f'第 {page}/{pages} 页  ·  显示 {start + 1}～{min(start + size, count)} / {count} 条',
+                style=ACCENT,
+            )
+        )
+        if navigation:
+            self.info('  ·  '.join(navigation))
+        self.info('f <关键词> 筛选名称 / 作者 / 源；f 清除。i / d 使用表中原序号。')
 
     def _print_source_stats(self, source_stats: list[SourceStat] | None) -> None:
         """在结果下方渲染一行紧凑的各源执行状态，帮助用户一眼看出哪个源失败了。"""
@@ -715,7 +765,7 @@ class TerminalPresenter:
         if pages > 1:
             self.info(
                 f'分组 {book_index + 1} · 第 {page}/{pages} 页；'
-                f'ch {book_index + 1} <页码> 翻页，v 使用原话序号。'
+                f'ch {book_index + 1} <页码/next/prev> 翻页，v 使用原话序号。'
             )
 
     def chapter_table(

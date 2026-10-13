@@ -445,6 +445,93 @@ def test_long_chapter_pagination_preserves_download_range(shell):
     ]
 
 
+def test_filter_navigation_preserves_selection_and_never_searches_again(shell, monkeypatch):
+    searches = []
+
+    def search(self, keyword):
+        searches.append(keyword)
+        results = make_search_results(self, 25)
+        for comic in results:
+            comic.author = '测试作者'
+        return results
+
+    monkeypatch.setattr(WorkflowSource, 'search', search)
+    shell.onecmd('s 漫画')
+    original = list(shell.context.searched_results)
+    shell.onecmd('f SECOND 测试作者')
+    assert shell.search_result_indices == list(range(25, 50))
+    assert shell.search_page == 1
+    shell.onecmd('p next')
+    assert shell.search_page == 2
+    assert 'second-025' in shell.console.file.getvalue()
+    shell.onecmd('p')
+    assert shell.search_page == 2
+    shell.onecmd('p next')
+    assert shell.last_command_ok is False
+    assert shell.search_page == 2
+    shell.onecmd('p prev')
+    assert shell.search_page == 1
+    shell.onecmd('i 46')
+    assert shell.context.comic.url == 'https://second.test/21'
+    shell.onecmd('d 46')
+    assert shell.last_command_ok is True
+    assert shell.job_store.list_jobs()[0][0].comic_url == 'https://second.test/21'
+    assert shell.context.searched_results == original
+    assert searches == ['漫画', '漫画']
+    shell.onecmd('f')
+    assert shell.search_result_indices is None
+    assert shell.search_filter == ''
+    assert shell.search_page == 1
+
+
+@pytest.mark.parametrize('term', ['测试漫画源', '[red]', 'FIRST'])
+def test_filter_matches_literal_titles_and_source_names(shell, term):
+    shell.onecmd('s 漫画')
+    shell.onecmd(f'f {term}')
+    assert shell.last_command_ok is True
+    assert shell.search_result_indices == ([0] if term == 'FIRST' else [0, 1])
+
+
+def test_empty_filter_results_are_recoverable_and_new_search_resets_view(shell):
+    shell.onecmd('f 漫画')
+    assert shell.last_command_ok is False
+    shell.onecmd('s 漫画')
+    shell.onecmd('i 1')
+    comic = shell.context.comic
+    shell.onecmd('f 无匹配内容')
+    assert shell.last_command_ok is True
+    assert shell.search_result_indices == []
+    assert shell.context.comic is comic
+    shell.onecmd('status')
+    assert '匹配 0 / 2 条' in shell.console.file.getvalue()
+    shell.onecmd('p next')
+    assert shell.last_command_ok is False
+    shell.onecmd('f')
+    assert shell.search_result_indices is None
+    shell.onecmd('f first')
+    shell.onecmd('s 新搜索')
+    assert shell.search_filter == ''
+    assert shell.search_result_indices is None
+    assert shell.search_page == 1
+
+
+def test_chapter_navigation_remembers_each_group_and_resets_for_new_comic(shell):
+    shell.onecmd('i https://first.test/comic')
+    book = shell.context.comic.books[0]
+    book.vols = [ComicVolume(f'V{i}', f'https://first.test/{i}') for i in range(125)]
+    shell.context.comic.books.append(book)
+    shell.onecmd('ch 1 next')
+    shell.onecmd('ch 2 3')
+    shell.onecmd('ch 1')
+    assert shell.chapter_pages == {0: 2, 1: 3}
+    shell.onecmd('ch 1 prev')
+    shell.onecmd('ch 1 prev')
+    assert shell.last_command_ok is False
+    assert shell.chapter_pages == {0: 1, 1: 3}
+    shell.onecmd('i https://second.test/comic')
+    assert shell.chapter_pages == {}
+
+
 @pytest.mark.parametrize(
     'command',
     [

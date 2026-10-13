@@ -1,7 +1,7 @@
 [project]
 name = "comic_downloader"
 dynamic = ["version"]
-description = "Effortlessly download comics via this lightweight, single-threaded command-line tool."
+description = "A terminal comic downloader with multi-source search, concurrent image downloads, and resumable tasks."
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "fjcanyue" }]

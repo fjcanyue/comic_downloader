@@ -278,6 +278,10 @@ class Shell(cmd.Cmd):
         self.search_keyword = ''
         self.search_duration = 0.0
         self.search_outcomes: list[SearchOutcome] = []
+        self.search_filter = ''
+        self.search_result_indices: list[int] | None = None
+        self.search_page = 1
+        self.chapter_pages: dict[int, int] = {}
         self.paginate_output = True
 
     def emptyline(self) -> bool:
@@ -323,23 +327,60 @@ class Shell(cmd.Cmd):
         )
         if self.search_outcomes:
             self.presenter.search_report(self.search_outcomes)
+        if self.search_keyword:
+            self.presenter.search_position(
+                self.search_filter,
+                self._search_result_count(),
+                len(self.context.searched_results),
+                self.search_page,
+            )
+
+    def _search_result_count(self) -> int:
+        if self.search_result_indices is None:
+            return len(self.context.searched_results)
+        return len(self.search_result_indices)
+
+    def do_f(self, arg):
+        """f [关键词]：在缓存中筛选名称、作者、源代码或源名称；空格分词且全部匹配，忽略大小写。单独输入 f 清除筛选，序号不变。"""
+        self.last_command_ok = False
+        if not self.search_keyword:
+            self.presenter.warn('请先使用 s <关键词> 搜索。')
+            return
+        self.search_filter = arg.strip()
+        terms = self.search_filter.casefold().split()
+        self.search_result_indices = None
+        if terms:
+            self.search_result_indices = []
+            for index, comic in enumerate(self.context.searched_results):
+                fields = [comic.name, comic.author, comic.source]
+                if comic.source:
+                    fields.append(self._source_display_name(comic.source))
+                haystack = ' '.join(field or '' for field in fields).casefold()
+                if all(term in haystack for term in terms):
+                    self.search_result_indices.append(index)
+        self.search_page = 1
+        self._print_search_table(self.search_keyword, self.search_duration)
+        self.last_command_ok = True
 
     def do_p(self, arg):
-        """p [页码]：翻看最近一次搜索结果，每页 20 条，序号保持不变，不重新请求网站。"""
+        """p [页码/next/prev]：翻看缓存搜索结果，每页 20 条；无参数重显当前页，支持筛选，序号不变。"""
         self.last_command_ok = False
         if not self.search_keyword:
             self.presenter.warn('请先使用 s <关键词> 搜索。')
             return
         try:
-            page = self._read_page(arg, len(self.context.searched_results), SEARCH_PAGE_SIZE)
+            page = self._read_page(
+                arg, self._search_result_count(), SEARCH_PAGE_SIZE, self.search_page
+            )
         except ValueError as exc:
             self.presenter.warn(str(exc))
             return
         self._print_search_table(self.search_keyword, self.search_duration, page=page)
+        self.search_page = page
         self.last_command_ok = True
 
     def do_ch(self, arg):
-        """ch <分组> [页码]：翻看当前漫画的章节，每页 60 话；下载使用原有话序号。"""
+        """ch <分组> [页码/next/prev]：翻看章节，每页 60 话；无页码重显该分组当前页，下载使用原话序号。"""
         self.last_command_ok = False
         if self.context.comic is None:
             self.presenter.warn('请先使用 i <序号/URL> 查看漫画详情。')
@@ -355,20 +396,31 @@ class Shell(cmd.Cmd):
                 args[1] if len(args) == VOLUME_TO_ARG_COUNT else '',
                 len(book.vols),
                 CHAPTER_PAGE_SIZE,
+                self.chapter_pages.get(book_index, 1),
             )
         except ValueError as exc:
             self.presenter.warn(str(exc))
             return
         self.presenter.chapter_page(book_index, book, page)
+        self.chapter_pages[book_index] = page
         self.last_command_ok = True
 
     @staticmethod
-    def _read_page(arg: str, total: int, page_size: int) -> int:
+    def _read_page(arg: str, total: int, page_size: int, current: int = 1) -> int:
         pages = max(1, (total + page_size - 1) // page_size)
+        value = arg.strip().casefold()
+        if value == 'next':
+            if current >= pages:
+                raise ValueError(f'已是最后一页（第 {current}/{pages} 页）。')
+            return current + 1
+        if value == 'prev':
+            if current <= 1:
+                raise ValueError(f'已是第一页（共 {pages} 页）。')
+            return current - 1
         try:
-            return parse_1_based_index(arg.strip() or '1', pages, '页码') + 1
+            return parse_1_based_index(value or str(current), pages, '页码') + 1
         except ValueError:
-            raise ValueError(f'页码必须是 1～{pages} 的整数。') from None
+            raise ValueError(f'页码必须是 1～{pages} 的整数，或 next / prev。') from None
 
     def do_tasks(self, arg):
         """tasks [任务ID]：列出当前保存路径中的下载任务，或查看某个任务的章节与错误。"""
@@ -916,6 +968,8 @@ class Shell(cmd.Cmd):
             page=page,
             page_size=SEARCH_PAGE_SIZE if self.paginate_output else None,
             source_stats=source_stats,
+            result_indices=self.search_result_indices,
+            filter_text=self.search_filter,
         )
 
     def _build_source_stats(
@@ -953,6 +1007,9 @@ class Shell(cmd.Cmd):
         self.search_keyword = arg
         self.search_duration = 0
         self.search_outcomes = []
+        self.search_filter = ''
+        self.search_result_indices = None
+        self.search_page = 1
         tasks = self._build_search_tasks()
         if not tasks:
             self.presenter.warn('没有可用于搜索的源，请检查源配置或浏览器驱动。')
@@ -1069,6 +1126,7 @@ class Shell(cmd.Cmd):
         return None
 
     def _print_comic_info(self, comic: Comic) -> None:
+        self.chapter_pages.clear()
         self.presenter.comic_info(comic, paginate=self.paginate_output)
 
     def _print_chapter_tables(self, comic: Comic) -> None:
