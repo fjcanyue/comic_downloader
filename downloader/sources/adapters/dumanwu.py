@@ -8,6 +8,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 
 from downloader.comic import Comic, ComicBook, ComicSource, ComicVolume, logger
+from downloader.sources.parsing import finalize_comic_info, http_url, node_text, parse_warning
 
 METADATA_PAIR_LENGTH = 2
 
@@ -77,7 +78,9 @@ class DumanwuComic(ComicSource):
                     self.search_error = '部分搜索条目缺少漫画地址，已保留其余有效结果'
                     self.logger.warning('解析到一个没有URL的漫画条目，已跳过。')
                     continue
-                comic.url = f'{self.base_url}{url_part}'
+                comic.url = http_url(url_part, self.base_url + '/')
+                if not comic.url:
+                    raise ValueError('搜索条目缺少有效 HTTP 地址')
                 # 作者信息未在此处直接提供，设为空
                 comic.author = ''
                 comic.name = b.attrib.get('title', '未知漫画')
@@ -120,7 +123,7 @@ class DumanwuComic(ComicSource):
             comic_name=comic.name,
             count=len(comic.books),
         )
-        return comic
+        return finalize_comic_info(comic, url)
 
     def _parse_comic_header(self, root, url):
         try:
@@ -135,7 +138,9 @@ class DumanwuComic(ComicSource):
             if not name_nodes:
                 self.logger.error('解析动漫名称失败: {url}', url=url)
                 return None
-            comic.name = name_nodes[0].text.strip()
+            comic.name = node_text(name_nodes[0])
+            if not comic.name:
+                return None
             self.logger.debug('动漫名称: {comic_name}', comic_name=comic.name)
         except Exception as e:
             self.logger.exception(
@@ -193,30 +198,27 @@ class DumanwuComic(ComicSource):
             comic_book = ComicBook()
             comic_book.name = f'章节列表{book_index + 1}'
             self.logger.debug('处理章节分组: %s', comic_book.name)
-            self._append_initial_volumes(book, comic_book)
+            self._append_initial_volumes(book, comic_book, url)
             self._append_more_chapters(book, comic_book, url)
             comic_book.vols.reverse()
-            if comic_book.vols:
-                comic.books.append(comic_book)
-            else:
-                self.logger.warning(
-                    "章节分组 '{book_name}' 不包含任何有效卷，已跳过.", book_name=comic_book.name
-                )
+            comic.books.append(comic_book)
 
-    def _append_initial_volumes(self, book, comic_book):
+    def _append_initial_volumes(self, book, comic_book, page_url):
         vol_list_nodes = book.xpath('ul/a')
         for vol_node in vol_list_nodes:
             vol_name = '未知卷'
             try:
                 li_node = vol_node.xpath('li')
                 if not li_node:
+                    parse_warning(comic_book, '部分章节缺少名称，已保留其余章节。')
                     self.logger.warning(
                         '卷信息缺少<li>标签: {node}',
                         node=etree.tostring(vol_node, encoding='unicode'),
                     )
                     continue
-                li_text = li_node[0].text
+                li_text = node_text(li_node[0])
                 if not li_text:
+                    parse_warning(comic_book, '部分章节缺少名称，已保留其余章节。')
                     self.logger.warning(
                         '卷名称文本为空: {node}',
                         node=etree.tostring(vol_node, encoding='unicode'),
@@ -224,10 +226,11 @@ class DumanwuComic(ComicSource):
                     continue
                 vol_name = li_text.strip()
                 vol_url_part = vol_node.attrib.get('href')
-                if not vol_url_part:
+                full_vol_url = http_url(vol_url_part, page_url)
+                if not full_vol_url:
+                    parse_warning(comic_book, '部分章节地址无效，已保留其余章节。')
                     self.logger.warning("卷 '{vol_name}' 的URL部分为空，跳过.", vol_name=vol_name)
                     continue
-                full_vol_url = self.base_url + vol_url_part
                 comic_book.vols.append(ComicVolume(vol_name, full_vol_url, comic_book.name))
                 self.logger.debug(
                     '  找到卷 (初始列表): {vol_name} ({full_vol_url})',
@@ -235,6 +238,7 @@ class DumanwuComic(ComicSource):
                     full_vol_url=full_vol_url,
                 )
             except Exception as e:
+                parse_warning(comic_book, '部分章节解析失败，已保留其余章节。')
                 self.logger.exception(
                     "解析卷 '{vol_name}' 时出错: {error}", vol_name=vol_name, error=e
                 )
@@ -242,7 +246,10 @@ class DumanwuComic(ComicSource):
     def _append_more_chapters(self, book, comic_book, url):
         response = None
         try:
-            more_div = book.xpath('//div[contains(@class,"chaplist-more")]')
+            more_div = book.xpath(
+                './/div[contains(@class,"chaplist-more")] | '
+                'following-sibling::*[1][self::div[contains(@class,"chaplist-more")]]'
+            )
             if not more_div:
                 self.logger.warning('未找到加载更多章节入口: {url}', url=url)
                 return
@@ -266,24 +273,35 @@ class DumanwuComic(ComicSource):
             json_response = response.json()
             self._append_more_chapter_response(comic_book, comic_id, json_response)
         except requests.exceptions.RequestException as e:
+            parse_warning(comic_book, f'加载更多章节失败：{e}；当前章节列表可能不完整。')
             self.logger.exception('请求更多章节失败: {ex}', ex=e)
         except json.JSONDecodeError as e:
+            parse_warning(comic_book, '加载更多章节返回无效 JSON；当前章节列表可能不完整。')
             self.logger.exception(
                 '解析更多章节响应JSON失败: {ex}, 响应文本: {text}',
                 ex=e,
                 text=response.text[:200] if response is not None else 'N/A',
             )
         except Exception as e:
+            parse_warning(comic_book, f'加载更多章节解析失败：{e}；当前章节列表可能不完整。')
             self.logger.exception('处理更多章节时发生未知错误: {ex}', ex=e)
+        finally:
+            if response is not None:
+                response.close()
 
     def _append_more_chapter_response(self, comic_book, comic_id, json_response):
-        if json_response.get('code') == '200' and json_response.get('data'):
+        if str(json_response.get('code')) == '200' and json_response.get('data'):
             chapters = json_response.get('data', [])
+            if not isinstance(chapters, list):
+                raise ValueError('章节数据不是列表')
             self.logger.info('成功加载了 {count} 个章节', count=len(chapters))
             for chapter_data in chapters:
+                if not isinstance(chapter_data, dict):
+                    parse_warning(comic_book, '部分追加章节数据无效，已保留其余章节。')
+                    continue
                 chap_name = chapter_data.get('chaptername')
                 chap_id = chapter_data.get('chapterid')
-                if chap_name and chap_id:
+                if isinstance(chap_name, str) and chap_name.strip() and str(chap_id).isdecimal():
                     chap_url = f'{self.base_url}/{comic_id}/{chap_id}.html'
                     comic_book.vols.append(ComicVolume(chap_name, chap_url, comic_book.name))
                     self.logger.debug(
@@ -291,7 +309,10 @@ class DumanwuComic(ComicSource):
                         chap_name=chap_name,
                         chap_url=chap_url,
                     )
-        elif json_response.get('code') != '200':
+                else:
+                    parse_warning(comic_book, '部分追加章节缺少有效名称或编号，已保留其余章节。')
+        elif str(json_response.get('code')) != '200':
+            parse_warning(comic_book, '加载更多章节返回错误状态；当前章节列表可能不完整。')
             self.logger.warning(
                 '加载更多章节失败: 服务器返回代码 {code}, 消息: {msg}',
                 code=json_response.get('code'),

@@ -784,6 +784,22 @@ class TerminalPresenter:
     # ------------------------------------------------------------------
     # 动漫详情
     # ------------------------------------------------------------------
+    def comic_parse_notes(self, comic: Comic, *, downloading: bool = False) -> None:
+        if not comic.parse_warnings:
+            return
+        notes = comic.parse_warnings[:MAX_FAILURE_DETAIL_ROWS]
+        body = Text('\n'.join(notes))
+        if len(comic.parse_warnings) > MAX_FAILURE_DETAIL_ROWS:
+            body.append(
+                f'\n另有 {len(comic.parse_warnings) - MAX_FAILURE_DETAIL_ROWS} 项提示，详见日志。'
+            )
+        body.append('\n已保留可用章节；若数量不符，请重新获取详情或更换源。', style=MUTED)
+        if downloading:
+            body.append(
+                '\n本次任务仅包含已解析的所选章节；任务完成不代表网站全书已完整获取。', style=WARN
+            )
+        self.print(Panel(body, title='章节解析提示', border_style=WARN, padding=(0, 1)))
+
     def comic_info(self, comic: Comic, *, paginate: bool = True) -> None:
         self.print(Rule(style=ACCENT))
         header_parts = [Text(comic.name or '未知漫画', style=f'bold {ACCENT}')]
@@ -800,6 +816,7 @@ class TerminalPresenter:
             body_lines.extend(Text(f'{meta["k"]}: {meta["v"]}') for meta in comic.metadata)
 
         self.print(Panel(Group(*body_lines), border_style=ACCENT, padding=(0, 1)))
+        self.comic_parse_notes(comic)
 
         for book_index, book in enumerate(comic.books):
             if paginate:

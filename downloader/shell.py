@@ -1228,6 +1228,7 @@ class Shell(cmd.Cmd):
         )
 
     def _start_job(self, comic: Comic, volumes: list[JobVolume]):
+        self.presenter.comic_parse_notes(comic, downloading=True)
         if not volumes:
             self.presenter.warn('没有可下载章节，未创建任务。')
             return None

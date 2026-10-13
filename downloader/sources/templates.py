@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
-from urllib.parse import quote, urljoin
+from urllib.parse import quote
 
 from loguru import logger
 from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
 
 from downloader.models import Comic, ComicBook, ComicVolume
+from downloader.sources.parsing import finalize_comic_info, http_url, node_text, parse_warning
 
 
 class SourceUrlMixin:
@@ -28,11 +29,7 @@ class SourceUrlMixin:
         ) -> Any: ...
 
     def absolute_url(self, url_part: str | None, base_url: str | None = None) -> str | None:
-        if not url_part:
-            return None
-        if url_part.startswith('http'):
-            return url_part
-        return urljoin((base_url or self.base_url).rstrip('/') + '/', url_part)
+        return http_url(url_part, base_url or self.base_url.rstrip('/') + '/')
 
     def _parse_html_with_encoding(self, url: str, encoding: str = 'utf-8'):
         if encoding == 'utf-8':
@@ -43,13 +40,15 @@ class SourceUrlMixin:
         values = node.xpath(xpath)
         if not values:
             return None
+        if isinstance(values, str):
+            return values.strip() or None
         if all(isinstance(value, str) for value in values):
             text = ''.join(value.strip() for value in values if value.strip())
             return text or None
         value = values[0]
-        text = getattr(value, 'text', None)
-        if isinstance(text, str) and text.strip():
-            return text.strip()
+        text = node_text(value)
+        if text:
+            return text
         text_content = value.xpath('string()') if hasattr(value, 'xpath') else None
         return (
             text_content.strip()
@@ -186,7 +185,7 @@ class GroupedChapterInfoMixin(SourceUrlMixin):
             comic.name,
             len(comic.books),
         )
-        return comic
+        return finalize_comic_info(comic, url)
 
     def _parse_comic_header(self, root, url):
         try:
@@ -221,31 +220,30 @@ class GroupedChapterInfoMixin(SourceUrlMixin):
         for book in book_list:
             book_name = self._first_xpath_value(book, self.config['info_book_name_xpath'])
             if not isinstance(book_name, str) or not book_name:
-                logger.warning('Chapter group title was not found, skipped: {}', url)
-                continue
+                book_name = f'章节分组 {len(comic.books) + 1}'
+                parse_warning(comic, '部分分组缺少标题，已使用默认名称保留章节。')
             comic_book = ComicBook()
             comic_book.name = book_name
             logger.debug('Processing chapter group: {}', comic_book.name)
-            self._append_book_volumes(book, comic_book)
+            self._append_book_volumes(book, comic_book, url)
             if self.reverse_volumes:
                 comic_book.vols.reverse()
-            if comic_book.vols:
-                comic.books.append(comic_book)
-            else:
-                logger.warning("Chapter group '{}' has no valid volumes, skipped.", comic_book.name)
+            comic.books.append(comic_book)
 
-    def _append_book_volumes(self, book, comic_book) -> None:
+    def _append_book_volumes(self, book, comic_book, page_url: str) -> None:
         vol_list = book.xpath(self.config['info_vols_xpath'])
         extract = self.config['info_vol_extract']
         for vol_node in vol_list:
             vol_title = self._first_xpath_value(vol_node, extract['name'])
             vol_href = self._first_xpath_value(vol_node, extract['url'])
             if not isinstance(vol_title, str) or not isinstance(vol_href, str) or not vol_href:
+                parse_warning(comic_book, '部分章节缺少名称或地址，已保留其余章节。')
                 logger.warning('Incomplete volume info: {}', self._node_debug_string(vol_node))
                 continue
 
-            full_vol_url = self.absolute_url(vol_href)
+            full_vol_url = self.absolute_url(vol_href, page_url)
             if not full_vol_url:
+                parse_warning(comic_book, '部分章节地址无效，已保留其余章节。')
                 logger.warning("Volume '{}' has empty URL part, skipped.", vol_title)
                 continue
             comic_book.vols.append(ComicVolume(vol_title, full_vol_url, comic_book.name))
@@ -270,6 +268,7 @@ class SingleBookChapterInfoMixin(GroupedChapterInfoMixin):
                 vol_name = self._extract_volume_name(chapter_node, extract)
                 vol_href = self._extract_volume_href(chapter_node, extract)
                 if not vol_href:
+                    parse_warning(comic_book, '部分章节缺少地址，已保留其余章节。')
                     logger.warning(
                         'Incomplete volume info: {}',
                         self._node_debug_string(chapter_node)[:200],
@@ -279,14 +278,17 @@ class SingleBookChapterInfoMixin(GroupedChapterInfoMixin):
                     vol_name = chapter_node.get('title', '').strip()
                 if not vol_name:
                     vol_name = '未知章节'
+                    parse_warning(comic_book, '部分章节缺少名称，已使用默认名称。')
 
-                full_vol_url = self.absolute_url(vol_href)
+                full_vol_url = self.absolute_url(vol_href, url)
                 if not full_vol_url:
+                    parse_warning(comic_book, '部分章节地址无效，已保留其余章节。')
                     logger.warning("Volume '{}' has empty URL part, skipped.", vol_name)
                     continue
                 comic_book.vols.append(ComicVolume(vol_name, full_vol_url, comic_book.name))
                 logger.debug('  Found volume: {} ({})', vol_name, full_vol_url)
             except Exception:
+                parse_warning(comic_book, '部分章节解析失败，已保留其余章节。')
                 logger.warning(
                     'Failed to parse chapter item: {}',
                     self._node_debug_string(chapter_node)[:200],
@@ -296,10 +298,7 @@ class SingleBookChapterInfoMixin(GroupedChapterInfoMixin):
 
         if self.reverse_volumes:
             comic_book.vols.reverse()
-        if comic_book.vols:
-            comic.books.append(comic_book)
-        else:
-            logger.warning('Chapter group contains no valid volumes and was skipped: {}', url)
+        comic.books.append(comic_book)
 
     def _extract_volume_name(self, chapter_node, extract: dict[str, str]) -> str:
         vol_name = self._first_xpath_value(chapter_node, extract['name'])

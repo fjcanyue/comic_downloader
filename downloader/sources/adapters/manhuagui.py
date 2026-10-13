@@ -1,8 +1,9 @@
-from urllib.parse import quote, urljoin
+from urllib.parse import quote
 
 from selenium.webdriver.support.ui import WebDriverWait
 
 from downloader.comic import Comic, ComicBook, ComicSource, ComicVolume, logger
+from downloader.sources.parsing import finalize_comic_info, http_url, node_text, parse_warning
 
 
 class ManhuaguiComic(ComicSource):
@@ -70,7 +71,9 @@ class ManhuaguiComic(ComicSource):
         if not href:
             raise ValueError('搜索条目缺少漫画地址')
         comic = Comic()
-        comic.url = urljoin(self.base_url, href)
+        comic.url = http_url(href, self.base_url + '/')
+        if not comic.url:
+            raise ValueError('搜索条目缺少有效 HTTP 地址')
         authors = book.xpath('div[contains(@class,"book-detail")]/dl/dd[3]/span/a')
         comic.author = ', '.join(author.text for author in authors if author.text)
         comic.name = link.attrib.get('title') or '未知漫画'
@@ -90,7 +93,7 @@ class ManhuaguiComic(ComicSource):
         self._append_metadata(root, comic)
         self._append_books(root, comic, url)
         logger.info('看漫画 动漫详细信息获取完成: {}, 共 {} 个章节.', comic.name, len(comic.books))
-        return comic
+        return finalize_comic_info(comic, url)
 
     def _parse_comic_header(self, root, url):
         try:
@@ -100,7 +103,7 @@ class ManhuaguiComic(ComicSource):
             if not name_nodes:
                 logger.error('解析动漫名称失败，未找到标题元素: {}', url)
                 return None
-            name_text = name_nodes[0].text
+            name_text = node_text(name_nodes[0])
             if not name_text or not name_text.strip():
                 logger.error('解析动漫名称失败，标题文本为空: {}', url)
                 return None
@@ -140,14 +143,16 @@ class ManhuaguiComic(ComicSource):
                 # 尝试更稳健地获取章节标题
                 title_node = book_node.xpath('preceding-sibling::h4[1]/span | self::div/h4/span')
                 if title_node:
-                    comic_book.name = title_node[0].text.strip()
+                    comic_book.name = node_text(title_node[0]) or f'章节卷 {book_index + 1}'
                 else:  # 如果特定结构找不到，尝试通用一些的父/兄节点标题
                     # 这是一个备用逻辑，可能需要根据实际页面调整
                     fallback_title_nodes = book_node.xpath(
                         '../h4/span | ../../h4/span | preceding-sibling::div[contains(@class, "title")]/h4/span'
                     )
                     if fallback_title_nodes:
-                        comic_book.name = fallback_title_nodes[0].text.strip()
+                        comic_book.name = (
+                            node_text(fallback_title_nodes[0]) or f'章节卷 {book_index + 1}'
+                        )
                     else:
                         comic_book.name = f'章节卷 {book_index + 1}'  # 默认名称
                 logger.debug('处理章节: {}', comic_book.name)
@@ -161,25 +166,30 @@ class ManhuaguiComic(ComicSource):
                 try:
                     a_nodes = vol.xpath('a')
                     if not a_nodes:
+                        parse_warning(comic_book, '部分章节缺少链接，已保留其余章节。')
                         logger.warning('卷信息缺少链接元素: {}', url)
                         continue
                     v = a_nodes[0]
                     span_nodes = v.xpath('span')
-                    if not span_nodes or not span_nodes[0].text:
+                    if not span_nodes or not node_text(span_nodes[0]):
+                        parse_warning(comic_book, '部分章节缺少名称，已保留其余章节。')
                         logger.warning('卷信息缺少名称: {}', url)
                         continue
                     vol_href = v.attrib.get('href')
-                    if not vol_href:
+                    full_url = http_url(vol_href, url)
+                    if not full_url:
+                        parse_warning(comic_book, '部分章节地址无效，已保留其余章节。')
                         logger.warning("卷 '{}' 的URL部分为空，跳过.", span_nodes[0].text)
                         continue
                     comic_book.vols.append(
                         ComicVolume(
-                            span_nodes[0].text.strip(),
-                            self.base_url + '/' + vol_href,
+                            node_text(span_nodes[0]),
+                            full_url,
                             comic_book.name,
                         )
                     )
                 except Exception as e:
+                    parse_warning(comic_book, '部分章节解析失败，已保留其余章节。')
                     logger.warning('解析卷信息时出错: {}, 错误: {}', url, e, exc_info=True)
                     continue
             comic_book.vols.reverse()

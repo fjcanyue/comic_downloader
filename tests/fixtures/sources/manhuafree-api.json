@@ -1,0 +1,10 @@
+{
+  "code": 200,
+  "data": {
+    "title": "星海纪行", "slug": "starsea", "status": 1, "desc": "用于离线回归的虚构作品。",
+    "chapters": [
+      {"attributes": {"title": "第二话", "slug": "chapter-2"}},
+      {"attributes": {"title": "第一话", "slug": "chapter-1"}}
+    ]
+  }
+}

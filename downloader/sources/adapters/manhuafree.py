@@ -7,6 +7,7 @@ from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
 
 from downloader.browser.modes import REQUESTS_MODE
 from downloader.comic import Comic, ComicBook, ComicSource, ComicVolume, logger
+from downloader.sources.parsing import finalize_comic_info, http_url, parse_warning
 
 # 漫画状态码映射
 STATUS_MAP = {'0': '完结', '1': '连载', '2': '暂停'}
@@ -34,17 +35,22 @@ class ManhuafreeComic(ComicSource):
     def _api_get(self, path, params=None):
         """调用 API 并返回 JSON 数据，失败返回 None"""
         api_url = f'{self.config["api_base_url"]}{path}'
+        resp = None
         try:
             resp = self.http.get(
                 api_url,
                 params=params,
                 headers={'Referer': self.base_url, 'User-Agent': 'Mozilla/5.0'},
+                timeout=30,
             )
             resp.raise_for_status()
             return resp.json()
         except Exception as e:
             logger.error('API 请求失败: {}, 错误: {}', api_url, e, exc_info=True)
             return None
+        finally:
+            if resp is not None:
+                resp.close()
 
     def _extract_mid(self, root, url):
         """从页面提取 data-mid 属性"""
@@ -115,7 +121,9 @@ class ManhuafreeComic(ComicSource):
                 logger.warning('解析到一个没有URL的漫画条目，已跳过。')
                 return None
             comic = Comic()
-            comic.url = self.base_url + url_part if url_part.startswith('/') else url_part
+            comic.url = http_url(url_part, self.base_url + '/')
+            if not comic.url:
+                raise ValueError('搜索条目缺少有效 HTTP 地址')
             name_text = item.get('name') or ''
             comic.name = name_text.strip() or '未知漫画'
             comic.author = ''
@@ -177,19 +185,30 @@ class ManhuafreeComic(ComicSource):
 
         slug = manga.get('slug', '')
         chapters = manga.get('chapters', [])
+        if not isinstance(chapters, list):
+            parse_warning(comic_book, '章节数据不是列表，无法解析章节。')
+            chapters = []
         for chapter in chapters:
-            attrs = chapter.get('attributes', {})
-            ch_title = attrs.get('title', '').strip()
-            ch_slug = attrs.get('slug', '')
-            if ch_title and ch_slug and slug:
-                ch_url = f'{self.base_url}/manga/{slug}/{ch_slug}'
-                comic_book.vols.append(ComicVolume(ch_title, ch_url, comic_book.name))
+            attrs = chapter.get('attributes', {}) if isinstance(chapter, dict) else {}
+            if not isinstance(attrs, dict):
+                attrs = {}
+            ch_title = attrs.get('title')
+            ch_slug = attrs.get('slug')
+            if (
+                isinstance(ch_title, str)
+                and ch_title.strip()
+                and isinstance(ch_slug, str)
+                and ch_slug.strip()
+                and isinstance(slug, str)
+                and slug.strip()
+            ):
+                ch_url = f'{self.base_url}/manga/{quote(slug, safe="")}/{quote(ch_slug, safe="")}'
+                comic_book.vols.append(ComicVolume(ch_title.strip(), ch_url, comic_book.name))
+            else:
+                parse_warning(comic_book, '部分章节缺少有效标题或路径，已保留其余章节。')
 
         comic_book.vols.reverse()
-        if comic_book.vols:
-            comic.books.append(comic_book)
-        else:
-            logger.warning('章节列表不包含任何有效章节: {}', url)
+        comic.books.append(comic_book)
 
         logger.info(
             '{} 动漫详细信息获取完成: {}, 共 {} 个章节.',
@@ -197,7 +216,7 @@ class ManhuafreeComic(ComicSource):
             comic.name,
             len(comic_book.vols),
         )
-        return comic
+        return finalize_comic_info(comic, url)
 
     def __parse_imgs__(self, url):
         logger.info('开始从 {} 解析图片列表: {}', self.name, url)

@@ -20,6 +20,23 @@ from downloader.tui import RetryTaskView, SourceStat, SourceView, TerminalPresen
 
 
 @pytest.mark.parametrize('width', [40, 80, 120])
+def test_catalog_warnings_are_visible_literal_and_bounded(width):
+    output = StringIO()
+    presenter = TerminalPresenter(Console(file=output, width=width, color_system=None))
+    comic = Comic()
+    comic.name = '详情回归'
+    comic.parse_warnings = ['[red]追加章节失败[/]', *[f'提示{i}' for i in range(8)]]
+    presenter.comic_info(comic)
+    presenter.comic_parse_notes(comic, downloading=True)
+    rendered = output.getvalue()
+    assert '章节解析提示' in rendered
+    assert '[red]追加章节失败[/]' in rendered
+    assert '提示7' not in rendered
+    assert '另有 4 项提示' in rendered
+    assert '任务完成不代表网站全书已完整获取' in ''.join(rendered.replace('│', '').split())
+
+
+@pytest.mark.parametrize('width', [40, 80, 120])
 def test_filtered_search_shows_original_ids_literal_filter_and_navigation(width):
     output = StringIO()
     presenter = TerminalPresenter(Console(file=output, width=width, color_system=None))

@@ -490,6 +490,28 @@ def test_full_download_saves_all_groups(shell, monkeypatch):
     assert job.state == 'completed'
 
 
+def test_partial_catalog_warns_before_downloading_only_available_chapters(shell, monkeypatch):
+    original = WorkflowSource.info
+
+    def partial_info(self, url):
+        comic = original(self, url)
+        comic.parse_warnings = ['追加章节请求失败，当前列表可能不完整。']
+        return comic
+
+    monkeypatch.setattr(WorkflowSource, 'info', partial_info)
+    shell.onecmd('i https://first.test/comic')
+    assert '章节解析提示' in shell.console.file.getvalue()
+    shell.console.file.seek(0)
+    shell.console.file.truncate(0)
+    shell.onecmd('d https://first.test/comic')
+    assert shell.last_command_ok is True
+    output = shell.console.file.getvalue()
+    assert output.index('章节解析提示') < output.index('下载任务已保存')
+    job = shell.job_store.list_jobs()[0][0]
+    assert len(job.volumes) == 5
+    assert job.state == 'completed'
+
+
 def test_unavailable_driver_keeps_retryable_plan(shell, monkeypatch):
     shell.onecmd('i https://first.test/comic')
     monkeypatch.setattr(shell, '_ensure_source_download_ready', lambda: False)

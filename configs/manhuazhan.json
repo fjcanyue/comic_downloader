@@ -5,7 +5,7 @@
     "info_book_name_xpath": "div[contains(@class,'d-title')]/h2/text()",
     "info_vols_xpath": "div[contains(@class,'d-play-box')]/div[contains(@class,'d-player-list')]/a",
     "info_vol_extract": {
-        "name": "./text()",
+        "name": "string(.)",
         "url": "./@href"
     },
     "imgs_js": "return typeof newImgs !== \"undefined\" ? newImgs : [];"

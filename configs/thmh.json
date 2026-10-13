@@ -7,7 +7,7 @@
     },
     "info_name_xpath": "//div[contains(@class,'comic_deCon')]/h1",
     "info_meta_xpath": "//ul[contains(@class,'comic_deCon_liO')]/li",
-    "info_books_xpath": "//div[contains(@class,'zj_list')]",
+    "info_books_xpath": "//div[contains(concat(' ',normalize-space(@class),' '),' zj_list ')]",
     "info_book_name_xpath": "div[contains(@class,'zj_list_head')]/h2",
     "info_vols_xpath": "div[contains(@class,'zj_list_con')]/ul/li",
     "info_vol_extract": {

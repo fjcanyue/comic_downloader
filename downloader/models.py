@@ -20,6 +20,7 @@ class ComicBook:
     def __init__(self) -> None:
         self.name: str | None = None
         self.vols: list[ComicVolume] = []
+        self.parse_warnings: list[str] = []
 
 
 class Comic:
@@ -30,6 +31,7 @@ class Comic:
         self.source: str | None = None
         self.metadata: list[dict[str, str]] = []
         self.books: list[ComicBook] = []
+        self.parse_warnings: list[str] = []
 
 
 @dataclass
