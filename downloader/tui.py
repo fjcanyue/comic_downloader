@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -11,6 +12,7 @@ from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
 
+from downloader.download.job_browser import TASK_FILTER_LABELS, JobSummary, TaskQuery
 from downloader.download.jobs import DownloadJob
 from downloader.models import Comic, DownloadSummary, SearchOutcome, VolumeDownloadResult
 
@@ -157,7 +159,7 @@ class TerminalPresenter:
             ('p', '[页码/next/prev]', '翻看筛选结果；不填重显当前页'),
             ('ch', '<分组> [页码]', '翻看章节，也支持 next / prev'),
             ('status', '', '查看当前漫画、路径和覆盖模式'),
-            ('tasks', '[任务ID]', '查看下载计划和失败详情'),
+            ('tasks', '[状态/任务ID]', '筛选下载任务；next / prev 翻页'),
             ('d', '[序号/URL]', '下载当前或指定动漫'),
             ('v', '<章节> [范围]', '按范围下载章节'),
             ('source', '[序号/代码名]', '查看并切换动漫源'),
@@ -524,12 +526,44 @@ class TerminalPresenter:
         ]
         self.print(Panel(Text('\n'.join(rows)), title='当前状态', border_style=ACCENT))
 
-    def download_jobs(self, jobs: list[DownloadJob]) -> None:
+    def task_position(self, query: TaskQuery, count: int, total: int, size: int) -> None:
+        pages = max(1, (count + size - 1) // size)
+        noun = '章节' if query.job_id else '任务'
+        state = Text(f'{noun}筛选  {TASK_FILTER_LABELS[query.status]}', style=f'bold {ACCENT}')
+        state.append(f'\n匹配 {count} / {total} 项  ·  第 {query.page}/{pages} 页', style=MUTED)
+        self.print(Panel(state, border_style=MUTED, padding=(0, 1)))
+
+    def task_navigation(
+        self, query: TaskQuery, count: int, size: int, *, interactive: bool = True
+    ) -> None:
+        pages = max(1, (count + size - 1) // size)
+        command = (
+            f'tasks {query.job_id} {query.status}' if query.job_id else f'tasks {query.status}'
+        )
+        actions = []
+        if query.page > 1:
+            previous = 'tasks prev' if interactive else f'{command} {query.page - 1}'
+            actions.append(f'{previous} 上一页')
+        if query.page < pages:
+            following = 'tasks next' if interactive else f'{command} {query.page + 1}'
+            actions.append(f'{following} 下一页')
+        if actions:
+            self.info('  ·  '.join(actions))
+        if query.job_id:
+            self.info(f'tasks {query.job_id} failed 只看失败章节；tasks 返回全部任务。')
+        else:
+            self.info('tasks unfinished 只看未完成；tasks failed 只看有失败；tasks 返回全部任务。')
+
+    def download_jobs(
+        self, jobs: Sequence[DownloadJob | JobSummary], *, prefixes: dict[str, str] | None = None
+    ) -> None:
         if not jobs:
-            self.info('当前保存路径没有下载任务。执行 d 或 v 后会自动保存任务。')
+            self.info('当前列表没有任务。输入 tasks 返回全部任务；执行 d 或 v 创建任务。')
             return
-        table = Table(title='下载任务', header_style=f'bold {ACCENT}', border_style=MUTED)
-        table.add_column('任务 ID', no_wrap=True, min_width=12)
+        table = Table(
+            title='下载任务', header_style=f'bold {ACCENT}', border_style=MUTED, box=box.SIMPLE_HEAD
+        )
+        table.add_column('任务 ID', overflow='fold', min_width=12)
         table.add_column('漫画', overflow='fold')
         compact = self.console.width < COMPACT_TASK_WIDTH
         if compact:
@@ -538,8 +572,10 @@ class TerminalPresenter:
             table.add_column('完成', justify='right')
             table.add_column('状态')
         for job in jobs:
-            count = f'{len(job.volumes) - len(job.remaining)}/{len(job.volumes)}'
-            cells = [Text(job.id[:12]), Text(job.comic_name)]
+            summary = JobSummary.from_job(job) if isinstance(job, DownloadJob) else job
+            count = f'{summary.total - summary.remaining}/{summary.total}'
+            label = prefixes.get(job.id, job.id) if prefixes is not None else job.id[:12]
+            cells = [Text(label), Text(job.comic_name)]
             if compact:
                 cells.append(Text(f'{JOB_STATE_LABELS[job.state]}\n{count}'))
             else:
@@ -549,13 +585,14 @@ class TerminalPresenter:
         self.info('tasks <任务ID> 查看章节与错误；retry <任务ID> 继续未完成章节。')
         self.info('记录属于当前保存路径。未结束的任务可尝试 retry，正在运行的任务会提示占用。')
 
-    def download_job(self, job: DownloadJob) -> None:
+    def download_job(self, job: DownloadJob, *, volume_indices: list[int] | None = None) -> None:
+        remaining = sum(not volume.complete for volume in job.volumes)
         self.print(
             Panel(
                 Text(
                     f'任务：{job.id}\n漫画：{job.comic_name}\n源：{job.source_name}\n'
                     f'URL：{job.comic_url or "未记录"}\n状态：{JOB_STATE_LABELS[job.state]}\n'
-                    f'已完成：{len(job.volumes) - len(job.remaining)}/{len(job.volumes)}\n'
+                    f'已完成：{len(job.volumes) - remaining}/{len(job.volumes)}\n'
                     f'更新时间（UTC）：{job.updated_at}'
                 ),
                 title='任务详情',
@@ -564,19 +601,41 @@ class TerminalPresenter:
         )
         if job.error:
             self.warn(job.error)
-        table = Table(header_style=f'bold {ACCENT}', border_style=MUTED)
-        for title in ('分组', '卷/话', '状态', '说明'):
+        indices = range(len(job.volumes)) if volume_indices is None else volume_indices
+        table = Table(header_style=f'bold {ACCENT}', border_style=MUTED, box=box.SIMPLE_HEAD)
+        table.add_column('序号', justify='right', style=ACCENT)
+        compact = self.console.width < COMPACT_TASK_WIDTH
+        for title in ('卷/话', '状态 / 说明') if compact else ('分组', '卷/话', '状态', '说明'):
             table.add_column(title, overflow='fold')
-        for volume in job.volumes:
+        for index in indices:
+            volume = job.volumes[index]
             result = volume.result
             status = '待下载' if result is None else VOLUME_STATE_LABELS[result.status]
             note = '' if result is None else (result.message or '')
             if result and result.failed_images:
                 note = note or result.failed_images[0].error
-            table.add_row(Text(volume.book_name), Text(volume.name), status, Text(note))
-        self.print(table)
-        if job.remaining:
-            self.info(f'retry {job.id[:12]} 继续 {len(job.remaining)} 话；已成功的章节保持不变。')
+            if compact:
+                table.add_row(
+                    Text(str(index + 1)),
+                    Text(f'{volume.book_name}\n{volume.name}'),
+                    Text(f'{status}\n{note}' if note else status),
+                )
+            else:
+                table.add_row(
+                    Text(str(index + 1)),
+                    Text(volume.book_name),
+                    Text(volume.name),
+                    status,
+                    Text(note),
+                )
+        if indices:
+            self.print(table)
+        else:
+            self.info(
+                f'没有符合当前筛选的章节。tasks {job.id} all 查看全部章节，或 tasks 返回任务列表。'
+            )
+        if remaining:
+            self.info(f'retry {job.id} 继续 {remaining} 话；筛选不改变重试范围。')
 
     # ------------------------------------------------------------------
     # 搜索结果

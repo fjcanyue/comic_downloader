@@ -361,6 +361,122 @@ def test_tasks_does_not_initialize_browser_or_create_history_directory(shell, mo
     assert not shell.job_store.directory.exists()
 
 
+def make_browsable_jobs(shell, count):
+    jobs = []
+    for index in range(count):
+        job = DownloadJob(
+            'first',
+            f'漫画{index:03d}',
+            'https://first.test/comic',
+            [
+                JobVolume('正篇', f'第{number:03d}话', f'https://first.test/{number}')
+                for number in range(1, 66)
+            ],
+            id=f'{index + 1:032x}',
+            state='failed',
+        )
+        for volume in job.volumes:
+            volume.result = VolumeDownloadResult(volume.name, volume.url, 'failed', message='超时')
+        shell.job_store.save(job)
+        jobs.append(job)
+    return jobs
+
+
+def test_task_pages_filters_and_stable_details(shell):
+    jobs = make_browsable_jobs(shell, 23)
+    shell.onecmd('tasks unfinished')
+    output = shell.console.file
+    first = output.getvalue()
+    assert '漫画022' in first
+    assert '漫画000' not in first
+    assert 'tasks next' in first
+    shell.onecmd('tasks next')
+    assert shell.task_query.page == 2
+    assert '漫画000' in output.getvalue()
+    shell.onecmd('tasks next')
+    assert shell.last_command_ok is False
+    assert shell.task_query.page == 2
+    shell.onecmd(f'tasks {jobs[0].id} failed 2')
+    assert shell.task_query.job_id == jobs[0].id
+    assert shell.task_query.status == 'failed'
+    detail = output.getvalue()[len(first) :]
+    assert '第031话' in detail
+    assert '第060话' in detail
+    assert '第061话' not in detail
+    shell.onecmd('tasks next')
+    assert '第065话' in output.getvalue()
+    assert shell.task_query.page == 3
+    shell.onecmd('tasks prev')
+    assert shell.task_query.page == 2
+    shell.onecmd('tasks')
+    assert shell.task_query.job_id is None
+    assert shell.task_query.status == 'all'
+    assert shell.task_query.page == 1
+
+
+def test_task_filter_does_not_change_retry_scope_or_current_comic(shell):
+    shell.onecmd('i https://first.test/comic')
+    comic = shell.context.comic
+    job = make_browsable_jobs(shell, 1)[0]
+    job.volumes[0].result = None
+    shell.job_store.save(job)
+    shell.onecmd(f'tasks {job.id} failed')
+    assert shell.context.comic is comic
+    assert len(shell.job_store.load(job.id).remaining) == 65
+    shell.onecmd(f'retry {job.id}')
+    assert len(shell.context.source.downloaded_urls) == 65
+    assert shell.job_store.load(job.id).state == 'completed'
+
+
+def test_task_browser_refreshes_changed_records_and_handles_no_matches(shell):
+    job = make_browsable_jobs(shell, 1)[0]
+    shell.onecmd('tasks completed')
+    assert shell.last_command_ok is True
+    assert '匹配 0 / 1 项' in shell.console.file.getvalue()
+    for volume in job.volumes:
+        volume.result = VolumeDownloadResult(volume.name, volume.url, 'skipped')
+    job.state = 'completed'
+    shell.job_store.save(job)
+    shell.onecmd('tasks completed')
+    assert '匹配 1 / 1 项' in shell.console.file.getvalue()
+    shell.onecmd(f'tasks {job.id} failed')
+    assert shell.last_command_ok is True
+    assert '没有符合当前筛选的章节' in shell.console.file.getvalue()
+
+
+def test_task_detail_navigation_keeps_resolved_id_if_prefix_becomes_ambiguous(shell):
+    job = make_browsable_jobs(shell, 1)[0]
+    job.id = 'abcd' + '0' * 28
+    shell.job_store.save(job)
+    shell.onecmd('tasks abcd')
+    assert shell.task_query.job_id == job.id
+    job.id = 'abcd' + '1' * 28
+    shell.job_store.save(job)
+    shell.onecmd('tasks next')
+    assert shell.last_command_ok is True
+    assert shell.task_query.job_id == 'abcd' + '0' * 28
+
+
+def test_corrupt_task_is_reported_without_hiding_valid_tasks(shell):
+    job = make_browsable_jobs(shell, 1)[0]
+    (shell.job_store.directory / f'{"f" * 32}.json').write_text('{broken', encoding='utf-8')
+    shell.onecmd('tasks')
+    assert shell.last_command_ok is False
+    assert job.comic_name in shell.console.file.getvalue()
+    assert '无法读取任务记录' in shell.console.file.getvalue()
+
+
+def test_direct_task_command_limits_output_and_provides_explicit_page_commands(shell):
+    make_browsable_jobs(shell, 23)
+    assert main_module._run_command(shell, 'tasks', ['failed']) == 0
+    output = shell.console.file.getvalue()
+    assert 'tasks failed 2' in output
+    assert 'tasks next' not in output
+    assert '漫画000' not in output
+    assert main_module._run_command(shell, 'tasks', ['failed', '2']) == 0
+    assert '漫画000' in shell.console.file.getvalue()
+
+
 def test_full_download_saves_all_groups(shell, monkeypatch):
     shell.onecmd('i https://first.test/comic')
     extra = ComicBook()

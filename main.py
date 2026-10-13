@@ -8,6 +8,7 @@ from loguru import logger
 # Disable Selenium Manager stats to Plausible
 os.environ['SE_AVOID_STATS'] = 'true'
 
+from downloader.download.job_browser import parse_task_query
 from downloader.runtime_config import RuntimeConfig
 from downloader.shell import Shell
 from downloader.sources import validate_runtime_config_sources
@@ -23,7 +24,8 @@ USAGE = """用法:
   comic_downloader [下载路径] info <漫画URL>
   comic_downloader [下载路径] download <漫画URL>
   comic_downloader [下载路径] download_vols <漫画URL> <章节序号> [起始序号] [截止序号]
-  comic_downloader [下载路径] tasks [任务ID]
+  comic_downloader [下载路径] tasks [状态] [页码]
+  comic_downloader [下载路径] tasks <任务ID> [状态] [页码]
   comic_downloader [下载路径] sources
   comic_downloader [下载路径] check [动漫源序号|代码名|all]
   comic_downloader [下载路径] retry [任务序号|任务ID|all]
@@ -36,6 +38,8 @@ USAGE = """用法:
 
 直接子命令使用完整 URL；搜索结果序号仅在交互式 shell 内有效。
 download_vols 的一个范围参数表示截止序号，两个表示起始和截止，均从 1 开始。
+tasks 状态：all / unfinished / failed / completed / pending；任务列表另支持 running / interrupted。
+tasks 默认第一页；next / prev 仅用于交互会话，直接子命令使用明确页码。
 退出码: 0 成功；1 执行/配置失败；2 参数错误；130 用户中断。
 """
 
@@ -171,7 +175,10 @@ def _parse_command(args: list[str]) -> tuple[str, str | None, list[str]]:
 def _validate_command(subcommand: str | None, args: list[str]) -> None:
     if subcommand is None:
         return
-    optional_commands = {'sources': 0, 'tasks': 1, 'retry': 1, 'check': 1}
+    if subcommand == 'tasks':
+        _validate_task_command(args)
+        return
+    optional_commands = {'sources': 0, 'retry': 1, 'check': 1}
     if subcommand in optional_commands:
         if len(args) > optional_commands[subcommand]:
             raise CommandUsageError(
@@ -188,6 +195,10 @@ def _validate_command(subcommand: str | None, args: list[str]) -> None:
         if len(args) != 1:
             raise CommandUsageError(f'{subcommand} 只接受一个漫画 URL。')
         return
+    _validate_volume_args(args)
+
+
+def _validate_volume_args(args: list[str]) -> None:
     if not 2 <= len(args) <= 4:  # noqa: PLR2004 - URL plus group and optional range
         raise CommandUsageError('download_vols 需要 URL、分组序号，以及可选的截止或起始/截止序号。')
     try:
@@ -198,6 +209,13 @@ def _validate_command(subcommand: str | None, args: list[str]) -> None:
         raise CommandUsageError('序号从 1 开始，必须是正整数。')
     if len(indices) == 3 and indices[1] > indices[2]:  # noqa: PLR2004
         raise CommandUsageError('起始序号不能大于截止序号。')
+
+
+def _validate_task_command(args: list[str]) -> None:
+    try:
+        parse_task_query(args)
+    except ValueError as exc:
+        raise CommandUsageError(str(exc)) from exc
 
 
 def _run_command(shell: Shell, subcommand: str | None, subcommand_args: list[str]) -> int:

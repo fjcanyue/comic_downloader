@@ -74,7 +74,9 @@ uv run pyinstaller downloader.spec
 | `sources` | 查看动漫源能力及浏览器依赖 | `sources` |
 | `check [序号/代码名/all]` | 查看已存状态，或显式检查来源 | `check all` |
 | `status` | 查看路径、当前漫画、搜索结果数和覆盖模式 | `status` |
-| `tasks [任务ID]` | 查看下载计划，或某个计划的章节和错误 | `tasks` |
+| `tasks [状态] [页码]` | 按状态浏览下载计划，每页 20 项 | `tasks unfinished` |
+| `tasks <任务ID> [状态] [页码]` | 查看某个计划的章节与错误，每页 30 话 | `tasks a1b2c3d4 failed` |
+| `tasks next` / `tasks prev` | 在当前任务列表或章节筛选中连续翻页 | `tasks next` |
 | `retry [序号/任务ID/all]` | 查看或继续未完成下载，支持重启后恢复 | `retry a1b2c3d4` |
 | `help [命令]` | 命令速查和具体用法 | `help v` |
 | `q` | 退出 | `q` |
@@ -143,7 +145,8 @@ comic_downloader search <关键词>
 comic_downloader info <URL>
 comic_downloader download <URL>
 comic_downloader download_vols <URL> <章节序号> [起始] [截止]
-comic_downloader tasks [任务ID]
+comic_downloader tasks [状态] [页码]
+comic_downloader tasks <任务ID> [状态] [页码]
 comic_downloader retry [任务序号|任务ID|all]
 comic_downloader sources
 comic_downloader check [动漫源序号|代码名|all]
@@ -180,6 +183,56 @@ comic_downloader D:\Comics retry a1b2c3d4
 `retry` 使用当前运行配置和覆盖选项，但只作用于未完成章节。
 若要重新下载已经完成的章节，使用 `--overwrite` 重新执行 `download` / `download_vols` 创建新任务。
 任务记录不是文件校验清单：手动删除已经完成的文件后，应创建新下载任务。
+
+### 任务分页与状态筛选
+
+`tasks` 返回全部下载计划的第一页，按更新时间从新到旧排列；同一时间的记录按任务 ID
+稳定排序。列表每页 20 项，详情每页 30 话，交互与直接子命令都默认只显示第一页：
+
+```text
+tasks unfinished               查看还有未完成章节的计划
+tasks failed 2                 查看有失败计划的第 2 页
+tasks a1b2c3d4 failed           只看该计划失败或部分失败的章节
+tasks next                     沿用当前列表、任务及筛选，查看下一页
+tasks prev                     返回上一页
+tasks                          返回全部任务首页
+```
+
+将示例 ID 替换为实际任务 ID。筛选支持：
+
+| 状态 | 任务列表 | 任务详情中的章节 |
+| --- | --- | --- |
+| `all` | 全部计划 | 全部章节 |
+| `unfinished` | 仍有未完成章节 | 待下载、失败或部分失败 |
+| `failed` | 记录状态为“有失败” | 失败或部分失败 |
+| `completed` | 记录状态为“已完成” | 已下载或已跳过 |
+| `pending` | 记录状态为“待下载” | 尚无处理结果 |
+| `running` / `interrupted` | 未结束 / 已中断 | 不适用 |
+
+`running` 是保存的任务状态，并不保证进程仍在运行；`unfinished` 根据剩余章节计算。
+筛选和分页只改变展示，**`retry <任务ID>` 仍恢复该计划的所有未完成章节**。
+详情中的序号是该计划的原章节位置，跨分组连续编号，不是 `v` 命令的分组内序号。
+任务继续通过 ID 选择；纯数字 ID 前缀也按 ID 处理，例如 `tasks 1234`，
+查看全部任务的第 2 页应输入 `tasks all 2`。
+
+直接子命令没有连续浏览会话，必须使用明确页码，例如：
+
+```shell
+comic_downloader D:\Comics tasks unfinished 2
+comic_downloader D:\Comics tasks a1b2c3d4 failed 2
+```
+
+输出会提供下一页的明确命令；`tasks next/prev` 仅在交互会话中可用。
+列表显示的短 ID 遇到冲突会自动加长；打开详情后使用完整 ID 记住当前任务。
+无匹配、越界和损坏记录都有提示，有效记录仍可浏览。
+
+任务列表采用内存中的轻量摘要缓存，不额外写入索引文件，也不修改任务 JSON 格式。
+每次浏览仍扫描文件元数据，新增、删除及正常更新/原子替换的记录会反映在后续浏览中；
+内容变化时重新解析，详情与重试始终读取任务记录。首次扫描仍需验证所有历史计划，
+缓存只在当前进程内有效。列表会实时刷新，其他下载更新任务时排序和页内内容可能变化，
+任务 ID 保持不变。以下为真实 Rich 输出的演示数据：
+
+![任务状态筛选与失败章节详情](docs/task-browser.svg)
 
 ZIP 完整写入临时文件后才替换最终文件，已有 ZIP 需通过可读性、非空与 CRC 校验才会跳过。
 打包只包含本次预期的编号图片，目录中的笔记和临时文件会保留在原地。
@@ -267,11 +320,12 @@ UTC 时间戳，便于脚本或故障排查读取。该检查只验证首页的 
 3. **源可维护性（已完成）**：已补齐源能力与最近验证元数据，拆分历史解析和诊断职责，并将项目级 Pyright 类型检查收敛到零错误、零警告。
 4. **可观测性（已完成）**：已增加可选的并发源连通性检查、原子持久化的结构化诊断摘要；在线状态只由显式检查产生，不把“已配置”误报为“当前可用”。
 5. **长列表操作与调度内存（已完成）**：加入本地多词筛选、稳定序号、连续翻页、分组页码记忆及窄屏帮助；图片队列改为有上限的滚动调度。详见[本轮代码分析、验证与后续方向](docs/ideation/2026-10-13-filter-navigation-performance.md)。
+6. **任务浏览规模化（已完成）**：加入计划和章节的状态筛选、分页、稳定 ID 与窄屏详情；轻量摘要缓存减少重复 JSON 解析。详见[任务浏览迭代与性能验证](docs/ideation/2026-10-13-task-browser.md)。
 
 后续优先方向：
 
 - **源解析回归**：积累脱敏的搜索/详情/章节网页样本，覆盖正常、空结果、结构变化和部分损坏。
-- **任务列表规模化**：为 `tasks` 与任务详情补充分页、状态筛选和明确的归档清理操作。
+- **任务归档管理**：分页和状态筛选已实现；后续明确历史计划的归档、保留期限和显式清理流程。
 - **搜索范围扩展**：依据各源分页协议按需加载网站后续搜索页，并设计去重、限速与稳定序号策略。
 
 开发验证：`uv run pytest -o addopts= -q`；类型检查在 Windows 可使用

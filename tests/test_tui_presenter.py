@@ -5,6 +5,7 @@ from io import StringIO
 import pytest
 from rich.console import Console
 
+from downloader.download.job_browser import TaskQuery
 from downloader.download.jobs import DownloadJob, JobVolume
 from downloader.models import (
     Comic,
@@ -105,6 +106,35 @@ def test_task_list_and_details_show_recovery_actions(width):
     assert '网络超时' in rendered
     assert 'retry' in rendered
     assert '0/1' in rendered
+
+
+@pytest.mark.parametrize('width', [40, 80, 120])
+def test_task_detail_filter_retains_original_chapter_numbers_and_literal_errors(width):
+    output = StringIO()
+    presenter = TerminalPresenter(Console(file=output, width=width, color_system=None))
+    volumes = [JobVolume('正篇', f'话{i:03d}', f'https://example.test/{i}') for i in range(1, 36)]
+    volumes[30].result = VolumeDownloadResult(
+        '话031', volumes[30].url, 'partial', message='[red]失败[/]'
+    )
+    job = DownloadJob('test', '漫画', 'https://example.test/comic', volumes, state='failed')
+    presenter.task_position(TaskQuery(job.id, 'failed'), 1, 35, 30)
+    presenter.download_job(job, volume_indices=[30])
+    rendered = output.getvalue()
+    assert '匹配 1 / 35 项' in rendered
+    assert '话031' in rendered
+    assert '话001' not in rendered
+    assert '[red]失败[/]' in rendered
+    assert '筛选不改变重试范围' in ''.join(rendered.split())
+    assert '31' in rendered
+
+
+def test_direct_task_navigation_provides_explicit_commands():
+    presenter, output = presenter_with_output()
+    presenter.task_navigation(TaskQuery(status='unfinished', page=2), 43, 20, interactive=False)
+    rendered = output.getvalue()
+    assert 'tasks unfinished 1' in rendered
+    assert 'tasks unfinished 3' in rendered
+    assert 'tasks next' not in rendered
 
 
 def test_external_text_is_rendered_literally():

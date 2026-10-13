@@ -10,6 +10,7 @@ from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
 
+from downloader.download.job_browser import JobSummary
 from downloader.download.jobs import JOB_STATES, DownloadJob, JobVolume, timestamp
 from downloader.models import ImageDownloadFailure, VolumeDownloadResult
 
@@ -22,6 +23,7 @@ else:
 class JobStore:
     def __init__(self, output_path: str):
         self.directory = Path(output_path).resolve() / '.comic_downloader' / 'jobs'
+        self._summaries: dict[Path, tuple[tuple[int, int, int, int], JobSummary]] = {}
 
     def save(self, job: DownloadJob) -> None:
         self._validate_id(job.id)
@@ -43,6 +45,7 @@ class JobStore:
                 stream.flush()
                 os.fsync(stream.fileno())
             os.replace(tmp_path, self.directory / f'{job.id}.json')
+            self._summaries.pop(self.directory / f'{job.id}.json', None)
         finally:
             if tmp_path is not None:
                 tmp_path.unlink(missing_ok=True)
@@ -65,7 +68,37 @@ class JobStore:
                 jobs.append(self._read(path))
             except (ValueError, OSError) as exc:  # noqa: PERF203 - isolate corrupt records
                 errors.append(f'{path.name}: {exc}')
-        return sorted(jobs, key=lambda job: job.updated_at, reverse=True), errors
+        return sorted(jobs, key=lambda job: (job.updated_at, job.id), reverse=True), errors
+
+    def list_summaries(self) -> tuple[list[JobSummary], list[str]]:
+        """Re-scan metadata each time; retain no chapter/image lists between reads."""
+        summaries, errors = [], []
+        paths = set(self.directory.glob('*.json'))
+        for stale in self._summaries.keys() - paths:
+            del self._summaries[stale]
+        for path in sorted(paths):
+            try:
+                before = self._signature(path)
+                cached = self._summaries.get(path)
+                if cached is not None and cached[0] == before:
+                    summaries.append(cached[1])
+                    continue
+                summary = JobSummary.from_job(self._read(path))
+                # A concurrent atomic replacement must not tag old data with new metadata.
+                if self._signature(path) == before:
+                    self._summaries[path] = (before, summary)
+                else:
+                    self._summaries.pop(path, None)
+                summaries.append(summary)
+            except (ValueError, OSError) as exc:
+                self._summaries.pop(path, None)
+                errors.append(f'{path.name}: {exc}')
+        return sorted(summaries, key=lambda job: (job.updated_at, job.id), reverse=True), errors
+
+    @staticmethod
+    def _signature(path: Path) -> tuple[int, int, int, int]:
+        stat = path.stat()
+        return stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size, stat.st_ino
 
     @contextmanager
     def lock(self, job_id: str):

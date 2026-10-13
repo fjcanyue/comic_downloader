@@ -51,6 +51,39 @@ class InterruptingShell(FakeShell):
         raise KeyboardInterrupt
 
 
+@pytest.mark.parametrize(
+    'args',
+    [
+        ['tasks', 'unfinished', '2'],
+        ['tasks', 'ABCD', 'failed', '3'],
+        ['tasks', '1234'],
+    ],
+)
+def test_task_filter_and_page_arguments_pass_prevalidation(args):
+    _, command, values = main_module._parse_command(args)
+    assert command == 'tasks'
+    assert values == args[1:]
+
+
+@pytest.mark.parametrize(
+    'args',
+    [
+        ['tasks', 'next'],
+        ['tasks', 'all', '0'],
+        ['tasks', 'abcd', 'running'],
+        ['tasks', 'all', '2', 'extra'],
+    ],
+)
+def test_invalid_task_filters_fail_before_shell_creation(monkeypatch, args, capsys):
+    def fail_shell(*args, **kwargs):
+        pytest.fail('invalid tasks syntax must not initialize the shell')
+
+    monkeypatch.setattr(main_module, 'Shell', fail_shell)
+    monkeypatch.setattr(sys, 'argv', ['comic_downloader', *args])
+    assert main_module.main() == 2
+    assert '参数错误' in capsys.readouterr().out
+
+
 def test_help_exits_before_shell_creation(monkeypatch, capsys):
     def fail_shell(*args, **kwargs):
         raise AssertionError('help should not create Shell')

@@ -5,7 +5,7 @@ import concurrent.futures
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 from urllib.parse import urlparse, urlsplit
 
@@ -16,6 +16,15 @@ from urllib3.util.retry import Retry
 
 from downloader.browser.manager import DriverManager
 from downloader.comic import Comic, ComicSource
+from downloader.download.job_browser import (
+    TASK_PAGE_SIZE,
+    TASK_VOLUME_PAGE_SIZE,
+    TaskQuery,
+    matching_jobs,
+    matching_volumes,
+    parse_task_query,
+    unique_job_prefixes,
+)
 from downloader.download.job_store import JobStore
 from downloader.download.jobs import DownloadJob, JobVolume, run_download_job
 from downloader.download.tasks import DownloadTask, DownloadTaskStore, DownloadTaskStoreError
@@ -282,6 +291,7 @@ class Shell(cmd.Cmd):
         self.search_result_indices: list[int] | None = None
         self.search_page = 1
         self.chapter_pages: dict[int, int] = {}
+        self.task_query: TaskQuery | None = None
         self.paginate_output = True
 
     def emptyline(self) -> bool:
@@ -423,17 +433,50 @@ class Shell(cmd.Cmd):
             raise ValueError(f'页码必须是 1～{pages} 的整数，或 next / prev。') from None
 
     def do_tasks(self, arg):
-        """tasks [任务ID]：列出当前保存路径中的下载任务，或查看某个任务的章节与错误。"""
+        """tasks [状态] [页码] 或 tasks <任务ID> [状态] [页码]；tasks next/prev 翻页。状态：all/unfinished/failed/completed/pending，列表另支持 running/interrupted。tasks 返回全部任务首页。"""
         self.last_command_ok = False
-        if arg.strip():
-            self.presenter.download_job(self.job_store.load(arg.strip()))
-            self.last_command_ok = True
+        try:
+            query = parse_task_query(arg.split(), self.task_query)
+            if query.job_id:
+                query = self._show_task_detail(query)
+            else:
+                self._show_task_list(query)
+        except ValueError as exc:
+            self.presenter.warn(str(exc))
             return
-        jobs, errors = self.job_store.list_jobs()
-        self.presenter.download_jobs(jobs)
+        self.task_query = query
+
+    def _show_task_list(self, query: TaskQuery) -> None:
+        jobs, errors = self.job_store.list_summaries()
+        matches = matching_jobs(jobs, query.status)
+        self._read_page(str(query.page), len(matches), TASK_PAGE_SIZE)
+        start = (query.page - 1) * TASK_PAGE_SIZE
+        self.presenter.task_position(query, len(matches), len(jobs), TASK_PAGE_SIZE)
+        self.presenter.download_jobs(
+            matches[start : start + TASK_PAGE_SIZE], prefixes=unique_job_prefixes(jobs)
+        )
+        self.presenter.task_navigation(
+            query, len(matches), TASK_PAGE_SIZE, interactive=self.paginate_output
+        )
         for error in errors:
             self.presenter.warn(f'无法读取任务记录：{error}')
         self.last_command_ok = not errors
+
+    def _show_task_detail(self, query: TaskQuery) -> TaskQuery:
+        job = self.job_store.load(query.job_id or '')
+        query = replace(query, job_id=job.id)
+        indices = matching_volumes(job, query.status)
+        self._read_page(str(query.page), len(indices), TASK_VOLUME_PAGE_SIZE)
+        start = (query.page - 1) * TASK_VOLUME_PAGE_SIZE
+        self.presenter.task_position(query, len(indices), len(job.volumes), TASK_VOLUME_PAGE_SIZE)
+        self.presenter.download_job(
+            job, volume_indices=indices[start : start + TASK_VOLUME_PAGE_SIZE]
+        )
+        self.presenter.task_navigation(
+            query, len(indices), TASK_VOLUME_PAGE_SIZE, interactive=self.paginate_output
+        )
+        self.last_command_ok = True
+        return query
 
     def do_retry(self, arg):
         """retry [序号/任务ID/all]：查看或恢复下载；tasks 中的计划使用任务 ID，章节记录支持序号。"""
