@@ -26,6 +26,7 @@ USAGE = """用法:
   comic_downloader [下载路径] download <漫画URL>
   comic_downloader [下载路径] download_vols <漫画URL> <章节序号> [起始序号] [截止序号]
   comic_downloader [下载路径] tasks [状态] [页码]
+  comic_downloader [下载路径] tasks [状态] [页码] find <关键词>
   comic_downloader [下载路径] tasks <任务ID> [状态] [页码]
   comic_downloader [下载路径] archive [list [页码]]
   comic_downloader [下载路径] archive <任务ID>
@@ -45,6 +46,7 @@ USAGE = """用法:
 download_vols 的一个范围参数表示截止序号，两个表示起始和截止，均从 1 开始。
 tasks 状态：all / unfinished / failed / completed / pending；任务列表另支持 running / interrupted。
 tasks 默认第一页；next / prev 仅用于交互会话，直接子命令使用明确页码。
+tasks find 按漫画名、源代码或 ID 查找；find 后所有词均为关键词，忽略大小写且全部匹配。
 archive 仅归档已完成计划，可恢复，不改变漫画文件；归档浏览使用明确页码。
 退出码: 0 成功；1 执行/配置失败；2 参数错误；130 用户中断。
 """

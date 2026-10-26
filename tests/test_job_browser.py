@@ -200,3 +200,105 @@ def test_empty_summary_read_does_not_create_directory(tmp_path):
     store = JobStore(str(tmp_path))
     assert store.list_summaries() == ([], [])
     assert not store.directory.exists()
+
+
+@pytest.mark.parametrize(
+    'args, expected',
+    [
+        (['find', '猎人', 'MoRui'], TaskQuery(keyword='猎人 MoRui')),
+        (['failed', '2', 'find', '猎人'], TaskQuery(status='failed', page=2, keyword='猎人')),
+        (['FIND', 'all', '2', 'find'], TaskQuery(keyword='all 2 find')),
+    ],
+)
+def test_task_find_syntax_and_navigation(args, expected):
+    assert parse_task_query(args) == expected
+    assert parse_task_query(['next'], expected) == replace(expected, page=expected.page + 1)
+
+
+@pytest.mark.parametrize(
+    'args',
+    [
+        ['find'],
+        ['failed', 'find'],
+        ['abcd', 'find', 'name'],
+        ['next', 'find', 'name'],
+        ['failed', '0', 'find', 'name'],
+    ],
+)
+def test_invalid_find_is_rejected(args):
+    with pytest.raises(ValueError):
+        parse_task_query(args, TaskQuery())
+
+
+def test_find_combines_status_and_all_words_without_reordering_or_mutation():
+    original = JobSummary.from_job(make_job())
+    other = replace(original, id='b' * 32, source_name='OTHER')
+    jobs = [other, original]
+    assert matching_jobs(jobs, 'failed', '漫画 FIXTURE aaaa') == [original]
+    assert matching_jobs(jobs, 'completed', '漫画') == []
+    assert matching_jobs(jobs, 'all', '漫画 missing') == []
+    assert matching_jobs(jobs, 'all', '漫画') == jobs
+    assert matching_jobs(jobs, 'all', '[red]') == jobs
+    assert jobs == [other, original]
+
+
+def test_corrupt_summary_cache_skips_decoding_then_refreshes_and_prunes(tmp_path, monkeypatch):
+    store = JobStore(str(tmp_path))
+    job = make_job()
+    store.save(job)
+    record = store.directory / f'{job.id}.json'
+    record.write_text('{broken', encoding='utf-8')
+    reads = []
+    original_read = store._read
+
+    def read(path):
+        reads.append(path)
+        return original_read(path)
+
+    monkeypatch.setattr(store, '_read', read)
+    first = store.list_summaries()
+    assert first[0] == [] and len(first[1]) == 1
+    for _ in range(5):
+        assert store.list_summaries() == first
+    assert len(reads) == 1
+    JobStore(str(tmp_path)).save(job)
+    assert store.list_summaries() == ([JobSummary.from_job(job)], [])
+    assert len(reads) == 2
+    record.write_text('{broken again', encoding='utf-8')
+    assert store.list_summaries()[1]
+    record.unlink()
+    assert store.list_summaries() == ([], [])
+    assert not store._summary_errors
+
+
+def test_transient_io_errors_are_not_cached(tmp_path, monkeypatch):
+    store = JobStore(str(tmp_path))
+    store.save(make_job())
+    original_read = store._read
+
+    def read(path):
+        raise PermissionError('temporarily locked')
+
+    monkeypatch.setattr(store, '_read', read)
+    assert store.list_summaries()[1]
+    assert not store._summary_errors
+    monkeypatch.setattr(store, '_read', original_read)
+    assert len(store.list_summaries()[0]) == 1
+
+
+def test_repair_during_failed_decode_is_not_cached(tmp_path, monkeypatch):
+    store = JobStore(str(tmp_path))
+    job = make_job()
+    store.save(job)
+    original_read = store._read
+
+    def read(path):
+        job.comic_name = '修复后的记录'
+        JobStore(str(tmp_path)).save(job)
+        raise ValueError('old decode failure')
+
+    monkeypatch.setattr(store, '_read', read)
+    assert store.list_summaries()[1]
+    assert not store._summary_errors
+    monkeypatch.setattr(store, '_read', original_read)
+    assert store.list_summaries()[0][0].comic_name == '修复后的记录'

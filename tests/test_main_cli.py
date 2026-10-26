@@ -57,6 +57,8 @@ class InterruptingShell(FakeShell):
         ['tasks', 'unfinished', '2'],
         ['tasks', 'ABCD', 'failed', '3'],
         ['tasks', '1234'],
+        ['tasks', 'find', '猎人', 'MoRui'],
+        ['tasks', 'failed', '2', 'find', '猎人'],
     ],
 )
 def test_task_filter_and_page_arguments_pass_prevalidation(args):
@@ -72,6 +74,8 @@ def test_task_filter_and_page_arguments_pass_prevalidation(args):
         ['tasks', 'all', '0'],
         ['tasks', 'abcd', 'running'],
         ['tasks', 'all', '2', 'extra'],
+        ['tasks', 'find'],
+        ['tasks', 'abcd', 'find', '猎人'],
     ],
 )
 def test_invalid_task_filters_fail_before_shell_creation(monkeypatch, args, capsys):

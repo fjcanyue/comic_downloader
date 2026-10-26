@@ -554,6 +554,38 @@ def test_direct_task_command_limits_output_and_provides_explicit_page_commands(s
     assert '漫画000' in shell.console.file.getvalue()
 
 
+def test_task_find_keeps_query_across_pages_and_preserves_comic(shell):
+    shell.onecmd('i https://first.test/comic')
+    comic = shell.context.comic
+    jobs = make_browsable_jobs(shell, 23)
+    shell.onecmd('tasks failed find 漫画 FIRST')
+    assert shell.last_command_ok
+    assert shell.task_query.keyword == '漫画 FIRST'
+    shell.onecmd('tasks next')
+    assert shell.task_query.page == 2
+    assert shell.task_query.keyword == '漫画 FIRST'
+    shell.onecmd('tasks next')
+    assert not shell.last_command_ok
+    assert shell.task_query.page == 2
+    shell.onecmd('tasks find 漫画000')
+    assert shell.task_query.page == 1
+    assert shell.context.comic is comic
+    assert len(shell.job_store.load(jobs[0].id).remaining) == 65
+    shell.onecmd('tasks find 不存在的漫画')
+    assert shell.last_command_ok
+    assert '匹配 0 / 23 项' in shell.console.file.getvalue()
+    shell.onecmd('tasks')
+    assert shell.task_query.keyword == ''
+
+
+def test_direct_find_navigation_keeps_explicit_query(shell):
+    make_browsable_jobs(shell, 23)
+    assert main_module._run_command(shell, 'tasks', ['failed', 'find', '漫画']) == 0
+    assert 'tasks failed 2 find 漫画' in shell.console.file.getvalue()
+    assert main_module._run_command(shell, 'tasks', ['failed', '2', 'find', '漫画']) == 0
+    assert '漫画000' in shell.console.file.getvalue()
+
+
 def test_full_download_saves_all_groups(shell, monkeypatch):
     shell.onecmd('i https://first.test/comic')
     extra = ComicBook()

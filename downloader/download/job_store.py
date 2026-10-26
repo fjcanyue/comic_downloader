@@ -26,6 +26,7 @@ class JobStore:
         self.lock_directory = Path(self.output_path) / '.comic_downloader' / 'jobs'
         self.directory = self.lock_directory / 'archive' if archived else self.lock_directory
         self._summaries: dict[Path, tuple[tuple[int, int, int, int], JobSummary]] = {}
+        self._summary_errors: dict[Path, tuple[tuple[int, int, int, int], str]] = {}
         self._archive_store: JobStore | None = None
 
     def archive_view(self) -> JobStore:
@@ -113,14 +114,21 @@ class JobStore:
         paths = set(self.directory.glob('*.json'))
         for stale in self._summaries.keys() - paths:
             del self._summaries[stale]
+        for stale in self._summary_errors.keys() - paths:
+            del self._summary_errors[stale]
         for path in sorted(paths):
             try:
                 before = self._signature(path)
+                cached_error = self._summary_errors.get(path)
+                if cached_error is not None and cached_error[0] == before:
+                    errors.append(f'{path.name}: {cached_error[1]}')
+                    continue
+                self._summary_errors.pop(path, None)
                 cached = self._summaries.get(path)
                 if cached is not None and cached[0] == before:
                     summaries.append(cached[1])
                     continue
-                summary = JobSummary.from_job(self._read(path))
+                summary = self._read_summary(path, before)
                 # A concurrent atomic replacement must not tag old data with new metadata.
                 if self._signature(path) == before:
                     self._summaries[path] = (before, summary)
@@ -131,6 +139,15 @@ class JobStore:
                 self._summaries.pop(path, None)
                 errors.append(f'{path.name}: {exc}')
         return sorted(summaries, key=lambda job: (job.updated_at, job.id), reverse=True), errors
+
+    def _read_summary(self, path: Path, before: tuple[int, int, int, int]) -> JobSummary:
+        try:
+            return JobSummary.from_job(self._read(path))
+        except ValueError as exc:
+            # Cache only stable decode failures, never transient I/O failures or tracebacks.
+            if self._signature(path) == before:
+                self._summary_errors[path] = (before, str(exc))
+            raise
 
     @staticmethod
     def _signature(path: Path) -> tuple[int, int, int, int]:

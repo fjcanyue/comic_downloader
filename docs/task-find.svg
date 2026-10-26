@@ -1,0 +1,150 @@
+<svg class="rich-terminal" viewBox="0 0 1482 586.8" xmlns="http://www.w3.org/2000/svg">
+    <!-- Generated with Rich https://www.textualize.io -->
+    <style>
+
+    @font-face {
+        font-family: "Fira Code";
+        src: local("FiraCode-Regular"),
+                url("https://cdnjs.cloudflare.com/ajax/libs/firacode/6.2.0/woff2/FiraCode-Regular.woff2") format("woff2"),
+                url("https://cdnjs.cloudflare.com/ajax/libs/firacode/6.2.0/woff/FiraCode-Regular.woff") format("woff");
+        font-style: normal;
+        font-weight: 400;
+    }
+    @font-face {
+        font-family: "Fira Code";
+        src: local("FiraCode-Bold"),
+                url("https://cdnjs.cloudflare.com/ajax/libs/firacode/6.2.0/woff2/FiraCode-Bold.woff2") format("woff2"),
+                url("https://cdnjs.cloudflare.com/ajax/libs/firacode/6.2.0/woff/FiraCode-Bold.woff") format("woff");
+        font-style: bold;
+        font-weight: 700;
+    }
+
+    .terminal-2622617390-matrix {
+        font-family: Fira Code, monospace;
+        font-size: 20px;
+        line-height: 24.4px;
+        font-variant-east-asian: full-width;
+    }
+
+    .terminal-2622617390-title {
+        font-size: 18px;
+        font-weight: bold;
+        font-family: arial;
+    }
+
+    .terminal-2622617390-r1 { fill: #c5c8c6 }
+.terminal-2622617390-r2 { fill: #868887 }
+.terminal-2622617390-r3 { fill: #68a0b3;font-weight: bold }
+.terminal-2622617390-r4 { fill: #98a84b;font-weight: bold }
+.terminal-2622617390-r5 { fill: #cc555a;font-weight: bold }
+.terminal-2622617390-r6 { fill: #4e707b;font-weight: bold }
+.terminal-2622617390-r7 { fill: #c5c8c6;font-style: italic; }
+.terminal-2622617390-r8 { fill: #68a0b3 }
+.terminal-2622617390-r9 { fill: #cc555a }
+    </style>
+
+    <defs>
+    <clipPath id="terminal-2622617390-clip-terminal">
+      <rect x="0" y="0" width="1463.0" height="535.8" />
+    </clipPath>
+    <clipPath id="terminal-2622617390-line-0">
+    <rect x="0" y="1.5" width="1464" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-2622617390-line-1">
+    <rect x="0" y="25.9" width="1464" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-2622617390-line-2">
+    <rect x="0" y="50.3" width="1464" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-2622617390-line-3">
+    <rect x="0" y="74.7" width="1464" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-2622617390-line-4">
+    <rect x="0" y="99.1" width="1464" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-2622617390-line-5">
+    <rect x="0" y="123.5" width="1464" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-2622617390-line-6">
+    <rect x="0" y="147.9" width="1464" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-2622617390-line-7">
+    <rect x="0" y="172.3" width="1464" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-2622617390-line-8">
+    <rect x="0" y="196.7" width="1464" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-2622617390-line-9">
+    <rect x="0" y="221.1" width="1464" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-2622617390-line-10">
+    <rect x="0" y="245.5" width="1464" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-2622617390-line-11">
+    <rect x="0" y="269.9" width="1464" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-2622617390-line-12">
+    <rect x="0" y="294.3" width="1464" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-2622617390-line-13">
+    <rect x="0" y="318.7" width="1464" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-2622617390-line-14">
+    <rect x="0" y="343.1" width="1464" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-2622617390-line-15">
+    <rect x="0" y="367.5" width="1464" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-2622617390-line-16">
+    <rect x="0" y="391.9" width="1464" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-2622617390-line-17">
+    <rect x="0" y="416.3" width="1464" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-2622617390-line-18">
+    <rect x="0" y="440.7" width="1464" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-2622617390-line-19">
+    <rect x="0" y="465.1" width="1464" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-2622617390-line-20">
+    <rect x="0" y="489.5" width="1464" height="24.65"/>
+            </clipPath>
+    </defs>
+
+    <rect fill="#292929" stroke="rgba(255,255,255,0.35)" stroke-width="1" x="1" y="1" width="1480" height="584.8" rx="8"/><text class="terminal-2622617390-title" fill="#c5c8c6" text-anchor="middle" x="740" y="27">动漫下载器&#160;·&#160;任务查找</text>
+            <g transform="translate(26,22)">
+            <circle cx="0" cy="0" r="7" fill="#ff5f57"/>
+            <circle cx="22" cy="0" r="7" fill="#febc2e"/>
+            <circle cx="44" cy="0" r="7" fill="#28c840"/>
+            </g>
+        
+    <g transform="translate(9, 41)" clip-path="url(#terminal-2622617390-clip-terminal)">
+    
+    <g class="terminal-2622617390-matrix">
+    <text class="terminal-2622617390-r1" x="0" y="20" textLength="402.6" clip-path="url(#terminal-2622617390-line-0)">演示数据&#160;·&#160;tasks&#160;failed&#160;find&#160;猎人&#160;morui</text><text class="terminal-2622617390-r1" x="1464" y="20" textLength="12.2" clip-path="url(#terminal-2622617390-line-0)">
+</text><text class="terminal-2622617390-r2" x="0" y="44.4" textLength="24.4" clip-path="url(#terminal-2622617390-line-1)">┌─</text><text class="terminal-2622617390-r2" x="24.4" y="44.4" textLength="73.2" clip-path="url(#terminal-2622617390-line-1)">&#160;任务概览&#160;</text><text class="terminal-2622617390-r2" x="146.4" y="44.4" textLength="1293.2" clip-path="url(#terminal-2622617390-line-1)">──────────────────────────────────────────────────────────────────────────────────────────────────────────</text><text class="terminal-2622617390-r2" x="1439.6" y="44.4" textLength="24.4" clip-path="url(#terminal-2622617390-line-1)">─┐</text><text class="terminal-2622617390-r1" x="1464" y="44.4" textLength="12.2" clip-path="url(#terminal-2622617390-line-1)">
+</text><text class="terminal-2622617390-r2" x="0" y="68.8" textLength="12.2" clip-path="url(#terminal-2622617390-line-2)">│</text><text class="terminal-2622617390-r3" x="24.4" y="68.8" textLength="73.2" clip-path="url(#terminal-2622617390-line-2)">全部计划&#160;4</text><text class="terminal-2622617390-r4" x="146.4" y="68.8" textLength="122" clip-path="url(#terminal-2622617390-line-2)">&#160;&#160;·&#160;&#160;已完成&#160;1</text><text class="terminal-2622617390-r5" x="305" y="68.8" textLength="122" clip-path="url(#terminal-2622617390-line-2)">&#160;&#160;·&#160;&#160;有失败&#160;2</text><text class="terminal-2622617390-r6" x="463.6" y="68.8" textLength="122" clip-path="url(#terminal-2622617390-line-2)">&#160;&#160;·&#160;&#160;待下载&#160;1</text><text class="terminal-2622617390-r2" x="1451.8" y="68.8" textLength="12.2" clip-path="url(#terminal-2622617390-line-2)">│</text><text class="terminal-2622617390-r1" x="1464" y="68.8" textLength="12.2" clip-path="url(#terminal-2622617390-line-2)">
+</text><text class="terminal-2622617390-r2" x="0" y="93.2" textLength="12.2" clip-path="url(#terminal-2622617390-line-3)">│</text><text class="terminal-2622617390-r6" x="24.4" y="93.2" textLength="353.8" clip-path="url(#terminal-2622617390-line-3)">当前保存路径&#160;·&#160;不含归档&#160;·&#160;记录状态不代表进程正在运行</text><text class="terminal-2622617390-r2" x="1451.8" y="93.2" textLength="12.2" clip-path="url(#terminal-2622617390-line-3)">│</text><text class="terminal-2622617390-r1" x="1464" y="93.2" textLength="12.2" clip-path="url(#terminal-2622617390-line-3)">
+</text><text class="terminal-2622617390-r2" x="0" y="117.6" textLength="1464" clip-path="url(#terminal-2622617390-line-4)">└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘</text><text class="terminal-2622617390-r1" x="1464" y="117.6" textLength="12.2" clip-path="url(#terminal-2622617390-line-4)">
+</text><text class="terminal-2622617390-r2" x="0" y="142" textLength="1464" clip-path="url(#terminal-2622617390-line-5)">┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐</text><text class="terminal-2622617390-r1" x="1464" y="142" textLength="12.2" clip-path="url(#terminal-2622617390-line-5)">
+</text><text class="terminal-2622617390-r2" x="0" y="166.4" textLength="12.2" clip-path="url(#terminal-2622617390-line-6)">│</text><text class="terminal-2622617390-r3" x="24.4" y="166.4" textLength="109.8" clip-path="url(#terminal-2622617390-line-6)">任务筛选&#160;&#160;有失败</text><text class="terminal-2622617390-r2" x="1451.8" y="166.4" textLength="12.2" clip-path="url(#terminal-2622617390-line-6)">│</text><text class="terminal-2622617390-r1" x="1464" y="166.4" textLength="12.2" clip-path="url(#terminal-2622617390-line-6)">
+</text><text class="terminal-2622617390-r2" x="0" y="190.8" textLength="12.2" clip-path="url(#terminal-2622617390-line-7)">│</text><text class="terminal-2622617390-r3" x="24.4" y="190.8" textLength="146.4" clip-path="url(#terminal-2622617390-line-7)">查找&#160;&#160;猎人&#160;morui</text><text class="terminal-2622617390-r2" x="1451.8" y="190.8" textLength="12.2" clip-path="url(#terminal-2622617390-line-7)">│</text><text class="terminal-2622617390-r1" x="1464" y="190.8" textLength="12.2" clip-path="url(#terminal-2622617390-line-7)">
+</text><text class="terminal-2622617390-r2" x="0" y="215.2" textLength="12.2" clip-path="url(#terminal-2622617390-line-8)">│</text><text class="terminal-2622617390-r6" x="24.4" y="215.2" textLength="268.4" clip-path="url(#terminal-2622617390-line-8)">匹配&#160;2&#160;/&#160;4&#160;项&#160;&#160;·&#160;&#160;第&#160;1/1&#160;页</text><text class="terminal-2622617390-r2" x="1451.8" y="215.2" textLength="12.2" clip-path="url(#terminal-2622617390-line-8)">│</text><text class="terminal-2622617390-r1" x="1464" y="215.2" textLength="12.2" clip-path="url(#terminal-2622617390-line-8)">
+</text><text class="terminal-2622617390-r2" x="0" y="239.6" textLength="1464" clip-path="url(#terminal-2622617390-line-9)">└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘</text><text class="terminal-2622617390-r1" x="1464" y="239.6" textLength="12.2" clip-path="url(#terminal-2622617390-line-9)">
+</text><text class="terminal-2622617390-r7" x="0" y="264" textLength="878.4" clip-path="url(#terminal-2622617390-line-10)">&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;下载任务&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-2622617390-r1" x="1464" y="264" textLength="12.2" clip-path="url(#terminal-2622617390-line-10)">
+</text><text class="terminal-2622617390-r1" x="1464" y="288.4" textLength="12.2" clip-path="url(#terminal-2622617390-line-11)">
+</text><text class="terminal-2622617390-r3" x="24.4" y="312.8" textLength="122" clip-path="url(#terminal-2622617390-line-12)">任务&#160;ID&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-2622617390-r3" x="207.4" y="312.8" textLength="134.2" clip-path="url(#terminal-2622617390-line-12)">漫画&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-2622617390-r3" x="402.6" y="312.8" textLength="48.8" clip-path="url(#terminal-2622617390-line-12)">源&#160;&#160;&#160;</text><text class="terminal-2622617390-r3" x="500.2" y="312.8" textLength="36.6" clip-path="url(#terminal-2622617390-line-12)">&#160;完成</text><text class="terminal-2622617390-r3" x="597.8" y="312.8" textLength="48.8" clip-path="url(#terminal-2622617390-line-12)">状态&#160;&#160;</text><text class="terminal-2622617390-r3" x="707.6" y="312.8" textLength="146.4" clip-path="url(#terminal-2622617390-line-12)">更新（UTC）&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-2622617390-r1" x="1464" y="312.8" textLength="12.2" clip-path="url(#terminal-2622617390-line-12)">
+</text><text class="terminal-2622617390-r2" x="0" y="337.2" textLength="927.2" clip-path="url(#terminal-2622617390-line-13)">&#160;──────────────────────────────────────────────────────────────────────────&#160;</text><text class="terminal-2622617390-r1" x="1464" y="337.2" textLength="12.2" clip-path="url(#terminal-2622617390-line-13)">
+</text><text class="terminal-2622617390-r8" x="24.4" y="361.6" textLength="146.4" clip-path="url(#terminal-2622617390-line-14)">a1b2c3d40000</text><text class="terminal-2622617390-r1" x="207.4" y="361.6" textLength="109.8" clip-path="url(#terminal-2622617390-line-14)">猎人&#160;·&#160;正篇&#160;&#160;</text><text class="terminal-2622617390-r2" x="402.6" y="361.6" textLength="61" clip-path="url(#terminal-2622617390-line-14)">morui</text><text class="terminal-2622617390-r1" x="500.2" y="361.6" textLength="61" clip-path="url(#terminal-2622617390-line-14)">35/38</text><text class="terminal-2622617390-r9" x="597.8" y="361.6" textLength="36.6" clip-path="url(#terminal-2622617390-line-14)">有失败</text><text class="terminal-2622617390-r2" x="707.6" y="361.6" textLength="195.2" clip-path="url(#terminal-2622617390-line-14)">2026-10-26&#160;08:42</text><text class="terminal-2622617390-r1" x="1464" y="361.6" textLength="12.2" clip-path="url(#terminal-2622617390-line-14)">
+</text><text class="terminal-2622617390-r8" x="24.4" y="386" textLength="146.4" clip-path="url(#terminal-2622617390-line-15)">b2c3d4e50000</text><text class="terminal-2622617390-r1" x="207.4" y="386" textLength="97.6" clip-path="url(#terminal-2622617390-line-15)">猎人&#160;·&#160;特别篇</text><text class="terminal-2622617390-r2" x="402.6" y="386" textLength="61" clip-path="url(#terminal-2622617390-line-15)">morui</text><text class="terminal-2622617390-r1" x="500.2" y="386" textLength="61" clip-path="url(#terminal-2622617390-line-15)">&#160;&#160;6/7</text><text class="terminal-2622617390-r9" x="597.8" y="386" textLength="36.6" clip-path="url(#terminal-2622617390-line-15)">有失败</text><text class="terminal-2622617390-r2" x="707.6" y="386" textLength="195.2" clip-path="url(#terminal-2622617390-line-15)">2026-10-25&#160;16:20</text><text class="terminal-2622617390-r1" x="1464" y="386" textLength="12.2" clip-path="url(#terminal-2622617390-line-15)">
+</text><text class="terminal-2622617390-r1" x="1464" y="410.4" textLength="12.2" clip-path="url(#terminal-2622617390-line-16)">
+</text><text class="terminal-2622617390-r1" x="0" y="434.8" textLength="512.4" clip-path="url(#terminal-2622617390-line-17)">tasks&#160;&lt;任务ID&gt;&#160;查看章节与错误；retry&#160;&lt;任务ID&gt;&#160;继续未完成章节。</text><text class="terminal-2622617390-r1" x="1464" y="434.8" textLength="12.2" clip-path="url(#terminal-2622617390-line-17)">
+</text><text class="terminal-2622617390-r1" x="0" y="459.2" textLength="488" clip-path="url(#terminal-2622617390-line-18)">记录属于当前保存路径。未结束的任务可尝试&#160;retry，正在运行的任务会提示占用。</text><text class="terminal-2622617390-r1" x="1464" y="459.2" textLength="12.2" clip-path="url(#terminal-2622617390-line-18)">
+</text><text class="terminal-2622617390-r1" x="0" y="483.6" textLength="439.2" clip-path="url(#terminal-2622617390-line-19)">archive&#160;&lt;任务ID&gt;&#160;归档已完成计划；archive&#160;查看归档。</text><text class="terminal-2622617390-r1" x="1464" y="483.6" textLength="12.2" clip-path="url(#terminal-2622617390-line-19)">
+</text><text class="terminal-2622617390-r1" x="0" y="508" textLength="671" clip-path="url(#terminal-2622617390-line-20)">tasks&#160;unfinished&#160;只看未完成；tasks&#160;failed&#160;只看有失败；tasks&#160;返回全部任务。</text><text class="terminal-2622617390-r1" x="1464" y="508" textLength="12.2" clip-path="url(#terminal-2622617390-line-20)">
+</text><text class="terminal-2622617390-r1" x="0" y="532.4" textLength="622.2" clip-path="url(#terminal-2622617390-line-21)">tasks&#160;find&#160;&lt;关键词&gt;&#160;查找漫画名、源代码或&#160;ID；查找不改变&#160;retry&#160;all&#160;的范围。</text><text class="terminal-2622617390-r1" x="1464" y="532.4" textLength="12.2" clip-path="url(#terminal-2622617390-line-21)">
+</text>
+    </g>
+    </g>
+</svg>

@@ -35,6 +35,14 @@ MAX_FAILURE_DETAIL_ROWS = 5
 MAX_URL_DISPLAY_WIDTH = 50
 COMPACT_SEARCH_WIDTH = 80
 COMPACT_TASK_WIDTH = 60
+WIDE_TASK_WIDTH = 100
+JOB_STATE_STYLES = {
+    'completed': SUCCESS,
+    'failed': ERROR,
+    'interrupted': WARN,
+    'running': ACCENT,
+    'pending': MUTED,
+}
 SEARCH_PAGE_SIZE = 20
 CHAPTER_PAGE_SIZE = 60
 SEARCH_STATE_LABELS = {
@@ -160,6 +168,7 @@ class TerminalPresenter:
             ('ch', '<分组> [页码]', '翻看章节，也支持 next / prev'),
             ('status', '', '查看当前漫画、路径和覆盖模式'),
             ('tasks', '[状态/任务ID]', '筛选下载任务；next / prev 翻页'),
+            ('tasks find', '<关键词>', '按漫画名、源代码或 ID 查找计划'),
             ('archive', '[list/任务ID/show/restore]', '归档已完成计划、查看或恢复归档'),
             ('d', '[序号/URL]', '下载当前或指定动漫'),
             ('v', '<章节> [范围]', '按范围下载章节'),
@@ -527,10 +536,25 @@ class TerminalPresenter:
         ]
         self.print(Panel(Text('\n'.join(rows)), title='当前状态', border_style=ACCENT))
 
+    def task_overview(self, jobs: Sequence[JobSummary], *, unreadable: int = 0) -> None:
+        counts = dict.fromkeys(JOB_STATE_STYLES, 0)
+        for job in jobs:
+            counts[job.state] += 1
+        state = Text(f'全部计划 {len(jobs)}', style=f'bold {ACCENT}')
+        for key, count in counts.items():
+            if count:
+                state.append(f'  ·  {JOB_STATE_LABELS[key]} {count}', style=JOB_STATE_STYLES[key])
+        if unreadable:
+            state.append(f'\n无法读取 {unreadable} 条记录（未计入统计）', style=WARN)
+        state.append('\n当前保存路径 · 不含归档 · 记录状态不代表进程正在运行', style=MUTED)
+        self.print(Panel(state, title='任务概览', title_align='left', border_style=MUTED))
+
     def task_position(self, query: TaskQuery, count: int, total: int, size: int) -> None:
         pages = max(1, (count + size - 1) // size)
         noun = '章节' if query.job_id else '任务'
         state = Text(f'{noun}筛选  {TASK_FILTER_LABELS[query.status]}', style=f'bold {ACCENT}')
+        if query.keyword:
+            state.append(f'\n查找  {query.keyword}')
         state.append(f'\n匹配 {count} / {total} 项  ·  第 {query.page}/{pages} 页', style=MUTED)
         self.print(Panel(state, border_style=MUTED, padding=(0, 1)))
 
@@ -542,11 +566,12 @@ class TerminalPresenter:
             f'tasks {query.job_id} {query.status}' if query.job_id else f'tasks {query.status}'
         )
         actions = []
+        suffix = f' find {query.keyword}' if query.keyword else ''
         if query.page > 1:
-            previous = 'tasks prev' if interactive else f'{command} {query.page - 1}'
+            previous = 'tasks prev' if interactive else f'{command} {query.page - 1}{suffix}'
             actions.append(f'{previous} 上一页')
         if query.page < pages:
-            following = 'tasks next' if interactive else f'{command} {query.page + 1}'
+            following = 'tasks next' if interactive else f'{command} {query.page + 1}{suffix}'
             actions.append(f'{following} 下一页')
         if actions:
             self.info('  ·  '.join(actions))
@@ -554,6 +579,7 @@ class TerminalPresenter:
             self.info(f'tasks {query.job_id} failed 只看失败章节；tasks 返回全部任务。')
         else:
             self.info('tasks unfinished 只看未完成；tasks failed 只看有失败；tasks 返回全部任务。')
+            self.info('tasks find <关键词> 查找漫画名、源代码或 ID；查找不改变 retry all 的范围。')
 
     def download_jobs(
         self,
@@ -578,20 +604,33 @@ class TerminalPresenter:
         table.add_column('任务 ID', overflow='fold', min_width=12)
         table.add_column('漫画', overflow='fold')
         compact = self.console.width < COMPACT_TASK_WIDTH
+        wide = self.console.width >= WIDE_TASK_WIDTH
+        if wide:
+            table.add_column('源', overflow='fold')
         if compact:
             table.add_column('进度', overflow='fold')
         else:
             table.add_column('完成', justify='right')
             table.add_column('状态')
+        if wide:
+            table.add_column('更新（UTC）', style=MUTED, no_wrap=True)
         for job in jobs:
             summary = JobSummary.from_job(job) if isinstance(job, DownloadJob) else job
             count = f'{summary.total - summary.remaining}/{summary.total}'
             label = prefixes.get(job.id, job.id) if prefixes is not None else job.id[:12]
-            cells = [Text(label), Text(job.comic_name)]
+            name = Text(job.comic_name)
+            if not wide:
+                name.append(f'\n{job.source_name}', style=MUTED)
+            cells = [Text(label, style=ACCENT), name]
+            if wide:
+                cells.append(Text(job.source_name, style=MUTED))
+            status_style = JOB_STATE_STYLES[job.state]
             if compact:
-                cells.append(Text(f'{JOB_STATE_LABELS[job.state]}\n{count}'))
+                cells.append(Text(f'{JOB_STATE_LABELS[job.state]}\n{count}', style=status_style))
             else:
-                cells.extend([Text(count), Text(JOB_STATE_LABELS[job.state])])
+                cells.extend([Text(count), Text(JOB_STATE_LABELS[job.state], style=status_style)])
+            if wide:
+                cells.append(Text(job.updated_at[:16].replace('T', ' ')))
             table.add_row(*cells)
         self.print(table)
         if archived:

@@ -3,9 +3,10 @@ from __future__ import annotations
 from io import StringIO
 
 import pytest
+from rich.cells import cell_len
 from rich.console import Console
 
-from downloader.download.job_browser import TaskQuery
+from downloader.download.job_browser import JobSummary, TaskQuery
 from downloader.download.jobs import DownloadJob, JobVolume
 from downloader.models import (
     Comic,
@@ -172,6 +173,28 @@ def test_direct_task_navigation_provides_explicit_commands():
     assert 'tasks unfinished 1' in rendered
     assert 'tasks unfinished 3' in rendered
     assert 'tasks next' not in rendered
+
+
+@pytest.mark.parametrize('width', [40, 80, 120])
+def test_task_overview_and_find_render_literal_text_and_source(width):
+    output = StringIO()
+    presenter = TerminalPresenter(Console(file=output, width=width, color_system=None))
+    job = JobSummary(
+        'a' * 32, '[red]漫画[/]', 'fixture', 'failed', '2026-10-26T12:34:00+00:00', 5, 3
+    )
+    presenter.task_overview([job], unreadable=2)
+    presenter.task_position(TaskQuery(keyword='[red]漫画[/]'), 1, 1, 20)
+    presenter.download_jobs([job])
+    rendered = output.getvalue()
+    compact = ''.join(rendered.split())
+    assert '全部计划1' in compact
+    assert '无法读取2条记录' in compact
+    assert '[red]漫画[/]' in compact
+    assert 'fixture' in rendered
+    assert '2/5' in rendered
+    if width >= 100:
+        assert '2026-10-26 12:34' in rendered
+    assert all(cell_len(line) <= width for line in rendered.splitlines())
 
 
 def test_external_text_is_rendered_literally():

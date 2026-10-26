@@ -434,7 +434,7 @@ class Shell(cmd.Cmd):
             raise ValueError(f'页码必须是 1～{pages} 的整数，或 next / prev。') from None
 
     def do_tasks(self, arg):
-        """tasks [状态] [页码] 或 tasks <任务ID> [状态] [页码]；tasks next/prev 翻页。状态：all/unfinished/failed/completed/pending，列表另支持 running/interrupted。tasks 返回全部任务首页。"""
+        """tasks [状态] [页码] 或 tasks <任务ID> [状态] [页码]；tasks [状态] [页码] find <关键词> 查找漫画名、源代码或 ID；tasks next/prev 保留条件翻页。状态：all/unfinished/failed/completed/pending，列表另支持 running/interrupted。tasks 返回全部任务首页；查找不改变 retry all 的范围。"""
         self.last_command_ok = False
         try:
             query = parse_task_query(arg.split(), self.task_query)
@@ -449,9 +449,10 @@ class Shell(cmd.Cmd):
 
     def _show_task_list(self, query: TaskQuery) -> None:
         jobs, errors = self.job_store.list_summaries()
-        matches = matching_jobs(jobs, query.status)
+        matches = matching_jobs(jobs, query.status, query.keyword)
         self._read_page(str(query.page), len(matches), TASK_PAGE_SIZE)
         start = (query.page - 1) * TASK_PAGE_SIZE
+        self.presenter.task_overview(jobs, unreadable=len(errors))
         self.presenter.task_position(query, len(matches), len(jobs), TASK_PAGE_SIZE)
         self.presenter.download_jobs(
             matches[start : start + TASK_PAGE_SIZE], prefixes=unique_job_prefixes(jobs)
