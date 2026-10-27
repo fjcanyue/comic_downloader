@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import cmd
 import concurrent.futures
+import os
 import threading
 import time
 from collections.abc import Callable
@@ -36,6 +37,9 @@ from downloader.models import (
     VolumeDownloadResult,
 )
 from downloader.runtime_config import RuntimeConfig
+from downloader.search_browser.loader import DetailLoader, PreviewWorker
+from downloader.search_browser.state import BrowserState, DownloadAction, SearchItem, plain
+from downloader.search_browser.view import TERMINAL_ERRORS, SearchBrowser
 from downloader.sources import load_source_bindings
 from downloader.sources.metadata import SourceVerification
 from downloader.sources.profiles import SourceBinding, SourceProfile
@@ -295,6 +299,11 @@ class Shell(cmd.Cmd):
         self.task_query: TaskQuery | None = None
         self.archive_query: ArchiveQuery | None = None
         self.paginate_output = True
+        self.plain = False
+        self.search_generation = 0
+        self.browser_state: BrowserState | None = None
+        self.last_download_job_id: str | None = None
+        self.last_download_summary: DownloadSummary | None = None
 
     def emptyline(self) -> bool:
         """空行不重复执行上一条下载命令。"""
@@ -371,6 +380,8 @@ class Shell(cmd.Cmd):
                 if all(term in haystack for term in terms):
                     self.search_result_indices.append(index)
         self.search_page = 1
+        if self.browser_state is not None:
+            self.browser_state.apply_filter(self.search_filter)
         self._print_search_table(self.search_keyword, self.search_duration)
         self.last_command_ok = True
 
@@ -1108,6 +1119,8 @@ class Shell(cmd.Cmd):
             self.presenter.warn('请输入搜索关键字！')
             return
 
+        self.search_generation += 1
+        self.browser_state = None
         self.context.reset_comic()
         self.context.searched_results = []
         self.search_keyword = arg
@@ -1171,6 +1184,114 @@ class Shell(cmd.Cmd):
             duration=search_duration,
         )
         self._print_search_table(arg, search_duration, source_stats)
+        if self.context.searched_results and self._browser_available():
+            self.do_browse('')
+
+    def _browser_available(self) -> bool:
+        return bool(
+            not self.plain
+            and self.paginate_output
+            and self.stdin.isatty()
+            and self.stdout.isatty()
+            and os.environ.get('TERM', '').casefold() != 'dumb'
+        )
+
+    def do_browse(self, arg):
+        """browse：重新打开最近搜索的键盘浏览界面。↑↓ 选择，Enter 同屏详情，d 确认整本下载，Tab 切区，/ 筛选，l 下载摘要，Esc/q 返回。非终端或 --plain 下使用 i/d <原序号>。"""
+        if arg.strip():
+            self.presenter.warn('browse 不接受参数；请先使用 s <关键词> 搜索。')
+            self.last_command_ok = False
+            return
+        if not self.context.searched_results:
+            self.presenter.warn('请先使用 s <关键词> 搜索到漫画。')
+            return
+        if not self._browser_available():
+            self.presenter.info('当前使用文本交互；i <原序号> 查看详情，d <原序号> 下载。')
+            return
+        if self.browser_state is None or self.browser_state.generation != self.search_generation:
+            self.browser_state = BrowserState(
+                tuple(
+                    SearchItem.from_comic(index, comic)
+                    for index, comic in enumerate(self.context.searched_results)
+                ),
+                self.search_keyword,
+                self.search_generation,
+                {name: self._source_display_name(name) for name in self.source_options},
+                filter_text=self.search_filter,
+            )
+        state = self.browser_state
+        while True:
+            loader = DetailLoader(
+                self.all_source_bindings, self.context.output_path, self.context.create_http_session
+            )
+            try:
+                browser = SearchBrowser(
+                    state, PreviewWorker(loader), self.context.output_path, self.overwrite
+                )
+                action = browser.run()
+            except TERMINAL_ERRORS as exc:
+                logger.debug('终端浏览不可用：{}', exc)
+                self.presenter.warn(
+                    '终端不支持全屏输入输出，已返回文本交互；i/d <原序号> 查看或下载。'
+                )
+                break
+            if action is None:
+                break
+            self._browser_download(action, state)
+        self.search_filter = state.filter_text
+        self.search_result_indices = list(state.indices) if state.filter_text else None
+        self.search_page = 1
+        self.presenter.info('已返回命令行；browse 继续浏览，i/d <原序号> 查看或下载。')
+
+    def _browser_download(self, action: DownloadAction, state: BrowserState) -> None:
+        if not action.matches(self.search_generation, self.context.searched_results):
+            state.message = '搜索结果已变更，已取消下载；请重新选择。'
+            self.last_command_ok = False
+            return
+        self.last_download_job_id = None
+        self.last_download_summary = None
+        failure = ''
+        try:
+            self.do_d(str(action.item.index + 1))
+        except Exception as exc:
+            logger.exception('浏览界面下载失败：{}', action.item.url)
+            self.last_command_ok = False
+            failure = str(exc)
+            self.presenter.error(f'下载失败：{failure}')
+        self._browser_download_report(action, state, failure)
+
+    def _browser_download_report(
+        self, action: DownloadAction, state: BrowserState, failure: str
+    ) -> None:
+        state.message = f'{plain(action.item.name)}：' + (
+            '下载完成' if self.last_command_ok else '下载未完成'
+        )
+        state.report = [
+            state.message,
+            f'来源：{plain(action.item.source)}',
+            f'URL：{plain(action.item.url)}',
+        ]
+        if self.last_download_job_id:
+            job_id = self.last_download_job_id
+            state.message += f' · 任务 {job_id[:12]}'
+            state.report.extend(
+                [f'任务 ID：{job_id}', f'tasks {job_id} 查看；retry {job_id} 继续未完成章节。']
+            )
+        state.message += ' · 按 l 查看摘要'
+        if failure:
+            state.report.append(f'错误：{plain(failure)}')
+        if self.last_download_summary:
+            summary = self.last_download_summary
+            state.report.append(
+                f'共 {summary.total_volumes} 话 · 已下载 {summary.downloaded} · 已复用 {summary.skipped} · 失败 {summary.failed} · 部分失败 {summary.partial}'
+            )
+            state.report.extend(
+                f'{plain(volume.name)}：{volume.status} {plain(volume.message)}'
+                for volume in summary.volume_results
+            )
+        elif not failure:
+            state.report.append('未取得下载汇总，请退出浏览查看终端提示或检查任务记录。')
+        state.report_row = 0
 
     def do_i(self, arg):
         """i <搜索结果序号/URL>：查看动漫详情和分组，例如 i 1。"""
@@ -1305,6 +1426,7 @@ class Shell(cmd.Cmd):
             volumes,
         )
         self.job_store.save(job)
+        self.last_download_job_id = job.id
         self.presenter.info(f'下载任务已保存：{job.id[:12]}，共 {len(volumes)} 话。')
         return self._execute_job(job)
 
@@ -1393,6 +1515,7 @@ class Shell(cmd.Cmd):
             self.__print_download_summary(summary)
 
     def __print_download_summary(self, summary):
+        self.last_download_summary = summary
         self.presenter.download_summary(summary)
         self.last_command_ok = summary.ok
 

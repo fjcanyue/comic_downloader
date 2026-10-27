@@ -13,6 +13,7 @@ from downloader.comic import ComicSource
 from downloader.download.jobs import DownloadJob, JobVolume
 from downloader.download.progress import NoopDownloadProgress
 from downloader.models import Comic, ComicBook, ComicVolume, VolumeDownloadResult
+from downloader.search_browser.state import BrowserState, DownloadAction, SearchItem
 from downloader.shell import Shell, url_belongs_to_source
 from downloader.sources.metadata import SourceVerification
 from downloader.sources.profiles import SourceBinding, SourceProfile
@@ -85,6 +86,160 @@ def test_search_info_range_download_stays_in_shell(shell):
         'https://second.test/3',
         'https://second.test/4',
     ]
+
+
+def test_browser_auto_entry_downloads_original_item_all_groups_and_returns_to_same_state(
+    shell, monkeypatch
+):
+    original_info = WorkflowSource.info
+
+    def info(source, url):
+        comic = original_info(source, url)
+        extra = ComicBook()
+        extra.name = '番外'
+        extra.vols = [ComicVolume('特别篇', f'{source.base_url}/extra')]
+        comic.books.append(extra)
+        return comic
+
+    monkeypatch.setattr(WorkflowSource, 'info', info)
+    monkeypatch.setattr(shell, '_browser_available', lambda: True)
+    views = []
+
+    class Browser:
+        def __init__(self, state, worker, path, overwrite):
+            self.state = state
+            self.worker = worker
+            views.append(self)
+
+        def run(self):
+            assert self.worker.thread is None
+            if len(views) == 1:
+                self.state.apply_filter('second')
+                self.state.focus = 'details'
+                return self.state.action()
+            assert self.state is views[0].state
+            assert self.state.filter_text == 'second'
+            assert self.state.focus == 'details'
+            assert self.state.current.index == 1
+            assert '下载完成' in self.state.message
+            assert shell.last_download_job_id in '\n'.join(self.state.report)
+            return None
+
+    monkeypatch.setattr('downloader.shell.SearchBrowser', Browser)
+    shell.onecmd('s 漫画')
+    assert len(views) == 2
+    jobs, errors = shell.job_store.list_jobs()
+    assert not errors and len(jobs) == 1
+    assert jobs[0].source_name == 'second'
+    assert len(jobs[0].volumes) == 6
+    assert jobs[0].volumes[-1].book_name == '番外'
+    assert jobs[0].state == 'completed'
+    assert shell.last_command_ok
+    assert shell.search_result_indices == [1]
+
+
+def test_browser_cancel_does_not_download_switch_comic_or_create_records(shell, monkeypatch):
+    shell.onecmd('s 漫画')
+    shell.onecmd('i 1')
+    comic = shell.context.comic
+    monkeypatch.setattr(shell, '_browser_available', lambda: True)
+
+    class Browser:
+        def __init__(self, *args):
+            pass
+
+        def run(self):
+            return None
+
+    monkeypatch.setattr('downloader.shell.SearchBrowser', Browser)
+    shell.onecmd('browse')
+    assert shell.context.comic is comic
+    assert shell.current_source_name == 'first'
+    assert not shell.job_store.directory.exists()
+
+
+@pytest.mark.parametrize('changed', ['generation', 'source', 'url'])
+def test_browser_download_rejects_stale_search_identity(shell, changed):
+    shell.onecmd('s 漫画')
+    item = SearchItem.from_comic(0, shell.context.searched_results[0])
+    action = DownloadAction(shell.search_generation, item)
+    state = BrowserState((item,), '漫画', shell.search_generation)
+    if changed == 'generation':
+        shell.search_generation += 1
+    elif changed == 'source':
+        shell.context.searched_results[0].source = 'second'
+    else:
+        shell.context.searched_results[0].url = 'https://first.test/other'
+    shell._browser_download(action, state)
+    assert not shell.last_command_ok
+    assert '已变更' in state.message
+    assert not shell.job_store.directory.exists()
+
+
+def test_browser_download_failure_reports_error_and_keeps_browsing_state(shell, monkeypatch):
+    shell.onecmd('s 漫画')
+    item = SearchItem.from_comic(1, shell.context.searched_results[1])
+    state = BrowserState((replace(item, index=0),), '漫画', shell.search_generation)
+    state.filter_text = 'second'
+
+    def fail(arg):
+        assert arg == '2'
+        raise ValueError('模拟下载失败')
+
+    monkeypatch.setattr(shell, 'do_d', fail)
+    shell._browser_download(DownloadAction(shell.search_generation, item), state)
+    assert state.filter_text == 'second'
+    assert '模拟下载失败' in '\n'.join(state.report)
+    assert not shell.last_command_ok
+
+
+def test_browser_download_ctrl_c_keeps_existing_interrupt_semantics(shell, monkeypatch):
+    shell.onecmd('s 漫画')
+    item = SearchItem.from_comic(0, shell.context.searched_results[0])
+
+    def interrupt(arg):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(shell, 'do_d', interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        shell._browser_download(
+            DownloadAction(shell.search_generation, item),
+            BrowserState((item,), '漫画', shell.search_generation),
+        )
+
+
+@pytest.mark.parametrize(
+    'plain,interactive,tty,term,expected',
+    [
+        (False, True, True, 'xterm', True),
+        (True, True, True, 'xterm', False),
+        (False, False, True, 'xterm', False),
+        (False, True, False, 'xterm', False),
+        (False, True, True, 'dumb', False),
+    ],
+)
+def test_browser_terminal_detection_preserves_plain_and_direct_commands(  # noqa: PLR0913 - capability matrix
+    shell, monkeypatch, plain, interactive, tty, term, expected
+):
+    monkeypatch.setattr(shell.stdin, 'isatty', lambda: tty)
+    monkeypatch.setattr(shell.stdout, 'isatty', lambda: tty)
+    monkeypatch.setenv('TERM', term)
+    shell.plain = plain
+    shell.paginate_output = interactive
+    assert shell._browser_available() is expected
+
+
+def test_browser_terminal_failure_falls_back_without_losing_results(shell, monkeypatch):
+    shell.onecmd('s 漫画')
+    monkeypatch.setattr(shell, '_browser_available', lambda: True)
+
+    def unavailable(*args, **kwargs):
+        raise OSError('terminal unavailable')
+
+    monkeypatch.setattr('downloader.shell.SearchBrowser', unavailable)
+    shell.onecmd('browse')
+    assert len(shell.context.searched_results) == 2
+    assert '已返回文本交互' in shell.console.file.getvalue()
 
 
 def test_archive_workflow_preserves_current_selection_and_supports_both_page_modes(shell):

@@ -41,9 +41,11 @@ USAGE = """用法:
   -d, --debug     输出调试日志到终端
   -c, --config <文件>  指定运行配置文件
   --overwrite     覆盖已存在的下载文件
+  --plain         使用文本交互，不自动进入键盘分栏浏览
   -h, --help      显示帮助
 
 直接子命令使用完整 URL；搜索结果序号仅在交互式 shell 内有效。
+交互式搜索后可 ↑↓ 选择，Enter 同屏详情，d 确认整本下载；browse 重新打开，Esc 返回。
 download_vols 的一个范围参数表示截止序号，两个表示起始和截止，均从 1 开始。
 tasks 状态：all / unfinished / failed / completed / pending；任务列表另支持 running / interrupted。
 tasks 默认第一页；next / prev 仅用于交互会话，直接子命令使用明确页码。
@@ -58,6 +60,7 @@ archive next / prev 仅用于交互会话并保留查找条件；直接子命令
 class RuntimeOptions:
     overwrite: bool
     runtime_config: RuntimeConfig | None
+    plain: bool = False
 
 
 class RuntimeConfigLoadError(Exception):
@@ -90,6 +93,7 @@ def main() -> int:
         overwrite=runtime_options.overwrite,
         runtime_config=runtime_options.runtime_config,
     )
+    shell.plain = runtime_options.plain
 
     try:
         return _run_command(shell, subcommand, subcommand_args)
@@ -107,7 +111,11 @@ def main() -> int:
 def _configure_runtime(args: list[str]) -> RuntimeOptions:
     logger.remove()
     if '-d' in args or '--debug' in args:
-        logger.add(sys.stderr, level='DEBUG')
+        logger.add(
+            sys.stderr,
+            level='DEBUG',
+            filter=lambda record: not record['extra'].get('browser_preview', False),
+        )
         args[:] = [arg for arg in args if arg not in {'-d', '--debug'}]
 
     overwrite = False
@@ -115,13 +123,16 @@ def _configure_runtime(args: list[str]) -> RuntimeOptions:
         overwrite = True
         args[:] = [arg for arg in args if arg != '--overwrite']
 
+    plain = '--plain' in args
+    args[:] = [arg for arg in args if arg != '--plain']
+
     config_path = _pop_config_path(args)
     if any(arg in {'-c', '--config'} or arg.startswith('--config=') for arg in args):
         raise CommandUsageError('--config 只能指定一次。')
     runtime_config = _load_runtime_config(config_path) if config_path else None
 
     logger.add('comic_downloader.log', rotation='500 MB', level='INFO')
-    return RuntimeOptions(overwrite=overwrite, runtime_config=runtime_config)
+    return RuntimeOptions(overwrite=overwrite, runtime_config=runtime_config, plain=plain)
 
 
 def _load_runtime_config(config_path: str) -> RuntimeConfig:

@@ -163,6 +163,7 @@ class TerminalPresenter:
     def _command_cheatsheet(self) -> Table:
         entries = [
             ('s', '<关键词>', '从所有启用源搜索动漫'),
+            ('browse', '', '键盘浏览：Enter 详情，d 确认下载'),
             ('i', '<序号/URL>', '查看动漫详情'),
             ('f', '[关键词]', '筛选缓存结果；不填则清除'),
             ('p', '[页码/next/prev]', '翻看筛选结果；不填重显当前页'),

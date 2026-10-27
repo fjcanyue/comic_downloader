@@ -22,6 +22,7 @@ class FakeShell:
         self.overwrite = overwrite
         self.runtime_config = runtime_config
         self.last_command_ok = True
+        self.plain = False
         self.context = FakeContext()
         # 真实 Shell 通过 TerminalPresenter 暴露输出，fake 也需对齐该接口。
         self.presenter = TerminalPresenter()
@@ -49,6 +50,15 @@ class FakeShell:
 class InterruptingShell(FakeShell):
     def cmdloop(self):
         raise KeyboardInterrupt
+
+
+def test_plain_option_disables_fullscreen_browsing_without_changing_shell_constructor(monkeypatch):
+    shell = FakeShell('.')
+    monkeypatch.setattr(main_module, 'Shell', lambda *args, **kwargs: shell)
+    monkeypatch.setattr(sys, 'argv', ['comic_downloader', '--plain'])
+    assert main_module.main() == 0
+    assert shell.plain
+    assert shell.cmdloop_called
 
 
 @pytest.mark.parametrize(
