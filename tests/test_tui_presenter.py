@@ -6,6 +6,7 @@ import pytest
 from rich.cells import cell_len
 from rich.console import Console
 
+from downloader.download.job_archive import ArchiveQuery
 from downloader.download.job_browser import JobSummary, TaskQuery
 from downloader.download.jobs import DownloadJob, JobVolume
 from downloader.models import (
@@ -29,7 +30,7 @@ def test_archive_views_show_literal_names_and_only_archive_navigation(width):
     job = DownloadJob('fixture', '[red]漫画[/]', '', [volume], state='completed')
     presenter.download_jobs([job], archived=True)
     presenter.download_job(job, archived=True)
-    presenter.archive_navigation('archive list', 2, 45, 20)
+    presenter.archive_navigation(ArchiveQuery(page=2), 45, 20, interactive=False)
     text = output.getvalue()
     plain = ''.join(text.replace('│', '').split())
     assert '[red]漫画[/]' in plain
@@ -38,6 +39,30 @@ def test_archive_views_show_literal_names_and_only_archive_navigation(width):
     assert f'archiverestore{job.id}' in plain
     assert 'archivelist1' in plain and 'archivelist3' in plain
     assert 'retry' not in text and 'tasks next' not in text
+
+
+@pytest.mark.parametrize('width', [40, 80, 120])
+@pytest.mark.parametrize('interactive', [True, False])
+def test_archive_query_feedback_wraps_and_keeps_literal_keywords(width, interactive):
+    output = StringIO()
+    presenter = TerminalPresenter(Console(file=output, width=width, color_system=None))
+    query = ArchiveQuery(page=2, keyword='[red]猎人[/] MoRui')
+    presenter.archive_position(query, 45, 80, 20, unreadable=2)
+    presenter.archive_navigation(query, 45, 20, interactive=interactive)
+    text = output.getvalue()
+    plain = ''.join(text.replace('│', '').split())
+    assert '[red]猎人[/]MoRui' in plain
+    assert '匹配45/80项' in plain
+    assert '第2/3页' in plain
+    assert '无法读取2条记录（未计入统计）' in plain
+    assert '仅含归档计划' in plain
+    assert max(cell_len(line) for line in text.splitlines()) <= width
+    if interactive:
+        assert 'archiveprev上一页' in plain
+        assert 'archivenext下一页' in plain
+    else:
+        assert 'archivelist1find[red]猎人[/]MoRui上一页' in plain
+        assert 'archivelist3find[red]猎人[/]MoRui下一页' in plain
 
 
 @pytest.mark.parametrize('width', [40, 80, 120])

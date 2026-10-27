@@ -80,6 +80,8 @@ uv run pyinstaller downloader.spec
 | `tasks next` / `tasks prev` | 在当前任务列表或章节筛选中连续翻页 | `tasks next` |
 | `archive <任务ID>` | 归档一个已完成计划，保留漫画文件 | `archive a1b2c3d4` |
 | `archive [list [页码]]` | 查看已归档计划，每页 20 项 | `archive list 2` |
+| `archive [list [页码]] find <关键词>` | 按漫画名、源代码或 ID 查找归档 | `archive find 猎人 morui` |
+| `archive next` / `archive prev` | 保留归档查找条件或当前详情，连续翻页 | `archive next` |
 | `archive show <任务ID> [页码]` | 查看归档详情，每页 30 话 | `archive show a1b2c3d4 2` |
 | `archive restore <任务ID>` | 将归档计划恢复到任务列表 | `archive restore a1b2c3d4` |
 | `retry [序号/任务ID/all]` | 查看或继续未完成下载，支持重启后恢复 | `retry a1b2c3d4` |
@@ -173,6 +175,7 @@ comic_downloader tasks [状态] [页码]
 comic_downloader tasks [状态] [页码] find <关键词>
 comic_downloader tasks <任务ID> [状态] [页码]
 comic_downloader archive [list [页码]]
+comic_downloader archive [list [页码]] find <关键词>
 comic_downloader archive <任务ID>
 comic_downloader archive show <任务ID> [页码]
 comic_downloader archive restore <任务ID>
@@ -311,6 +314,10 @@ tasks completed                  找到要归档的已完成计划
 archive a1b2c3d4                  归档一个计划
 archive                           查看归档第一页
 archive list 2                    查看归档第 2 页
+archive find 猎人 morui           查找该漫画在 morui 源的归档
+archive next                      保留条件，查看下一页
+archive prev                      返回上一页
+archive list 2 find 猎人 morui    明确查看查找结果第 2 页
 archive show a1b2c3d4              查看该归档计划的章节
 archive show a1b2c3d4 2            查看第 31～60 话
 archive restore a1b2c3d4           恢复到主任务列表
@@ -318,13 +325,29 @@ archive restore a1b2c3d4           恢复到主任务列表
 
 将示例 ID 替换为实际 ID，支持至少 4 位且不重复的十六进制前缀，包括纯数字前缀。
 归档列表每页 20 项，详情每页 30 话，按原更新时间从新到旧排列；归档和恢复不会重写
-更新时间。交互模式和直接子命令均使用明确页码，输出会提供上一页、下一页命令。
+更新时间。交互模式支持 `archive next/prev`，沿用最近成功打开的归档列表或章节详情；
+详情会记住完整 ID，避免前缀后来出现冲突。直接子命令使用明确页码，输出的翻页命令带上关键词。
+
+查找按空白分词、忽略大小写，所有词必须在漫画名、源代码或 ID 中匹配，可以跨字段命中。
+`find` 后所有文字均为关键词；不搜索章节，不访问网站。新查询默认回到第一页，
+`archive` 或 `archive list` 清除条件，返回全部归档首页。参数错误和越界不会覆盖原查询；
+归档和恢复单个计划也不会清除查询。列表每次读取当前记录，其他进程恢复计划后页数可能缩减，
+此时可使用 `archive list 1 find <原关键词>` 或 `archive` 重新定位。
+
+查找面板显示条件、匹配数、全部可读归档数和页码；无法读取的记录单独计数并报告，
+不会混入匹配总数。无匹配时提供清除条件的入口。**查找只影响浏览，归档和恢复始终指定单个 ID**，
+不把当前列表当作批量操作范围。短 ID 按全部可读归档判断冲突，不因筛选而缩短。
+
+以下为实际 Rich 渲染的合成演示数据，展示查询反馈与空结果提示：
+
+![归档查找与连续翻页](docs/archive-find.svg)
 
 直接执行时同样使用原来的下载路径：
 
 ```shell
 comic_downloader D:\Comics archive a1b2c3d4
 comic_downloader D:\Comics archive list 2
+comic_downloader D:\Comics archive list 2 find 猎人 morui
 comic_downloader D:\Comics archive restore a1b2c3d4
 ```
 
@@ -427,11 +450,12 @@ UTC 时间戳，便于脚本或故障排查读取。该检查只验证首页的 
 7. **章节目录解析与离线回归（已完成）**：为 7 个默认启用源建立合成详情/API 样本，修复嵌套文本、地址拼接和分组匹配，保留部分可用章节并显示解析提示；追加章节请求限定在所属分组。详见[章节目录解析迭代与验证](docs/ideation/2026-10-13-source-catalog.md)。
 8. **已完成计划归档（已完成）**：新增按 ID 归档、归档分页、章节详情与恢复入口，保留任务内容及漫画文件，复用任务进程锁。详见[归档设计与验证](docs/ideation/2026-10-13-job-archive.md)。
 9. **任务查找与状态概览（已完成）**：新增漫画名、源代码及 ID 多词查找，保留条件翻页；以状态概览、来源和更新时间改善浏览层级，并缓存未变化的损坏记录错误。详见[代码分析、界面设计与性能验证](docs/ideation/2026-10-26-task-find.md)。
+10. **归档查找与连续浏览（已完成）**：归档支持多词查找、独立浏览状态、列表与章节连续翻页；增加查询面板、无匹配恢复入口和损坏记录计数。详见[归档浏览迭代与验证](docs/ideation/2026-10-27-archive-find.md)。
 
 后续优先方向：
 
 - **源解析回归扩展**：已有合成目录样本不代表线上站点当前可用；后续积累有采集日期和来源记录的真实脱敏搜索/详情/章节快照，并扩展图片解析回归。
-- **历史任务管理扩展**：已完成任务查找、状态概览、单计划归档与恢复；后续优先评估归档查找和批量操作预览，再设计保留期限及显式清理流程。
+- **历史任务管理扩展**：已完成任务与归档查找、状态概览、单计划归档与恢复；后续优先评估批量操作候选预览及执行时复核，再设计保留期限及显式清理流程。
 - **搜索范围扩展**：依据各源分页协议按需加载网站后续搜索页，并设计去重、限速与稳定序号策略。
 
 开发验证：`uv run pytest -o addopts= -q`；类型检查在 Windows 可使用

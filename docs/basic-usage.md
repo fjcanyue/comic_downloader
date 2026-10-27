@@ -183,6 +183,27 @@ retry <任务ID>          继续失败、部分失败或未开始的章节
 任务恢复依据历史结果，不会重新验证记录中已成功的文件；手动删除文件后请新建下载任务。
 ZIP 的 CRC 校验用于识别归档损坏，不等同于图片内容的解码检查。
 
+### 已完成计划归档、查找与恢复
+
+```text
+tasks completed                  找到已完成计划
+archive a1b2c3d4                  归档单个计划，请替换为实际 ID
+archive find 猎人 morui           按漫画名、源代码或 ID 查找归档
+archive next                      保留关键词，查看下一页
+archive prev                      查看上一页
+archive show a1b2c3d4             查看归档章节，之后 next/prev 翻看章节
+archive restore a1b2c3d4          恢复单个计划到任务列表
+archive                           清除查找条件，回到全部归档首页
+```
+
+查找忽略大小写，按空白分词且所有词必须匹配，可跨字段命中。归档列表每页 20 项，章节详情每页
+30 话；无匹配、参数错误和越界都会给出提示。查看详情后，连续翻页作用于详情；返回列表可重新
+输入 `archive find <关键词>`。查找只影响浏览，归档和恢复始终针对指定的单个 ID。
+归档保留计划内容及漫画文件；恢复不会自动重新下载。
+
+直接 CLI 使用明确页码，例如 `comic_downloader D:\Comics archive list 2 find 猎人 morui`。
+输出的翻页命令保留关键词；`archive next/prev` 只用于交互会话。
+
 ## 7. 退出
 
 ```bash

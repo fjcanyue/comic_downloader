@@ -12,6 +12,7 @@ from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
 
+from downloader.download.job_archive import ArchiveQuery
 from downloader.download.job_browser import TASK_FILTER_LABELS, JobSummary, TaskQuery
 from downloader.download.jobs import DownloadJob
 from downloader.models import Comic, DownloadSummary, SearchOutcome, VolumeDownloadResult
@@ -170,6 +171,7 @@ class TerminalPresenter:
             ('tasks', '[状态/任务ID]', '筛选下载任务；next / prev 翻页'),
             ('tasks find', '<关键词>', '按漫画名、源代码或 ID 查找计划'),
             ('archive', '[list/任务ID/show/restore]', '归档已完成计划、查看或恢复归档'),
+            ('archive find', '<关键词>', '查找归档；archive next / prev 翻页'),
             ('d', '[序号/URL]', '下载当前或指定动漫'),
             ('v', '<章节> [范围]', '按范围下载章节'),
             ('source', '[序号/代码名]', '查看并切换动漫源'),
@@ -640,16 +642,38 @@ class TerminalPresenter:
         self.info('记录属于当前保存路径。未结束的任务可尝试 retry，正在运行的任务会提示占用。')
         self.info('archive <任务ID> 归档已完成计划；archive 查看归档。')
 
-    def archive_navigation(self, command: str, page: int, count: int, size: int) -> None:
+    def archive_position(
+        self, query: ArchiveQuery, count: int, total: int, size: int, *, unreadable: int = 0
+    ) -> None:
         pages = max(1, (count + size - 1) // size)
-        self.info(f'归档浏览 · 共 {count} 项 · 第 {page}/{pages} 页')
+        state = Text('归档查找', style=f'bold {ACCENT}')
+        state.append(f'\n条件  {query.keyword or "全部归档"}')
+        state.append(f'\n匹配 {count} / {total} 项  ·  第 {query.page}/{pages} 页', style=MUTED)
+        if unreadable:
+            state.append(f'\n无法读取 {unreadable} 条记录（未计入统计）', style=WARN)
+        state.append('\n当前保存路径 · 仅含归档计划', style=MUTED)
+        self.print(Panel(state, border_style=MUTED, padding=(0, 1)))
+
+    def archive_navigation(
+        self, query: ArchiveQuery, count: int, size: int, *, interactive: bool = True
+    ) -> None:
+        pages = max(1, (count + size - 1) // size)
+        if query.job_id:
+            self.info(f'归档章节 · 共 {count} 项 · 第 {query.page}/{pages} 页')
+        command = f'archive show {query.job_id}' if query.job_id else 'archive list'
+        suffix = f' find {query.keyword}' if query.keyword else ''
         actions = []
-        if page > 1:
-            actions.append(f'{command} {page - 1} 上一页')
-        if page < pages:
-            actions.append(f'{command} {page + 1} 下一页')
+        if query.page > 1:
+            previous = 'archive prev' if interactive else f'{command} {query.page - 1}{suffix}'
+            actions.append(f'{previous} 上一页')
+        if query.page < pages:
+            following = 'archive next' if interactive else f'{command} {query.page + 1}{suffix}'
+            actions.append(f'{following} 下一页')
         if actions:
             self.info('  ·  '.join(actions))
+        if not query.job_id:
+            self.info('archive find <关键词> 查找漫画名、源代码或 ID；archive 返回全部归档首页。')
+            self.info('查找只影响浏览；归档和恢复始终使用单个任务 ID。')
 
     def download_job(
         self, job: DownloadJob, *, volume_indices: list[int] | None = None, archived: bool = False

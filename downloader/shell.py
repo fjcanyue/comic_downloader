@@ -16,7 +16,7 @@ from urllib3.util.retry import Retry
 
 from downloader.browser.manager import DriverManager
 from downloader.comic import Comic, ComicSource
-from downloader.download.job_archive import parse_archive_query
+from downloader.download.job_archive import ArchiveQuery, parse_archive_query
 from downloader.download.job_browser import (
     TASK_PAGE_SIZE,
     TASK_VOLUME_PAGE_SIZE,
@@ -293,6 +293,7 @@ class Shell(cmd.Cmd):
         self.search_page = 1
         self.chapter_pages: dict[int, int] = {}
         self.task_query: TaskQuery | None = None
+        self.archive_query: ArchiveQuery | None = None
         self.paginate_output = True
 
     def emptyline(self) -> bool:
@@ -481,10 +482,12 @@ class Shell(cmd.Cmd):
         return query
 
     def do_archive(self, arg):
-        """archive [list [页码]] 查看归档；archive <任务ID> 归档已完成计划；archive show <任务ID> [页码] 查看详情；archive restore <任务ID> 恢复。仅移动计划记录，不改变漫画文件。"""
+        """archive [list [页码]] [find <关键词>] 按漫画名、源代码或 ID 查找归档；archive next/prev 保留条件翻页；archive show <任务ID> [页码] 查看详情；archive restore <任务ID> 恢复；archive <任务ID> 归档已完成计划。archive 返回全部归档首页；查找不改变归档或恢复的范围，操作始终指定单个 ID，不改变漫画文件。"""
         self.last_command_ok = False
         try:
-            query = parse_archive_query(arg.split())
+            query = parse_archive_query(
+                arg.split(), self.archive_query if self.paginate_output else None
+            )
             if query.action in {'archive', 'restore'}:
                 operation = (
                     self.job_store.archive if query.action == 'archive' else self.job_store.restore
@@ -499,37 +502,44 @@ class Shell(cmd.Cmd):
                 )
                 self.last_command_ok = True
             else:
-                self._show_archive(query.job_id, query.page)
+                self.archive_query = self._show_archive(query)
         except (ValueError, OSError) as exc:
             self.presenter.warn(str(exc))
 
-    def _show_archive(self, job_id: str | None, page: int) -> None:
+    def _show_archive(self, query: ArchiveQuery) -> ArchiveQuery:
         store = self.job_store.archive_view()
-        if job_id:
-            job = store.load(job_id)
+        if query.job_id:
+            job = store.load(query.job_id)
+            query = replace(query, job_id=job.id)
             count = len(job.volumes)
             size = TASK_VOLUME_PAGE_SIZE
-            self._read_page(str(page), count, size)
-            start = (page - 1) * size
+            self._read_page(str(query.page), count, size)
+            start = (query.page - 1) * size
             self.presenter.download_job(
                 job, volume_indices=list(range(start, min(start + size, count))), archived=True
             )
-            command = f'archive show {job.id}'
             errors = []
         else:
             jobs, errors = store.list_summaries()
-            count = len(jobs)
+            matches = matching_jobs(jobs, 'all', query.keyword)
+            count = len(matches)
             size = TASK_PAGE_SIZE
-            self._read_page(str(page), count, size)
-            start = (page - 1) * size
-            self.presenter.download_jobs(
-                jobs[start : start + size], prefixes=unique_job_prefixes(jobs), archived=True
-            )
-            command = 'archive list'
-        self.presenter.archive_navigation(command, page, count, size)
+            self._read_page(str(query.page), count, size)
+            start = (query.page - 1) * size
+            self.presenter.archive_position(query, count, len(jobs), size, unreadable=len(errors))
+            if not matches and query.keyword:
+                self.presenter.info('没有符合查找条件的归档。输入 archive 清除条件，返回全部归档。')
+            elif not jobs and errors:
+                self.presenter.warn('没有可读取的归档计划，请检查下方记录错误。')
+            else:
+                self.presenter.download_jobs(
+                    matches[start : start + size], prefixes=unique_job_prefixes(jobs), archived=True
+                )
+        self.presenter.archive_navigation(query, count, size, interactive=self.paginate_output)
         for error in errors:
             self.presenter.warn(f'无法读取归档记录：{error}')
         self.last_command_ok = not errors
+        return query
 
     def do_retry(self, arg):
         """retry [序号/任务ID/all]：查看或恢复下载；tasks 中的计划使用任务 ID，章节记录支持序号。"""

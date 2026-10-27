@@ -87,7 +87,7 @@ def test_search_info_range_download_stays_in_shell(shell):
     ]
 
 
-def test_archive_workflow_preserves_current_selection_and_uses_explicit_pages(shell):
+def test_archive_workflow_preserves_current_selection_and_supports_both_page_modes(shell):
     shell.onecmd('i https://first.test/comic')
     comic = shell.context.comic
     for index in range(23):
@@ -109,7 +109,7 @@ def test_archive_workflow_preserves_current_selection_and_uses_explicit_pages(sh
     shell.onecmd('archive')
     text = shell.console.file.getvalue()
     assert '第 1/2 页' in text
-    assert 'archive list 2' in text
+    assert 'archive next' in text
     assert 'tasks next' not in text
     shell.onecmd('archive list 2')
     assert shell.last_command_ok
@@ -120,7 +120,17 @@ def test_archive_workflow_preserves_current_selection_and_uses_explicit_pages(sh
     shell.onecmd(f'archive show {job.id[:12]}')
     text = shell.console.file.getvalue()
     assert 'V030' in text and 'V031' not in text
-    assert f'archive show {job.id} 2' in text
+    assert 'archive next' in text
+    assert shell.archive_query.job_id == job.id
+    shell.onecmd('archive next')
+    assert shell.archive_query.page == 2
+    assert 'V035' in shell.console.file.getvalue()
+    shell.onecmd('archive next')
+    assert not shell.last_command_ok
+    assert shell.archive_query.page == 2
+    shell.onecmd('archive prev')
+    assert shell.last_command_ok
+    assert shell.archive_query.page == 1
     shell.onecmd(f'archive show {job.id[:12]} 2')
     assert 'V035' in shell.console.file.getvalue()
     assert main_module._run_command(shell, 'archive', ['restore', job.id]) == 0
@@ -131,6 +141,128 @@ def test_archive_workflow_preserves_current_selection_and_uses_explicit_pages(sh
     assert shell.context.comic is comic
 
 
+def make_archived_jobs(shell, count=23):
+    jobs = []
+    for index in range(count):
+        volume = JobVolume('正篇', '第一话', 'https://first.test/1')
+        volume.result = VolumeDownloadResult(volume.name, volume.url, 'downloaded')
+        job = DownloadJob('first', f'归档{index:03d}', '', [volume], state='completed')
+        shell.job_store.save(job)
+        shell.job_store.archive(job.id)
+        jobs.append(job)
+    return jobs
+
+
+def test_archive_find_navigation_is_read_only_and_independent_of_tasks(shell):
+    shell.onecmd('i https://first.test/comic')
+    comic = shell.context.comic
+    jobs = make_archived_jobs(shell)
+    store = shell.job_store.archive_view()
+    before = {path: path.read_bytes() for path in store.directory.glob('*.json')}
+    shell.onecmd('tasks find 未完成')
+    task_query = shell.task_query
+    shell.onecmd('archive find 归档 FIRST')
+    assert shell.last_command_ok
+    assert shell.archive_query.keyword == '归档 FIRST'
+    shell.onecmd('archive next')
+    assert shell.archive_query.page == 2
+    assert shell.archive_query.keyword == '归档 FIRST'
+    previous = shell.archive_query
+    for command in ('archive next', 'archive list 0', 'archive next find other'):
+        shell.onecmd(command)
+        assert not shell.last_command_ok
+        assert shell.archive_query == previous
+    shell.onecmd('archive prev')
+    assert shell.last_command_ok
+    assert shell.archive_query.page == 1
+    shell.onecmd('archive prev')
+    assert not shell.last_command_ok
+    assert shell.archive_query.page == 1
+    shell.onecmd(f'archive find {jobs[0].id.upper()}')
+    assert shell.last_command_ok
+    assert '匹配 1 / 23 项' in shell.console.file.getvalue()
+    assert all(path.read_bytes() == data for path, data in before.items())
+    assert shell.task_query == task_query
+    assert shell.context.comic is comic
+    assert shell.current_source_name == 'first'
+    assert shell.job_store.list_jobs() == ([], [])
+
+
+def test_archive_find_empty_result_and_reset_are_distinct_from_empty_archive(shell):
+    make_archived_jobs(shell, 1)
+    shell.onecmd('archive find 不存在')
+    assert shell.last_command_ok
+    text = shell.console.file.getvalue()
+    assert '匹配 0 / 1 项' in text
+    assert '没有符合查找条件的归档' in text
+    assert '暂无归档' not in text
+    shell.onecmd('archive')
+    assert shell.last_command_ok
+    assert shell.archive_query.keyword == ''
+    assert shell.archive_query.page == 1
+
+
+def test_archive_refresh_after_external_restore_preserves_query_on_page_shrink(shell):
+    jobs = make_archived_jobs(shell, 21)
+    shell.onecmd('archive list 2 find 归档')
+    assert shell.last_command_ok
+    query = shell.archive_query
+    external_store = type(shell.job_store)(shell.job_store.output_path)
+    external_store.restore(jobs[0].id)
+    shell.onecmd('archive list 2 find 归档')
+    assert not shell.last_command_ok
+    assert shell.archive_query == query
+    shell.onecmd('archive prev')
+    assert shell.last_command_ok
+    assert shell.archive_query.page == 1
+    assert '匹配 20 / 20 项' in shell.console.file.getvalue()
+
+
+def test_unreadable_archive_does_not_claim_there_are_no_records(shell):
+    store = shell.job_store.archive_view()
+    store.directory.mkdir(parents=True)
+    (store.directory / ('f' * 32 + '.json')).write_text('broken', encoding='utf-8')
+    shell.onecmd('archive')
+    assert not shell.last_command_ok
+    text = shell.console.file.getvalue()
+    assert '没有可读取的归档计划' in text
+    assert '无法读取 1 条记录' in text
+    assert '暂无归档' not in text
+
+
+def test_archive_direct_navigation_keeps_query_and_rejects_session_commands(shell):
+    make_archived_jobs(shell)
+    assert main_module._run_command(shell, 'archive', ['find', '归档', 'FIRST']) == 0
+    assert 'archive list 2 find 归档 FIRST' in shell.console.file.getvalue()
+    assert main_module._run_command(shell, 'archive', ['list', '2', 'find', '归档']) == 0
+    assert shell.archive_query.page == 2
+    assert main_module._run_command(shell, 'archive', ['next']) == 1
+    assert shell.archive_query.page == 2
+
+
+def test_archive_find_prefixes_consider_nonmatching_records_and_restore_one_id(shell):
+    jobs = make_archived_jobs(shell, 2)
+    store = shell.job_store.archive_view()
+    for index, job in enumerate(jobs):
+        shell.job_store.restore(job.id)
+        (shell.job_store.directory / f'{job.id}.json').unlink()
+        job.id = 'a' * 12 + str(index) * 20
+        shell.job_store.save(job)
+        shell.job_store.archive(job.id)
+    shell.onecmd('archive find 归档000')
+    assert shell.last_command_ok
+    text = shell.console.file.getvalue()
+    assert jobs[0].id[:13] in text
+    assert jobs[1].id[:13] not in text
+    query = shell.archive_query
+    shell.onecmd(f'archive restore {jobs[1].id[:13]}')
+    assert shell.last_command_ok
+    assert shell.archive_query == query
+    assert [job.id for job in store.list_jobs()[0]] == [jobs[0].id]
+    shell.onecmd('archive find 归档001')
+    assert '匹配 0 / 1 项' in shell.console.file.getvalue()
+
+
 def test_archive_corrupt_records_report_failure_without_hiding_valid_plans(shell):
     shell.onecmd('d https://first.test/comic')
     job = shell.job_store.list_jobs()[0][0]
@@ -139,10 +271,11 @@ def test_archive_corrupt_records_report_failure_without_hiding_valid_plans(shell
     (archived.directory / ('f' * 32 + '.json')).write_text('broken', encoding='utf-8')
     shell.console.file.seek(0)
     shell.console.file.truncate()
-    assert main_module._run_command(shell, 'archive', []) == 1
+    assert main_module._run_command(shell, 'archive', ['find', '漫画']) == 1
     text = shell.console.file.getvalue()
     assert job.id[:12] in text
     assert '无法读取归档记录' in text
+    assert '无法读取 1 条记录（未计入统计）' in text
     assert main_module._run_command(shell, 'archive', ['show', job.id]) == 0
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 import sys
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 
 import main as main_module
@@ -190,6 +191,9 @@ def test_archive_prefix_ambiguity_and_corrupt_record_are_isolated(completed_plan
         (['ABCD'], ArchiveQuery('archive', 'abcd')),
         (['show', '1234', '3'], ArchiveQuery('show', '1234', 3)),
         (['restore', 'ABCD'], ArchiveQuery('restore', 'abcd')),
+        (['find', '漫画', 'MoRui'], ArchiveQuery(keyword='漫画 MoRui')),
+        (['list', '2', 'find', '漫画'], ArchiveQuery(page=2, keyword='漫画')),
+        (['LIST', 'FIND', 'all', 'next', 'find'], ArchiveQuery(keyword='all next find')),
     ],
 )
 def test_archive_syntax_shared_by_interactive_and_direct_commands(args, expected):
@@ -212,6 +216,16 @@ def test_archive_syntax_shared_by_interactive_and_direct_commands(args, expected
         ['abcd', 'extra'],
         ['restore', 'abcd', 'extra'],
         ['show', 'abc'],
+        ['find'],
+        ['list', '2', 'find'],
+        ['list', '0', 'find', '漫画'],
+        ['list', '2', 'extra', 'find', '漫画'],
+        ['abcd', 'find', '漫画'],
+        ['show', 'abcd', 'find', '漫画'],
+        ['restore', 'abcd', 'find', '漫画'],
+        ['next'],
+        ['prev'],
+        ['next', 'find', '漫画'],
     ],
 )
 def test_invalid_archive_syntax_fails_before_shell_creation(args):
@@ -219,11 +233,33 @@ def test_invalid_archive_syntax_fails_before_shell_creation(args):
         main_module._parse_command(['archive', *args])
 
 
+@pytest.mark.parametrize(
+    'query', [ArchiveQuery(page=2, keyword='漫画 MoRui'), ArchiveQuery('show', 'abcd', 2)]
+)
+def test_archive_relative_navigation_preserves_list_or_detail_context(query):
+    assert parse_archive_query(['next'], query) == replace(query, page=3)
+    assert parse_archive_query(['PREV'], query) == replace(query, page=1)
+    with pytest.raises(ValueError, match='第一页'):
+        parse_archive_query(['prev'], replace(query, page=1))
+    for args in (['next', '2'], ['prev', 'find', '漫画']):
+        with pytest.raises(ValueError):
+            parse_archive_query(args, query)
+
+
+def test_archive_mutations_cannot_be_repeated_by_relative_navigation():
+    for action in ('archive', 'restore'):
+        with pytest.raises(ValueError):
+            parse_archive_query(['next'], ArchiveQuery(action, 'abcd'))
+
+
 def test_direct_cli_archive_list_show_restore_round_trip(completed_plan):
     store, job = completed_plan
     commands = [
         ([job.id[:12]], '已归档'),
         ([], '已归档计划'),
+        (['find', '归档', 'TEST'], '匹配 1 / 1 项'),
+        (['find', job.id[:12]], '匹配 1 / 1 项'),
+        (['find', '不匹配'], '没有符合查找条件的归档'),
         (['show', job.id[:12]], '归档计划详情'),
         (['restore', job.id[:12]], '已恢复到任务列表'),
     ]
