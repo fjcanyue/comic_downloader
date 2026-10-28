@@ -17,6 +17,7 @@ from urllib3.util.retry import Retry
 
 from downloader.browser.manager import DriverManager
 from downloader.comic import Comic, ComicSource
+from downloader.command_prompt import create_command_prompt
 from downloader.download.job_archive import ArchiveQuery, parse_archive_query
 from downloader.download.job_browser import (
     TASK_PAGE_SIZE,
@@ -304,6 +305,54 @@ class Shell(cmd.Cmd):
         self.browser_state: BrowserState | None = None
         self.last_download_job_id: str | None = None
         self.last_download_summary: DownloadSummary | None = None
+
+    def _command_descriptions(self) -> dict[str, str]:
+        return {
+            name[3:]: (getattr(self, name).__doc__ or '').strip().split('。', 1)[0]
+            for name in self.get_names()
+            if name.startswith('do_') and name != 'do_EOF' and callable(getattr(self, name))
+        }
+
+    def cmdloop(self, intro=None) -> None:
+        if not self._browser_available():
+            return super().cmdloop(intro)
+        try:
+            session = create_command_prompt(self._command_descriptions())
+        except TERMINAL_ERRORS:
+            return super().cmdloop(intro)
+        self.preloop()
+        self.presenter.info(
+            '输入命令前缀查看候选；Tab 补全 / 切换，Shift+Tab 反向，Esc 取消，Enter 执行。'
+        )
+        if intro is not None:
+            self.intro = intro
+        if self.intro:
+            self.stdout.write(str(self.intro) + '\n')
+        try:
+            stop = False
+            while not stop:
+                if self.cmdqueue:
+                    line = self.cmdqueue.pop(0)
+                else:
+                    try:
+                        line = (
+                            session.prompt(self.prompt)
+                            if session
+                            else self._read_prompt_line(self.prompt)
+                        )
+                    except EOFError:
+                        line = 'EOF'
+                    except TERMINAL_ERRORS as exc:
+                        if session is None:
+                            raise
+                        logger.debug('命令补全不可用，返回文本输入：{}', exc)
+                        self.presenter.warn('终端补全不可用，已返回文本输入。')
+                        session = None
+                        continue
+                line = self.precmd(line)
+                stop = self.postcmd(self.onecmd(line), line)
+        finally:
+            self.postloop()
 
     def emptyline(self) -> bool:
         """空行不重复执行上一条下载命令。"""

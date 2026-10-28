@@ -14,6 +14,11 @@ comic_downloader
 uv run main.py
 ```
 
+命令行支持前缀提示与 Tab 补全：输入 `b` 会提示 `browse`，按 Tab 补全，再回车执行。
+有多个匹配项时，Tab 循环切换，Shift+Tab 反向切换；Esc 取消补全并恢复原前缀。
+例如 `s` 可以在 `s`、`source`、`sources`、`status` 间切换，空输入按 Tab 查看全部命令。
+搜索词、URL 和参数不会被命令补全改写。`--plain`、管道或不支持控制的终端使用文本输入。
+
 ## 2. 搜索动漫
 
 使用 `s` 命令搜索：

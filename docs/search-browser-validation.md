@@ -87,3 +87,19 @@ Windows 真实控制台（80×24）复测：进入详情区，选中卷名后 v 
 - [单话下载确认](search-browser-chapter-confirm.svg)
 
 本次改动不涉及浏览器驱动和网络加载实现；前述 SeleniumBase 真机验证限制仍适用。
+
+## 2026-10-28：命令前缀提示与 Tab 补全
+
+命令行输入使用已有 prompt_toolkit 提供候选列表；候选来自实际 `do_*` 命令及其帮助说明，
+不显示内部 EOF 命令。输入 `b` 显示 `browse`；Tab 正向循环、Shift+Tab 反向循环，
+Esc 恢复补全前的输入，回车执行。空输入按 Tab 显示全部命令，参数、URL 和搜索词不参与命令补全。
+Tab 对本地候选同步选择，保证快速连续输入 `b`、Tab、Enter 时提交完整命令。
+
+`--plain`、管道和 `TERM=dumb` 保留原文本输入；终端初始化或提示输入失败时退回文本模式。
+同一个补全会话可连续接受命令，切换源后显示更新的提示符；命令队列、空行、EOF 及 Ctrl+C
+继续沿用原命令执行语义。
+
+本轮全量 **590 passed**，Ruff lint / format 通过，Pyright **0 errors, 0 warnings**。
+Windows 真实控制台已验证输入 b 自动显示 browse、Tab 后提交，以及 s 候选列表的多次 Tab 和
+Shift+Tab 切换，连续三轮输入最终得到 `browse`、`sources`、`q`，退出后终端恢复。
+使用现有 spec 打包成功。

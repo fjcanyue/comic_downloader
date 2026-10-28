@@ -94,6 +94,98 @@ def test_search_info_range_download_stays_in_shell(shell):
     ]
 
 
+def test_command_prompt_lists_real_commands_and_reuses_session_with_updated_source_prompt(
+    shell, monkeypatch
+):
+    prompts = []
+    hooks = []
+    lines = iter(['i 1', '', 'q'])
+    shell.onecmd('s 漫画')
+    monkeypatch.setattr(shell, '_browser_available', lambda: True)
+    monkeypatch.setattr(shell, 'preloop', lambda: hooks.append('pre'))
+    monkeypatch.setattr(shell, 'postloop', lambda: hooks.append('post'))
+
+    class Session:
+        def prompt(self, prompt):
+            prompts.append(prompt)
+            return next(lines)
+
+    def create(commands):
+        assert set(commands) == {
+            name[3:] for name in shell.get_names() if name.startswith('do_')
+        } - {'EOF'}
+        assert '键盘浏览' in commands['browse']
+        return Session()
+
+    monkeypatch.setattr('downloader.shell.create_command_prompt', create)
+    shell.cmdqueue.append('status')
+    shell.cmdloop()
+    assert hooks == ['pre', 'post']
+    assert len(prompts) == 3
+    assert prompts[0] != prompts[1] == prompts[2]
+    assert shell.context.comic is not None
+    assert not shell.job_store.directory.exists()
+
+
+@pytest.mark.parametrize('initial_failure', [True, False])
+def test_command_prompt_terminal_failure_falls_back_to_text_once(
+    shell, monkeypatch, initial_failure
+):
+    monkeypatch.setattr(shell, '_browser_available', lambda: True)
+    shell.stdin = StringIO('status\nq\n')
+    hooks = []
+    monkeypatch.setattr(shell, 'preloop', lambda: hooks.append('pre'))
+    monkeypatch.setattr(shell, 'postloop', lambda: hooks.append('post'))
+
+    class Session:
+        def prompt(self, prompt):
+            raise OSError('no terminal')
+
+    def create(commands):
+        if initial_failure:
+            raise OSError('no terminal')
+        return Session()
+
+    monkeypatch.setattr('downloader.shell.create_command_prompt', create)
+    shell.cmdloop()
+    assert hooks == ['pre', 'post']
+    assert shell.last_command_ok
+    assert shell.stdin.tell() == len('status\nq\n')
+
+
+@pytest.mark.parametrize('reason', ['plain', 'pipe', 'dumb'])
+def test_command_prompt_preserves_plain_pipe_and_dumb_inputs(shell, monkeypatch, reason):
+    shell.stdin = StringIO('q\n')
+    shell.plain = reason == 'plain'
+    monkeypatch.setattr(shell.stdin, 'isatty', lambda: reason != 'pipe')
+    monkeypatch.setattr(shell.stdout, 'isatty', lambda: True)
+    monkeypatch.setenv('TERM', 'dumb' if reason == 'dumb' else 'xterm')
+
+    def unexpected(commands):
+        pytest.fail('text mode must not create a prompt session')
+
+    monkeypatch.setattr('downloader.shell.create_command_prompt', unexpected)
+    shell.cmdloop()
+    assert shell.stdin.tell() == len('q\n')
+
+
+@pytest.mark.parametrize('error', [EOFError, KeyboardInterrupt])
+def test_command_prompt_eof_and_interrupt_keep_existing_exit_behavior(shell, monkeypatch, error):
+    monkeypatch.setattr(shell, '_browser_available', lambda: True)
+
+    class Session:
+        def prompt(self, prompt):
+            raise error
+
+    monkeypatch.setattr('downloader.shell.create_command_prompt', lambda commands: Session())
+    if error is KeyboardInterrupt:
+        with pytest.raises(KeyboardInterrupt):
+            shell.cmdloop()
+    else:
+        shell.cmdloop()
+        assert shell.last_command_ok
+
+
 def test_browser_auto_entry_downloads_original_item_all_groups_and_returns_to_same_state(
     shell, monkeypatch
 ):
