@@ -30,9 +30,9 @@ from downloader.search_browser.controls import LinesControl, ResultsControl
 from downloader.search_browser.loader import PreviewWorker
 from downloader.search_browser.state import (
     BrowserState,
+    CatalogTarget,
     Detail,
     DownloadAction,
-    detail_lines,
     plain,
 )
 
@@ -79,7 +79,12 @@ class SearchBrowser:
             always_hide_cursor=True,
         )
         self.results.vertical_scroll = state.list_scroll
-        self.detail_control = LinesControl(self._detail_lines, self._detail_row)
+        self.detail_control = LinesControl(
+            self._detail_lines,
+            self._detail_row,
+            highlight=lambda: self.state.focus == 'details' and not self.state.show_report,
+            on_reflow=self._set_detail_row,
+        )
         self.detail = Window(
             self.detail_control,
             wrap_lines=False,
@@ -109,7 +114,11 @@ class SearchBrowser:
             lambda: self.confirm_lines, lambda: self.confirm_row, focusable=False
         )
         self.dialog = Frame(
-            title='下载整本漫画？',
+            title=lambda: (
+                '下载所选卷 / 话？'
+                if self.confirmation and self.confirmation.target
+                else '下载整本漫画？'
+            ),
             body=HSplit(
                 [
                     Window(
@@ -217,7 +226,7 @@ class SearchBrowser:
         size = self.app.output.get_size()
         if size.columns < MIN_COLUMNS or size.rows < MIN_ROWS:
             return '窗口较小：Tab 切换单面板 · Enter 详情 · Esc 返回；放大可分栏/下载'
-        return '↑↓ / PgUp PgDn 浏览 · Enter 详情 · d 下载 · Tab 切区\n/ 筛选 · r 刷新 · l 下载摘要 · Esc/q 返回命令'
+        return '↑↓ 选择 / PgUp PgDn 翻屏 · Enter 详情 · d 整本 · v 卷/话\nTab 切区 · / 筛选 · r 刷新 · l 下载摘要 · Esc/q 返回'
 
     def _detail_lines(self) -> list[str]:
         if self.state.show_report:
@@ -245,7 +254,10 @@ class SearchBrowser:
         return detail.row if detail else self.placeholder_row
 
     def _scroll_detail(self, amount: int) -> None:
-        row = min(max(0, self._detail_row() + amount), len(self.detail_control.wrapped()) - 1)
+        lines = self.detail_control.wrapped()
+        self._set_detail_row(min(max(0, self._detail_row() + amount), len(lines) - 1))
+
+    def _set_detail_row(self, row: int) -> None:
         if self.state.show_report:
             self.state.report_row = row
         else:
@@ -292,15 +304,20 @@ class SearchBrowser:
         )
         self.detail.vertical_scroll = 0
 
-    def _open_download(self) -> None:
+    def _open_download(self, *, selected: bool = False) -> None:
         size = self.app.output.get_size()
         if size.columns < MIN_COLUMNS or size.rows < MIN_ROWS:
-            self.state.message = '请放大到至少 48 列、18 行，或退出后使用 d <原序号>。'
+            self.state.message = '请放大到至少 48 列、18 行，或退出后使用 i/d/v 文本命令。'
             return
         action = self.state.action()
         if action is None:
             self.state.message = '请先选择来源和地址有效的漫画。'
             return
+        if selected:
+            target = self._selected_target()
+            if target is None:
+                return
+            action = DownloadAction(action.generation, action.item, target)
         item = action.item
         self.confirmation = action
         self.confirm_return_focus = self.state.focus
@@ -311,10 +328,17 @@ class SearchBrowser:
             f'原序号：{item.index + 1}',
             f'URL：{plain(item.url)}',
             f'保存到：{plain(self.output_path)}',
-            '范围：所有分组中的全部可解析章节',
+            f'范围：{action.target.description}'
+            if action.target
+            else '范围：所有分组中的全部可解析章节',
             f'文件策略：{"覆盖已有文件" if self.overwrite else "校验并复用已有文件"}',
         ]
         cached = self.state.details.get(item.key)
+        if action.target:
+            self.confirm_lines.append(f'等同命令：v {action.target.arguments}')
+            self.confirm_lines.append(
+                '确认后重新获取目录并核对所选卷 / 话；目录变动时取消本次下载。'
+            )
         if cached and cached.comic:
             comic = cached.comic
             self.confirm_lines.append(
@@ -325,6 +349,25 @@ class SearchBrowser:
             self.confirm_lines.append('确认后获取目录；无需先查看详情。')
         self.confirm_lines.append('↑↓ / PgUp PgDn 查看完整说明；Tab 或左右键选择按钮。')
         self.app.layout.focus(self.cancel_button)
+
+    def _selected_target(self) -> CatalogTarget | None:
+        item = self.state.current
+        detail = self.state.details.get(item.key) if item else None
+        if self.state.focus != 'details' or self.state.show_report:
+            self.state.message = '请按 Tab 切到漫画详情，选中卷名或某一话后按 v。'
+            return None
+        if detail is None or detail.comic is None:
+            self.state.message = '请先按 Enter 加载详情，再选中卷名或某一话。'
+            return None
+        position = detail.targets.get(self.detail_control.source_row())
+        if position is None:
+            self.state.message = '当前行不是卷名或某一话，请用上下键移动高亮。'
+            return None
+        target = CatalogTarget.from_comic(detail.comic, *position)
+        if not target.chapters:
+            self.state.message = '该卷没有可下载的话，请选择其他卷。'
+            return None
+        return target
 
     def _cancel_download(self) -> None:
         self.confirmation = None
@@ -398,6 +441,10 @@ class SearchBrowser:
         @keys.add('d', filter=normal)
         def download(event: KeyPressEvent) -> None:
             self._open_download()
+
+        @keys.add('v', filter=normal)
+        def download_selection(event: KeyPressEvent) -> None:
+            self._open_download(selected=True)
 
         @keys.add('tab', filter=normal)
         @keys.add('s-tab', filter=normal)
@@ -475,9 +522,7 @@ class SearchBrowser:
             if result.cancelled or self.closing:
                 self.state.details.pop(result.item.key, None)
             elif result.comic:
-                self.state.remember(
-                    result.item, Detail(detail_lines(result.item, result.comic), result.comic)
-                )
+                self.state.remember(result.item, Detail.from_comic(result.item, result.comic))
             else:
                 self.state.remember(
                     result.item,

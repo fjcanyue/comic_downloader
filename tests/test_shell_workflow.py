@@ -13,7 +13,13 @@ from downloader.comic import ComicSource
 from downloader.download.jobs import DownloadJob, JobVolume
 from downloader.download.progress import NoopDownloadProgress
 from downloader.models import Comic, ComicBook, ComicVolume, VolumeDownloadResult
-from downloader.search_browser.state import BrowserState, DownloadAction, SearchItem
+from downloader.search_browser.state import (
+    BrowserState,
+    CatalogTarget,
+    Detail,
+    DownloadAction,
+    SearchItem,
+)
 from downloader.shell import Shell, url_belongs_to_source
 from downloader.sources.metadata import SourceVerification
 from downloader.sources.profiles import SourceBinding, SourceProfile
@@ -240,6 +246,81 @@ def test_browser_terminal_failure_falls_back_without_losing_results(shell, monke
     shell.onecmd('browse')
     assert len(shell.context.searched_results) == 2
     assert '已返回文本交互' in shell.console.file.getvalue()
+
+
+@pytest.mark.parametrize('chapter', [None, 1, 3])
+def test_browser_v_downloads_only_confirmed_group_or_chapter_from_correct_comic(
+    shell, monkeypatch, chapter
+):
+    original_info = WorkflowSource.info
+
+    def info(source, url):
+        comic = original_info(source, url)
+        extra = ComicBook()
+        extra.name = '番外'
+        extra.vols = [ComicVolume(f'特别篇{i}', f'{source.base_url}/extra/{i}') for i in range(3)]
+        comic.books.append(extra)
+        return comic
+
+    monkeypatch.setattr(WorkflowSource, 'info', info)
+    shell.onecmd('s 漫画')
+    shell.onecmd('i 1')  # The text shell currently points at a different source/comic.
+    entries = tuple(
+        SearchItem.from_comic(i, c) for i, c in enumerate(shell.context.searched_results)
+    )
+    state = BrowserState(entries, '漫画', shell.search_generation, filter_text='second')
+    state.focus = 'details'
+    preview = shell.context.searched_results[1]
+    detail = Detail.from_comic(entries[1], preview)
+    detail.row = 8
+    state.remember(entries[1], detail)
+    target = CatalogTarget.from_comic(preview, 2, chapter)
+    shell._browser_download(DownloadAction(shell.search_generation, entries[1], target), state)
+    jobs, errors = shell.job_store.list_jobs()
+    assert not errors and len(jobs) == 1
+    expected = [url for _, url in target.chapters]
+    assert shell.context.source.downloaded_urls == expected
+    assert [v.url for v in jobs[0].volumes] == expected
+    assert all(v.book_name == '番外' for v in jobs[0].volumes)
+    assert jobs[0].source_name == 'second' and jobs[0].state == 'completed'
+    assert shell.last_command_ok
+    assert state.current is not None
+    assert state.filter_text == 'second' and state.current.index == 1
+    assert state.focus == 'details' and detail.row == 8
+    assert f'等同命令：v {target.arguments}' in state.report
+
+
+@pytest.mark.parametrize('change', ['reorder', 'url', 'removed', 'group', 'fetch_failure'])
+@pytest.mark.parametrize('chapter', [None, 2])
+def test_browser_v_rejects_changed_catalog_or_failed_reload_without_creating_job(
+    shell, monkeypatch, change, chapter
+):
+    shell.onecmd('s 漫画')
+    preview = shell.context.searched_results[0]
+    item = SearchItem.from_comic(0, preview)
+    target = CatalogTarget.from_comic(preview, 1, chapter)
+    original_info = WorkflowSource.info
+
+    def info(source, url):
+        comic = original_info(source, url)
+        if change == 'reorder':
+            comic.books[0].vols.reverse()
+        elif change == 'url':
+            comic.books[0].vols[1].url += '/changed'
+        elif change == 'removed':
+            comic.books[0].vols = []
+        elif change == 'group':
+            comic.books[0].name = '其他卷'
+        else:
+            return None
+        return comic
+
+    monkeypatch.setattr(WorkflowSource, 'info', info)
+    state = BrowserState((item,), '漫画', shell.search_generation)
+    shell._browser_download(DownloadAction(shell.search_generation, item, target), state)
+    assert not shell.last_command_ok
+    assert not shell.job_store.directory.exists()
+    assert '请按 r 刷新' in '\n'.join(state.report)
 
 
 def test_archive_workflow_preserves_current_selection_and_supports_both_page_modes(shell):

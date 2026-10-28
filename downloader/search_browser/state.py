@@ -33,9 +33,48 @@ class SearchItem:
 
 
 @dataclass(frozen=True)
+class CatalogTarget:
+    group: int
+    chapter: int | None
+    book_name: str
+    chapters: tuple[tuple[str, str], ...]
+
+    @classmethod
+    def from_comic(cls, comic: Comic, group: int, chapter: int | None) -> CatalogTarget:
+        book = comic.books[group - 1]
+        volumes = book.vols if chapter is None else book.vols[chapter - 1 : chapter]
+        return cls(group, chapter, book.name or '默认章节', tuple((v.name, v.url) for v in volumes))
+
+    @property
+    def arguments(self) -> str:
+        return (
+            str(self.group)
+            if self.chapter is None
+            else f'{self.group} {self.chapter} {self.chapter}'
+        )
+
+    @property
+    def description(self) -> str:
+        group = f'第 {self.group} 卷「{plain(self.book_name)}」'
+        if self.chapter is None:
+            return f'{group}全部 {len(self.chapters)} 话'
+        return f'{group}第 {self.chapter} 话「{plain(self.chapters[0][0])}」（仅此一话）'
+
+    def matches(self, comic: Comic) -> bool:
+        if not 1 <= self.group <= len(comic.books) or not self.chapters:
+            return False
+        if self.chapter is not None and not 1 <= self.chapter <= len(
+            comic.books[self.group - 1].vols
+        ):
+            return False
+        return self == self.from_comic(comic, self.group, self.chapter)
+
+
+@dataclass(frozen=True)
 class DownloadAction:
     generation: int
     item: SearchItem
+    target: CatalogTarget | None = None
 
     def matches(self, generation: int, comics: list[Comic]) -> bool:
         if generation != self.generation or not 0 <= self.item.index < len(comics):
@@ -50,9 +89,17 @@ class Detail:
     comic: Comic | None = None
     error: str = ''
     row: int = 0
+    targets: dict[int, tuple[int, int | None]] = field(default_factory=dict)
+
+    @classmethod
+    def from_comic(cls, item: SearchItem, comic: Comic) -> Detail:
+        targets: dict[int, tuple[int, int | None]] = {}
+        return cls(detail_lines(item, comic, targets=targets), comic, targets=targets)
 
 
-def detail_lines(item: SearchItem, comic: Comic) -> list[str]:
+def detail_lines(
+    item: SearchItem, comic: Comic, *, targets: dict[int, tuple[int, int | None]] | None = None
+) -> list[str]:
     lines = [
         plain(comic.name or item.name),
         f'来源：{plain(item.source)}',
@@ -68,10 +115,13 @@ def detail_lines(item: SearchItem, comic: Comic) -> list[str]:
     if not total:
         lines.append('没有解析到可下载章节，请检查页面或更换来源。')
     for group, book in enumerate(comic.books, 1):
+        if targets is not None:
+            targets[len(lines) + 1] = (group, None)
         lines.extend(['', f'[{group}] {plain(book.name) or "默认章节"} · {len(book.vols)} 话'])
-        lines.extend(
-            f'  {number}  {plain(volume.name)}' for number, volume in enumerate(book.vols, 1)
-        )
+        for number, volume in enumerate(book.vols, 1):
+            if targets is not None:
+                targets[len(lines)] = (group, number)
+            lines.append(f'  {number}  {plain(volume.name)}')
     return lines
 
 

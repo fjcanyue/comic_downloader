@@ -45,7 +45,8 @@ USAGE = """用法:
   -h, --help      显示帮助
 
 直接子命令使用完整 URL；搜索结果序号仅在交互式 shell 内有效。
-交互式搜索后可 ↑↓ 选择，Enter 同屏详情，d 确认整本下载；browse 重新打开，Esc 返回。
+交互式搜索后可 ↑↓ 选择，Enter 同屏详情，d 整本下载；Tab 切入详情后 v 下载所选卷/话，均需确认。
+browse 重新打开，Esc 返回命令行。
 download_vols 的一个范围参数表示截止序号，两个表示起始和截止，均从 1 开始。
 tasks 状态：all / unfinished / failed / completed / pending；任务列表另支持 running / interrupted。
 tasks 默认第一页；next / prev 仅用于交互会话，直接子命令使用明确页码。

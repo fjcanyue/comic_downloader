@@ -1197,7 +1197,7 @@ class Shell(cmd.Cmd):
         )
 
     def do_browse(self, arg):
-        """browse：重新打开最近搜索的键盘浏览界面。↑↓ 选择，Enter 同屏详情，d 确认整本下载，Tab 切区，/ 筛选，l 下载摘要，Esc/q 返回。非终端或 --plain 下使用 i/d <原序号>。"""
+        """browse：重新打开最近搜索的键盘浏览界面。↑↓ 选择，Enter 同屏详情，d 确认整本下载，Tab 切区后 v 确认所选卷/话下载，/ 筛选，l 下载摘要，Esc/q 返回。非终端或 --plain 下使用 i/d/v 文本命令。"""
         if arg.strip():
             self.presenter.warn('browse 不接受参数；请先使用 s <关键词> 搜索。')
             self.last_command_ok = False
@@ -1252,7 +1252,17 @@ class Shell(cmd.Cmd):
         self.last_download_summary = None
         failure = ''
         try:
-            self.do_d(str(action.item.index + 1))
+            if action.target is None:
+                self.do_d(str(action.item.index + 1))
+            else:
+                self.do_i(str(action.item.index + 1))
+                if not self.last_command_ok or self.context.comic is None:
+                    failure = '重新获取详情失败，未开始下载；请按 r 刷新后重试。'
+                elif not action.target.matches(self.context.comic):
+                    self.last_command_ok = False
+                    failure = '目录已变更，已取消下载；请按 r 刷新详情并重新选择卷 / 话。'
+                else:
+                    self.do_v(action.target.arguments)
         except Exception as exc:
             logger.exception('浏览界面下载失败：{}', action.item.url)
             self.last_command_ok = False
@@ -1271,6 +1281,10 @@ class Shell(cmd.Cmd):
             f'来源：{plain(action.item.source)}',
             f'URL：{plain(action.item.url)}',
         ]
+        if action.target:
+            state.report.extend(
+                [f'范围：{action.target.description}', f'等同命令：v {action.target.arguments}']
+            )
         if self.last_download_job_id:
             job_id = self.last_download_job_id
             state.message += f' · 任务 {job_id[:12]}'

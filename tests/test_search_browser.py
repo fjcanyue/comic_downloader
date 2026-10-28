@@ -13,6 +13,7 @@ from downloader.models import Comic, ComicBook, ComicVolume
 from downloader.search_browser.loader import PreviewWorker
 from downloader.search_browser.state import (
     BrowserState,
+    CatalogTarget,
     Detail,
     DownloadAction,
     SearchItem,
@@ -423,3 +424,125 @@ def test_long_details_and_confirmation_can_scroll_through_wrapped_lines():
         assert await asyncio.wait_for(run, 3) is None
 
     asyncio.run(exercise(scenario, state=state, output=ScreenOutput(48, 24)))
+
+
+@pytest.mark.parametrize('chapter', [None, 1, 3])
+def test_details_v_confirms_exact_group_or_single_chapter_and_keeps_selection(chapter):
+    comic = comic_detail()
+    extra = ComicBook()
+    extra.name = '番外'
+    extra.vols = [ComicVolume(f'特别篇{i}', f'https://example.test/extra/{i}') for i in range(3)]
+    comic.books.append(extra)
+    state = BrowserState(items(), '漫画', 2)
+    detail = Detail.from_comic(state.items[0], comic)
+    state.remember(state.items[0], detail)
+    logical_row = next(row for row, target in detail.targets.items() if target == (2, chapter))
+
+    async def scenario(browser, pipe, run):
+        pipe.send_text('\t\x1b[H')
+        await until(lambda: state.focus == 'details')
+        pipe.send_text('\x1b[B' * logical_row)
+        await until(lambda: browser.detail_control.source_row() == logical_row)
+        await until(lambda: browser.detail.vertical_scroll > 0)
+        content = browser.detail_control.create_content(browser.detail_control.width, 20)
+        assert content.get_line(detail.row)[0][0] == 'class:selected'
+        pipe.send_text('v')
+        await until(lambda: browser.confirmation is not None)
+        frozen = browser.confirmation
+        assert frozen.target == CatalogTarget.from_comic(comic, 2, chapter)
+        assert f'等同命令：v {frozen.target.arguments}' in browser.confirm_lines
+        assert browser.app.layout.has_focus(browser.cancel_button)
+        pipe.send_text('vdr\x1b[B\r')  # Scroll the modal, then default-cancel.
+        await until(lambda: browser.confirmation is None)
+        assert detail.row == content.cursor_position.y
+        assert state.focus == 'details' and browser.worker.thread is None
+        pipe.send_text('v\t\r')
+        assert await asyncio.wait_for(run, 3) == frozen
+
+    asyncio.run(exercise(scenario, state=state))
+
+
+def test_wrapped_chapter_selection_survives_resize_and_uses_original_number():
+    comic = comic_detail()
+    comic.books[0].vols[3].name = '长标题' * 70
+    state = BrowserState(items(), '漫画', 1)
+    detail = Detail.from_comic(state.items[0], comic)
+    state.remember(state.items[0], detail)
+    logical_row = next(row for row, target in detail.targets.items() if target == (1, 4))
+    output = ScreenOutput(80, 24)
+
+    async def scenario(browser, pipe, run):
+        pipe.send_text('\t')
+        await until(lambda: state.focus == 'details')
+        first = browser.detail_control.source_rows.index(logical_row)
+        pipe.send_text('\x1b[B' * (first + 1))  # Select the continuation of a wrapped title.
+        await until(lambda: detail.row == first + 1)
+        assert browser.detail_control.source_row() == logical_row
+        output.size = Size(rows=30, columns=120)
+        browser.app.invalidate()
+        await until(lambda: browser.detail_control.width < 75)
+        assert browser.detail_control.source_row() == logical_row
+        pipe.send_text('v\t\r')
+        action = await asyncio.wait_for(run, 3)
+        assert action.target.arguments == '1 4 4'
+        assert action.target.chapters == (
+            (comic.books[0].vols[3].name, 'https://example.test/v/3'),
+        )
+
+    asyncio.run(exercise(scenario, state=state, output=output))
+
+
+def test_v_ignores_non_catalog_rows_reports_empty_groups_and_filter_text():
+    comic = Comic()
+    empty = ComicBook()
+    empty.name = '空卷'
+    comic.books = [empty]
+    state = BrowserState(items(), '漫画', 1)
+    detail = Detail.from_comic(state.items[0], comic)
+    state.remember(state.items[0], detail)
+
+    async def scenario(browser, pipe, run):
+        pipe.send_text('v')
+        await until(lambda: 'Tab' in state.message)
+        assert browser.confirmation is None
+        pipe.send_text('\tv')
+        await until(lambda: '当前行不是' in state.message)
+        pipe.send_text('\x1b[Fv')
+        await until(lambda: '没有可下载' in state.message)
+        pipe.send_text('lv')
+        await until(lambda: 'Tab' in state.message)
+        assert browser.confirmation is None
+        pipe.send_text('/v')
+        await until(lambda: browser.filter_input.text == 'v')
+        assert browser.confirmation is None and browser.worker.thread is None
+        pipe.send_text('\x1b')
+        await until(lambda: not browser.editing)
+        pipe.send_text('q')
+        assert await asyncio.wait_for(run, 3) is None
+
+    asyncio.run(exercise(scenario, state=state))
+
+
+def test_v_during_loading_and_failure_cannot_open_confirmation():
+    release = threading.Event()
+
+    def load(item, stop):
+        assert release.wait(3)
+        raise ValueError('模拟获取失败')
+
+    async def scenario(browser, pipe, run):
+        try:
+            pipe.send_text('\r\tv')
+            await until(lambda: '先按 Enter' in browser.state.message)
+            assert browser.confirmation is None
+            release.set()
+            await until(lambda: bool(browser.state.details[items()[0].key].error))
+            pipe.send_text('v')
+            await asyncio.sleep(0.1)
+            assert browser.confirmation is None
+            pipe.send_text('q')
+            assert await asyncio.wait_for(run, 3) is None
+        finally:
+            release.set()
+
+    asyncio.run(exercise(scenario, load=load))
