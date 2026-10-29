@@ -1246,7 +1246,7 @@ class Shell(cmd.Cmd):
         )
 
     def do_browse(self, arg):
-        """browse：重新打开最近搜索的键盘浏览界面。↑↓ 选择，Enter 同屏详情，d 确认整本下载，Tab 切区后 v 确认所选卷/话下载，/ 筛选，l 下载摘要，Esc/q 返回。非终端或 --plain 下使用 i/d/v 文本命令。"""
+        """browse：重新打开最近搜索的键盘浏览界面。↑↓ 选择，Enter 同屏详情，d 确认整本下载，Tab 切区后 v 确认所选卷/话下载；空格标记范围起点，移动到同卷终点后 v 下载连续多话，再按空格清除。/ 筛选，l 下载摘要，Esc/q 返回。非终端或 --plain 下使用 i/d/v 文本命令。"""
         if arg.strip():
             self.presenter.warn('browse 不接受参数；请先使用 s <关键词> 搜索。')
             self.last_command_ok = False

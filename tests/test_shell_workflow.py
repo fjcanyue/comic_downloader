@@ -340,9 +340,9 @@ def test_browser_terminal_failure_falls_back_without_losing_results(shell, monke
     assert '已返回文本交互' in shell.console.file.getvalue()
 
 
-@pytest.mark.parametrize('chapter', [None, 1, 3])
+@pytest.mark.parametrize(('chapter', 'end_chapter'), [(None, None), (1, None), (3, None), (2, 3)])
 def test_browser_v_downloads_only_confirmed_group_or_chapter_from_correct_comic(
-    shell, monkeypatch, chapter
+    shell, monkeypatch, chapter, end_chapter
 ):
     original_info = WorkflowSource.info
 
@@ -366,7 +366,7 @@ def test_browser_v_downloads_only_confirmed_group_or_chapter_from_correct_comic(
     detail = Detail.from_comic(entries[1], preview)
     detail.row = 8
     state.remember(entries[1], detail)
-    target = CatalogTarget.from_comic(preview, 2, chapter)
+    target = CatalogTarget.from_comic(preview, 2, chapter, end_chapter)
     shell._browser_download(DownloadAction(shell.search_generation, entries[1], target), state)
     jobs, errors = shell.job_store.list_jobs()
     assert not errors and len(jobs) == 1
@@ -383,14 +383,14 @@ def test_browser_v_downloads_only_confirmed_group_or_chapter_from_correct_comic(
 
 
 @pytest.mark.parametrize('change', ['reorder', 'url', 'removed', 'group', 'fetch_failure'])
-@pytest.mark.parametrize('chapter', [None, 2])
+@pytest.mark.parametrize(('chapter', 'end_chapter'), [(None, None), (2, None), (1, 2)])
 def test_browser_v_rejects_changed_catalog_or_failed_reload_without_creating_job(
-    shell, monkeypatch, change, chapter
+    shell, monkeypatch, change, chapter, end_chapter
 ):
     shell.onecmd('s 漫画')
     preview = shell.context.searched_results[0]
     item = SearchItem.from_comic(0, preview)
-    target = CatalogTarget.from_comic(preview, 1, chapter)
+    target = CatalogTarget.from_comic(preview, 1, chapter, end_chapter)
     original_info = WorkflowSource.info
 
     def info(source, url):

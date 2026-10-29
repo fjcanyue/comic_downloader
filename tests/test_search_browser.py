@@ -546,3 +546,160 @@ def test_v_during_loading_and_failure_cannot_open_confirmation():
             release.set()
 
     asyncio.run(exercise(scenario, load=load))
+
+
+def select_chapter(browser, detail, group, chapter):
+    browser.detail_control.wrapped()
+    logical_row = next(row for row, target in detail.targets.items() if target == (group, chapter))
+    detail.row = browser.detail_control.source_rows.index(logical_row)
+    browser.app.invalidate()
+
+
+@pytest.mark.parametrize(('start', 'end'), [(2, 5), (5, 2), (100, 100)])
+@pytest.mark.parametrize('width', [48, 80, 120])
+def test_range_keys_render_and_confirm_exact_chapters_with_default_cancel(start, end, width):
+    comic = comic_detail()
+    state = BrowserState(items(), '漫画', 1, focus='details')
+    detail = Detail.from_comic(state.items[0], comic)
+    state.remember(state.items[0], detail)
+
+    async def scenario(browser, pipe, run):
+        select_chapter(browser, detail, 1, start)
+        pipe.send_text(' ')
+        await until(lambda: detail.range_start == (1, start))
+        pipe.send_text(('\x1b[B' if end >= start else '\x1b[A') * abs(end - start))
+        low, high = sorted((start, end))
+        await until(lambda: browser._range_bounds() == (1, low, high))
+        assert f'共 {high - low + 1} 话' in browser._message()
+        await asyncio.sleep(0.1)
+        screen = browser.app.renderer.last_rendered_screen
+        if low != high:
+            assert any(
+                'class:range' in cell.style
+                for row in screen.data_buffer.values()
+                for cell in row.values()
+            )
+        pipe.send_text('v')
+        await until(lambda: browser.confirmation is not None)
+        frozen = browser.confirmation
+        assert frozen.target.arguments == f'1 {low} {high}'
+        assert len(frozen.target.chapters) == high - low + 1
+        assert browser.app.layout.has_focus(browser.cancel_button)
+        pipe.send_text(' \r')  # Space in the modal must not clear the range or confirm.
+        await until(lambda: browser.confirmation is None)
+        assert detail.range_start == (1, start) and not run.done()
+        pipe.send_text('v\t\r')
+        assert await asyncio.wait_for(run, 3) == frozen
+        assert browser.worker.thread is None
+
+    asyncio.run(exercise(scenario, state=state, output=ScreenOutput(width, 24)))
+
+
+def test_range_rejects_other_groups_and_non_chapter_rows_and_can_be_cleared():
+    comic = comic_detail()
+    extra = ComicBook()
+    extra.name = '番外'
+    extra.vols = [ComicVolume('番外1', 'https://example.test/extra/1')]
+    comic.books.append(extra)
+    state = BrowserState(items(), '漫画', 1, focus='details')
+    detail = Detail.from_comic(state.items[0], comic)
+    state.remember(state.items[0], detail)
+
+    async def scenario(browser, pipe, run):
+        select_chapter(browser, detail, 1, 2)
+        pipe.send_text(' ')
+        await until(lambda: detail.range_start is not None)
+        for group, chapter in [(2, 1), (1, None)]:
+            select_chapter(browser, detail, group, chapter)
+            state.message = ''
+            pipe.send_text('v')
+            await until(lambda: '同一卷' in state.message)
+            assert browser.confirmation is None
+        pipe.send_text(' ')
+        await until(lambda: detail.range_start is None)
+        pipe.send_text('v')  # Whole-group behavior is restored after clearing.
+        await until(lambda: browser.confirmation is not None)
+        assert browser.confirmation.target.arguments == '1'
+        pipe.send_text('\r')
+        await until(lambda: browser.confirmation is None)
+        pipe.send_text(' ')
+        await until(lambda: '具体某一话' in state.message)
+        assert detail.range_start is None
+        pipe.send_text('q')
+        assert await asyncio.wait_for(run, 3) is None
+
+    asyncio.run(exercise(scenario, state=state))
+
+
+def test_range_is_scoped_to_cached_comic_and_refresh_discards_it():
+    state = BrowserState(items(), '漫画', 1, focus='details')
+    detail = Detail.from_comic(state.items[0], comic_detail())
+    state.remember(state.items[0], detail)
+    state.remember(state.items[1], Detail.from_comic(state.items[1], comic_detail()))
+
+    async def scenario(browser, pipe, run):
+        select_chapter(browser, detail, 1, 2)
+        pipe.send_text(' ')
+        await until(lambda: detail.range_start is not None)
+        pipe.send_text('\t\x1b[B\t')
+        await until(
+            lambda: state.current is not None
+            and state.current.index == 1
+            and state.focus == 'details'
+        )
+        assert browser._range_bounds() is None
+        assert browser._current_detail().range_start is None
+        pipe.send_text('/漫画0\r\t')
+        await until(
+            lambda: state.current is not None
+            and state.current.index == 0
+            and state.focus == 'details'
+        )
+        assert browser._range_bounds() == (1, 2, 2)
+        pipe.send_text('lr')  # Summary cannot be a range endpoint; refresh returns to details.
+        await until(lambda: state.details[items()[0].key] is not detail)
+        await until(lambda: state.details[items()[0].key].comic is not None)
+        assert state.details[items()[0].key].range_start is None
+        assert '起点已清除' in state.message
+        pipe.send_text('/foo bar')
+        await until(lambda: browser.filter_input.text.endswith('foo bar'))
+        assert browser.confirmation is None
+        pipe.send_text('\x1b')
+        await until(lambda: not browser.editing)
+        pipe.send_text('q')
+        assert await asyncio.wait_for(run, 3) is None
+
+    asyncio.run(exercise(scenario, state=state))
+
+
+def test_range_wrap_resize_preserves_endpoints_and_catalog_validation_checks_middle():
+    comic = comic_detail()
+    comic.books[0].vols[3].name = '很长的标题' * 50
+    state = BrowserState(items(), '漫画', 1, focus='details')
+    detail = Detail.from_comic(state.items[0], comic)
+    state.remember(state.items[0], detail)
+    output = ScreenOutput(80, 24)
+
+    async def scenario(browser, pipe, run):
+        select_chapter(browser, detail, 1, 2)
+        pipe.send_text(' ')
+        await until(lambda: detail.range_start is not None)
+        select_chapter(browser, detail, 1, 4)
+        browser._navigate(1)  # Continuation line of the same chapter.
+        assert browser._range_bounds() == (1, 2, 4)
+        output.size = Size(rows=30, columns=120)
+        browser.app.invalidate()
+        await until(lambda: browser.detail_control.width < 75)
+        assert browser._range_bounds() == (1, 2, 4)
+        pipe.send_text('v\t\r')
+        action = await asyncio.wait_for(run, 3)
+        assert action.target.arguments == '1 2 4'
+        assert action.target.matches(comic)
+        comic.books[0].vols[-1].name = '范围外改名'
+        assert action.target.matches(comic)
+        comic.books[0].vols[2].url += '/changed'
+        assert not action.target.matches(comic)
+        comic.books[0].vols = comic.books[0].vols[:3]
+        assert not action.target.matches(comic)
+
+    asyncio.run(exercise(scenario, state=state, output=output))

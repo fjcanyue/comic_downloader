@@ -42,7 +42,7 @@ class ResultsControl(UIControl):
 class LinesControl(UIControl):
     """Read only text: compute lines once on data change, render only visible rows."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - independent rendering and reflow callbacks
         self,
         lines: Callable[[], list[str]],
         row: Callable[[], int],
@@ -50,6 +50,7 @@ class LinesControl(UIControl):
         focusable=True,
         highlight: Callable[[], bool] | None = None,
         on_reflow: Callable[[int], None] | None = None,
+        row_style: Callable[[int], str] | None = None,
     ):
         self.lines = lines
         self.row = row
@@ -60,6 +61,7 @@ class LinesControl(UIControl):
         self.source_rows: list[int] = []
         self.highlight = highlight
         self.on_reflow = on_reflow
+        self.row_style = row_style
 
     def is_focusable(self) -> bool:
         return self.focusable
@@ -97,6 +99,8 @@ class LinesControl(UIControl):
                     if self.highlight
                     and self.highlight()
                     and self.source_rows[index] == self.source_rows[row]
+                    else self.row_style(self.source_rows[index])
+                    if self.row_style
                     else '',
                     lines[index],
                 )

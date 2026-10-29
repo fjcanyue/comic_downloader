@@ -38,19 +38,33 @@ class CatalogTarget:
     chapter: int | None
     book_name: str
     chapters: tuple[tuple[str, str], ...]
+    end_chapter: int | None = None
 
     @classmethod
-    def from_comic(cls, comic: Comic, group: int, chapter: int | None) -> CatalogTarget:
+    def from_comic(
+        cls, comic: Comic, group: int, chapter: int | None, end_chapter: int | None = None
+    ) -> CatalogTarget:
         book = comic.books[group - 1]
-        volumes = book.vols if chapter is None else book.vols[chapter - 1 : chapter]
-        return cls(group, chapter, book.name or '默认章节', tuple((v.name, v.url) for v in volumes))
+        if end_chapter is not None:
+            if chapter is None or not 1 <= chapter <= end_chapter <= len(book.vols):
+                raise ValueError('章节范围无效')
+            if end_chapter == chapter:
+                end_chapter = None
+        volumes = book.vols if chapter is None else book.vols[chapter - 1 : end_chapter or chapter]
+        return cls(
+            group,
+            chapter,
+            book.name or '默认章节',
+            tuple((v.name, v.url) for v in volumes),
+            end_chapter,
+        )
 
     @property
     def arguments(self) -> str:
         return (
             str(self.group)
             if self.chapter is None
-            else f'{self.group} {self.chapter} {self.chapter}'
+            else f'{self.group} {self.chapter} {self.end_chapter or self.chapter}'
         )
 
     @property
@@ -58,6 +72,11 @@ class CatalogTarget:
         group = f'第 {self.group} 卷「{plain(self.book_name)}」'
         if self.chapter is None:
             return f'{group}全部 {len(self.chapters)} 话'
+        if self.end_chapter is not None:
+            return (
+                f'{group}第 {self.chapter}–{self.end_chapter} 话（共 {len(self.chapters)} 话）'
+                f'；从「{plain(self.chapters[0][0])}」到「{plain(self.chapters[-1][0])}」'
+            )
         return f'{group}第 {self.chapter} 话「{plain(self.chapters[0][0])}」（仅此一话）'
 
     def matches(self, comic: Comic) -> bool:
@@ -67,7 +86,12 @@ class CatalogTarget:
             comic.books[self.group - 1].vols
         ):
             return False
-        return self == self.from_comic(comic, self.group, self.chapter)
+        if self.end_chapter is not None and (
+            self.chapter is None
+            or not self.chapter <= self.end_chapter <= len(comic.books[self.group - 1].vols)
+        ):
+            return False
+        return self == self.from_comic(comic, self.group, self.chapter, self.end_chapter)
 
 
 @dataclass(frozen=True)
@@ -90,6 +114,7 @@ class Detail:
     error: str = ''
     row: int = 0
     targets: dict[int, tuple[int, int | None]] = field(default_factory=dict)
+    range_start: tuple[int, int] | None = None
 
     @classmethod
     def from_comic(cls, item: SearchItem, comic: Comic) -> Detail:

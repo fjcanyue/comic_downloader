@@ -84,6 +84,7 @@ class SearchBrowser:
             self._detail_row,
             highlight=lambda: self.state.focus == 'details' and not self.state.show_report,
             on_reflow=self._set_detail_row,
+            row_style=self._range_row_style,
         )
         self.detail = Window(
             self.detail_control,
@@ -150,7 +151,7 @@ class SearchBrowser:
                     Window(FormattedTextControl(self._header), height=1, style='class:header'),
                     DynamicContainer(self._panels),
                     ConditionalContainer(self.filter_input, Condition(lambda: self.editing)),
-                    Window(FormattedTextControl(lambda: plain(self.state.message)), height=1),
+                    Window(FormattedTextControl(self._message), height=1),
                     Window(
                         FormattedTextControl(self._footer),
                         height=2,
@@ -177,6 +178,7 @@ class SearchBrowser:
             style=Style.from_dict(
                 {
                     'selected': 'bg:#008787 #ffffff bold',
+                    'range': 'bg:#005f5f #ffffff',
                     'header': 'bg:#005f5f #ffffff',
                     'footer': 'bg:#303030 #ffffff',
                     'frame.label': '#00afaf bold',
@@ -226,7 +228,70 @@ class SearchBrowser:
         size = self.app.output.get_size()
         if size.columns < MIN_COLUMNS or size.rows < MIN_ROWS:
             return '窗口较小：Tab 切换单面板 · Enter 详情 · Esc 返回；放大可分栏/下载'
+        if self.state.focus == 'details' and not self.state.show_report:
+            return '↑↓/翻页 选择 · 空格 标记/清除起点 · v 下载所选\nTab 切区 · d 整本 · r 刷新 · l 摘要 · Esc/q 返回'
         return '↑↓ 选择 / PgUp PgDn 翻屏 · Enter 详情 · d 整本 · v 卷/话\nTab 切区 · / 筛选 · r 刷新 · l 下载摘要 · Esc/q 返回'
+
+    def _current_detail(self) -> Detail | None:
+        item = self.state.current
+        return self.state.details.get(item.key) if item else None
+
+    def _range_bounds(self) -> tuple[int, int, int] | None:
+        detail = self._current_detail()
+        if detail is None or detail.range_start is None or self.state.show_report:
+            return None
+        group, start = detail.range_start
+        position = detail.targets.get(self.detail_control.source_row())
+        if position is None or position[0] != group or position[1] is None:
+            return None
+        return group, min(start, position[1]), max(start, position[1])
+
+    def _range_row_style(self, row: int) -> str:
+        detail = self._current_detail()
+        bounds = self._range_bounds()
+        position = detail.targets.get(row) if detail else None
+        if bounds and position:
+            group, start, end = bounds
+            if position[0] == group and position[1] is not None and start <= position[1] <= end:
+                return 'class:range'
+        return ''
+
+    def _message(self) -> str:
+        if self.state.message:
+            return plain(self.state.message)
+        detail = self._current_detail()
+        if (
+            self.state.focus == 'details'
+            and not self.state.show_report
+            and detail
+            and detail.range_start
+        ):
+            bounds = self._range_bounds()
+            if bounds:
+                group, start, end = bounds
+                return f'卷 {group} · {start}–{end} 话 · 共 {end - start + 1} 话；v 确认 / 空格清除'
+            group, start = detail.range_start
+            return f'起点：卷 {group} 第 {start} 话；请选同卷终点，或空格清除'
+        return plain(self.state.message)
+
+    def _mark_range(self) -> None:
+        detail = self._current_detail()
+        if self.state.focus != 'details' or self.state.show_report:
+            self.state.message = '请按 Tab 切到漫画详情，在某一话上按空格标记起点。'
+            return
+        if detail and detail.range_start:
+            detail.range_start = None
+            self.state.message = '已清除范围起点；v 下载当前卷或单话。'
+            return
+        target = self._selected_target()
+        if target is None:
+            return
+        if target.chapter is None:
+            self.state.message = '请选中具体某一话后按空格；整卷下载请按 v。'
+            return
+        if detail:
+            detail.range_start = (target.group, target.chapter)
+            self.state.message = ''
 
     def _detail_lines(self) -> list[str]:
         if self.state.show_report:
@@ -281,6 +346,9 @@ class SearchBrowser:
                 self.detail.vertical_scroll = 0
         else:
             self._scroll_detail(amount)
+            detail = self._current_detail()
+            if detail and detail.range_start and not self.state.show_report:
+                self.state.message = ''
 
     def _load_detail(self, *, refresh: bool = False) -> None:
         self.state.show_report = False
@@ -299,6 +367,8 @@ class SearchBrowser:
             )
             return
         self.tokens[item.key] = self.worker.submit(item)
+        if cached and cached.range_start:
+            self.state.message = '目录已刷新，范围起点已清除，请重新选择。'
         self.state.remember(
             item, Detail([plain(item.name), f'来源：{plain(item.source)}', '正在获取详情…'])
         )
@@ -360,10 +430,17 @@ class SearchBrowser:
             self.state.message = '请先按 Enter 加载详情，再选中卷名或某一话。'
             return None
         position = detail.targets.get(self.detail_control.source_row())
-        if position is None:
+        if detail.range_start:
+            bounds = self._range_bounds()
+            if bounds is None:
+                self.state.message = '范围下载只能选择同一卷内的具体话；空格清除起点。'
+                return None
+            target = CatalogTarget.from_comic(detail.comic, *bounds)
+        elif position is None:
             self.state.message = '当前行不是卷名或某一话，请用上下键移动高亮。'
             return None
-        target = CatalogTarget.from_comic(detail.comic, *position)
+        else:
+            target = CatalogTarget.from_comic(detail.comic, *position)
         if not target.chapters:
             self.state.message = '该卷没有可下载的话，请选择其他卷。'
             return None
@@ -445,6 +522,10 @@ class SearchBrowser:
         @keys.add('v', filter=normal)
         def download_selection(event: KeyPressEvent) -> None:
             self._open_download(selected=True)
+
+        @keys.add(' ', filter=normal)
+        def mark_range(event: KeyPressEvent) -> None:
+            self._mark_range()
 
         @keys.add('tab', filter=normal)
         @keys.add('s-tab', filter=normal)

@@ -30,7 +30,9 @@ class ScreenOutput(DummyOutput):
         return Size(rows=30, columns=self.width)
 
 
-async def render(width: int, *, confirmation: bool = False, chapter: bool = False) -> None:
+async def render(  # noqa: PLR0915 - render and export one complete demo screen
+    width: int, *, confirmation: bool = False, chapter: bool = False, chapter_range: bool = False
+) -> None:
     items = tuple(
         SearchItem(i, 'demo', f'https://example.test/comic/{i}', name, '演示作者')
         for i, name in enumerate(['星海旅人', '星海旅人 · 特别篇', '星海纪事', '银河漫游'])
@@ -63,6 +65,8 @@ async def render(width: int, *, confirmation: bool = False, chapter: bool = Fals
                 browser.detail_control.wrapped()
                 selected = next(row for row, target in detail.targets.items() if target == (1, 5))
                 detail.row = browser.detail_control.source_rows.index(selected)
+                if chapter_range:
+                    detail.range_start = (1, 2)
                 browser.app.invalidate()
                 await asyncio.sleep(0.15)
             if confirmation:
@@ -101,6 +105,8 @@ async def render(width: int, *, confirmation: bool = False, chapter: bool = Fals
             suffix = 'confirm' if confirmation else ('wide' if width >= WIDE_COLUMNS else 'narrow')
             if chapter:
                 suffix = 'chapter-confirm' if confirmation else 'chapter'
+            if chapter_range:
+                suffix = f'range-{width}' + ('-confirm' if confirmation else '')
             svg = console.export_svg(title='漫画下载器 · 键盘浏览 · 演示数据')
             Path(__file__).with_name(f'search-browser-{suffix}.svg').write_text(
                 '\n'.join(line.rstrip() for line in svg.splitlines()) + '\n', encoding='utf-8'
@@ -117,6 +123,10 @@ async def main() -> None:
     await render(80, confirmation=True)
     await render(120, chapter=True)
     await render(120, chapter=True, confirmation=True)
+    await render(120, chapter=True, chapter_range=True)
+    await render(80, chapter=True, chapter_range=True)
+    await render(48, chapter=True, chapter_range=True)
+    await render(80, chapter=True, chapter_range=True, confirmation=True)
 
 
 if __name__ == '__main__':
