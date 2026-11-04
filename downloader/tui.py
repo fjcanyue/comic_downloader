@@ -12,8 +12,14 @@ from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
 
+from downloader.download.archive_batch import ArchiveBatch
 from downloader.download.job_archive import ArchiveQuery
-from downloader.download.job_browser import TASK_FILTER_LABELS, JobSummary, TaskQuery
+from downloader.download.job_browser import (
+    TASK_FILTER_LABELS,
+    TASK_PAGE_SIZE,
+    JobSummary,
+    TaskQuery,
+)
 from downloader.download.jobs import DownloadJob
 from downloader.models import Comic, DownloadSummary, SearchOutcome, VolumeDownloadResult
 
@@ -37,6 +43,12 @@ MAX_URL_DISPLAY_WIDTH = 50
 COMPACT_SEARCH_WIDTH = 80
 COMPACT_TASK_WIDTH = 60
 WIDE_TASK_WIDTH = 100
+BATCH_STATE_LABELS = {
+    'ready': '待确认',
+    'running': '执行中或曾中断',
+    'finished': '已结束',
+    'cancelled': '已取消',
+}
 JOB_STATE_STYLES = {
     'completed': SUCCESS,
     'failed': ERROR,
@@ -173,6 +185,7 @@ class TerminalPresenter:
             ('tasks find', '<关键词>', '按漫画名、源代码或 ID 查找计划'),
             ('archive', '[list/任务ID/show/restore]', '归档已完成计划、查看或恢复归档'),
             ('archive find', '<关键词>', '查找归档；archive next / prev 翻页'),
+            ('archive batch', '[find <关键词>]', '预览批量归档；按批次 ID 确认执行'),
             ('d', '[序号/URL]', '下载当前或指定动漫'),
             ('v', '<章节> [范围]', '按范围下载章节'),
             ('source', '[序号/代码名]', '查看并切换动漫源'),
@@ -674,7 +687,116 @@ class TerminalPresenter:
             self.info('  ·  '.join(actions))
         if not query.job_id:
             self.info('archive find <关键词> 查找漫画名、源代码或 ID；archive 返回全部归档首页。')
-            self.info('查找只影响浏览；归档和恢复始终使用单个任务 ID。')
+            self.info('查找只影响浏览；批量归档需另用 archive batch 预览并确认。')
+
+    def archive_batch(self, batch: ArchiveBatch, *, page: int = 1) -> None:
+        size = TASK_PAGE_SIZE
+        pages = max(1, (len(batch.entries) + size - 1) // size)
+        labels = {
+            'pending': '未执行' if batch.state == 'cancelled' else '待处理',
+            'applying': '待核对',
+            'archived': '已归档',
+            'skipped': '已跳过',
+            'failed': '失败',
+        }
+        overview = Text()
+        overview.append('批量归档 · ' + BATCH_STATE_LABELS[batch.state], style=f'bold {ACCENT}')
+        overview.append(f'\n批次 {batch.id}\n保存路径 {batch.output_path}')
+        overview.append(f'\n条件 已完成 · {batch.keyword or "全部"}（独立于当前浏览筛选）')
+        overview.append(
+            f'\n固定候选 {len(batch.entries)} 项 · 第 {page}/{pages} 页 · 创建 {batch.created_at}',
+            style=MUTED,
+        )
+        overview.append('\n仅移动计划记录；漫画、图片、ZIP 文件保持不变。', style=MUTED)
+        if batch.errors:
+            overview.append(
+                f'\n预览时有 {len(batch.errors)} 条记录无法纳入，请检查下方提示。', style=WARN
+            )
+        self.print(Panel(overview, border_style=ACCENT, padding=(0, 1)))
+        if batch.entries:
+            table = Table(
+                title='归档候选预览' if batch.state == 'ready' else '批量归档记录',
+                header_style=f'bold {ACCENT}',
+                border_style=MUTED,
+                box=box.SIMPLE_HEAD,
+            )
+            table.add_column('任务 ID', overflow='fold', min_width=12, max_width=32)
+            table.add_column('漫画 / 来源', overflow='fold')
+            table.add_column('话数', justify='right')
+            table.add_column('结果', overflow='fold')
+            for entry in batch.entries[(page - 1) * size : page * size]:
+                summary = entry.summary
+                result = Text(
+                    labels[entry.status],
+                    style={
+                        'pending': MUTED,
+                        'applying': WARN,
+                        'archived': SUCCESS,
+                        'skipped': WARN,
+                        'failed': ERROR,
+                    }[entry.status],
+                )
+                if entry.message:
+                    result.append('\n' + entry.message, style=MUTED)
+                table.add_row(
+                    Text(summary.id),
+                    Text(f'{summary.comic_name}\n{summary.source_name}'),
+                    str(summary.total),
+                    result,
+                )
+            self.print(table)
+        else:
+            self.info(
+                '没有符合条件的已完成计划；可用 tasks completed 查看，或调整 batch find 条件。'
+            )
+        counts = {status: sum(e.status == status for e in batch.entries) for status in labels}
+        self.info(' · '.join(f'{label} {counts[status]}' for status, label in labels.items()))
+        self._archive_batch_navigation(batch, page, pages)
+        for error in batch.errors:
+            self.warn(f'预览排除：{error}')
+
+    def _archive_batch_navigation(self, batch: ArchiveBatch, page: int, pages: int) -> None:
+        if page > 1:
+            self.info(f'archive batch show {batch.id} {page - 1} 上一页')
+        if page < pages:
+            self.info(f'archive batch show {batch.id} {page + 1} 下一页')
+        if batch.state == 'ready':
+            self.info('预览未移动任何任务；请核对所有页，确认后执行：')
+            if batch.entries:
+                self.info(f'archive batch apply {batch.id}')
+            self.info(f'archive batch cancel {batch.id} 取消此批次')
+        elif batch.state == 'running':
+            self.info(f'archive batch apply {batch.id} 核对中断项并继续剩余候选')
+        elif batch.state == 'finished':
+            self.info('批次已结束；重复 apply 仅查看结果，不重新归档。跳过/失败项需重新预览。')
+            self.info('archive restore <任务ID> 可逐项恢复已归档计划。')
+        else:
+            self.info('该批次已取消，未移动任务；archive batch 可重新预览。')
+        self.info('archive batch list 查看批次历史。')
+        self.info('archive batch show <批次ID> 查看候选或结果。')
+
+    def archive_batches(self, batches: list[ArchiveBatch], *, page: int = 1) -> None:
+        size = TASK_PAGE_SIZE
+        pages = max(1, (len(batches) + size - 1) // size)
+        self.info(f'批次历史 · 当前保存路径 · 共 {len(batches)} 项 · 第 {page}/{pages} 页')
+        table = Table(header_style=f'bold {ACCENT}', border_style=MUTED, box=box.SIMPLE_HEAD)
+        for name in ('批次 ID', '条件 / 创建时间（UTC）', '候选 / 状态'):
+            table.add_column(name, overflow='fold')
+        for batch in batches[(page - 1) * size : page * size]:
+            table.add_row(
+                Text(batch.id),
+                Text(f'{batch.keyword or "全部已完成"}\n{batch.created_at[:19]}'),
+                Text(f'{len(batch.entries)} 项\n{BATCH_STATE_LABELS[batch.state]}'),
+            )
+        if batches:
+            self.print(table)
+        else:
+            self.info('暂无可读取的归档批次；archive batch [find <关键词>] 创建预览。')
+        if page > 1:
+            self.info(f'archive batch list {page - 1} 上一页')
+        if page < pages:
+            self.info(f'archive batch list {page + 1} 下一页')
+        self.info('archive batch show <批次ID> 查看候选、状态与逐项结果；不会重新扫描候选。')
 
     def download_job(
         self, job: DownloadJob, *, volume_indices: list[int] | None = None, archived: bool = False

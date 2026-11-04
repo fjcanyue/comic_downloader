@@ -10,6 +10,7 @@ from rich.console import Console
 
 from downloader.browser.manager import DriverManager
 from downloader.comic import ComicSource
+from downloader.download.archive_batch import ArchiveBatchStore
 from downloader.download.jobs import DownloadJob, JobVolume
 from downloader.download.progress import NoopDownloadProgress
 from downloader.models import Comic, ComicBook, ComicVolume, VolumeDownloadResult
@@ -479,6 +480,59 @@ def make_archived_jobs(shell, count=23):
         shell.job_store.archive(job.id)
         jobs.append(job)
     return jobs
+
+
+@pytest.mark.parametrize('width', [48, 80, 120])
+def test_archive_batch_preview_pagination_apply_and_cancel_are_independent_of_browsing(
+    shell, width
+):
+    shell.console.width = width
+    jobs = []
+    for index in range(23):
+        volume = JobVolume('正篇', '第一话', f'https://example.test/{index}')
+        volume.result = VolumeDownloadResult(volume.name, volume.url, 'downloaded')
+        job = DownloadJob(
+            'first',
+            f'[red]批次漫画 {index}',
+            'https://example.test/comic',
+            [volume],
+            state='completed',
+        )
+        shell.job_store.save(job)
+        jobs.append(job)
+    shell.onecmd('tasks completed find 不匹配')
+    shell.onecmd('archive find 另一条件')
+    task_query, archive_query = shell.task_query, shell.archive_query
+    shell.onecmd('archive batch find 批次漫画 FIRST')
+    assert shell.last_command_ok
+    store = ArchiveBatchStore(shell.job_store)
+    batch_id = next(store.directory.glob('*.json')).stem
+    text = shell.console.file.getvalue()
+    assert '归档候选预览' in text and '固定候选 23 项' in text
+    assert '[red]批次漫画' in text  # Names are rendered literally, never as Rich markup.
+    assert len(shell.job_store.list_jobs()[0]) == 23
+    assert shell.task_query == task_query and shell.archive_query == archive_query
+
+    shell.onecmd(f'archive batch show {batch_id} 2')
+    assert shell.last_command_ok and '第 2/2 页' in shell.console.file.getvalue()
+    shell.onecmd(f'archive batch show {batch_id} 3')
+    assert not shell.last_command_ok
+    assert store.load(batch_id).state == 'ready'
+    shell.onecmd(f'archive batch cancel {batch_id}')
+    assert shell.last_command_ok and store.load(batch_id).state == 'cancelled'
+    shell.onecmd(f'archive batch apply {batch_id}')
+    assert not shell.last_command_ok and len(shell.job_store.list_jobs()[0]) == 23
+
+    shell.onecmd('archive batch find 批次漫画 FIRST')
+    active = next(path.stem for path in store.directory.glob('*.json') if path.stem != batch_id)
+    shell.onecmd(f'archive batch apply {active}')
+    assert shell.last_command_ok
+    assert len(shell.job_store.archive_view().list_jobs()[0]) == 23
+    assert not shell.job_store.list_jobs()[0]
+    assert shell.task_query == task_query and shell.archive_query == archive_query
+    shell.onecmd(f'archive restore {jobs[0].id}')
+    shell.onecmd(f'archive batch apply {active}')
+    assert shell.last_command_ok and shell.job_store.load(jobs[0].id).state == 'completed'
 
 
 def test_archive_find_navigation_is_read_only_and_independent_of_tasks(shell):

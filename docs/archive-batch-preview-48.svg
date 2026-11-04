@@ -1,0 +1,194 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="rich-terminal" viewBox="0 0 604 879.5999999999999">
+
+    <style>
+
+    @font-face {
+        font-family: "Fira Code";
+        src: local("FiraCode-Regular"),
+                url("https://cdnjs.cloudflare.com/ajax/libs/firacode/6.2.0/woff2/FiraCode-Regular.woff2") format("woff2"),
+                url("https://cdnjs.cloudflare.com/ajax/libs/firacode/6.2.0/woff/FiraCode-Regular.woff") format("woff");
+        font-style: normal;
+        font-weight: 400;
+    }
+    @font-face {
+        font-family: "Fira Code";
+        src: local("FiraCode-Bold"),
+                url("https://cdnjs.cloudflare.com/ajax/libs/firacode/6.2.0/woff2/FiraCode-Bold.woff2") format("woff2"),
+                url("https://cdnjs.cloudflare.com/ajax/libs/firacode/6.2.0/woff/FiraCode-Bold.woff") format("woff");
+        font-style: bold;
+        font-weight: 700;
+    }
+
+    .terminal-3680888298-matrix {
+        font-family: Fira Code, monospace;
+        font-size: 20px;
+        line-height: 24.4px;
+        font-variant-east-asian: full-width;
+    }
+
+    .terminal-3680888298-title {
+        font-size: 18px;
+        font-weight: bold;
+        font-family: arial;
+    }
+
+    .terminal-3680888298-r1 { fill: #68a0b3 }
+.terminal-3680888298-r2 { fill: #c5c8c6 }
+.terminal-3680888298-r3 { fill: #68a0b3;font-weight: bold }
+.terminal-3680888298-r4 { fill: #868887 }
+.terminal-3680888298-r5 { fill: #c5c8c6;font-style: italic; }
+    </style>
+
+    <defs>
+    <clipPath id="terminal-3680888298-clip-terminal">
+      <rect x="0" y="0" width="584.5999999999999" height="828.5999999999999" />
+    </clipPath>
+    <clipPath id="terminal-3680888298-line-0">
+    <rect x="0" y="1.5" width="585.6" height="24.65" />
+            </clipPath>
+<clipPath id="terminal-3680888298-line-1">
+    <rect x="0" y="25.9" width="585.6" height="24.65" />
+            </clipPath>
+<clipPath id="terminal-3680888298-line-2">
+    <rect x="0" y="50.3" width="585.6" height="24.65" />
+            </clipPath>
+<clipPath id="terminal-3680888298-line-3">
+    <rect x="0" y="74.7" width="585.6" height="24.65" />
+            </clipPath>
+<clipPath id="terminal-3680888298-line-4">
+    <rect x="0" y="99.1" width="585.6" height="24.65" />
+            </clipPath>
+<clipPath id="terminal-3680888298-line-5">
+    <rect x="0" y="123.5" width="585.6" height="24.65" />
+            </clipPath>
+<clipPath id="terminal-3680888298-line-6">
+    <rect x="0" y="147.9" width="585.6" height="24.65" />
+            </clipPath>
+<clipPath id="terminal-3680888298-line-7">
+    <rect x="0" y="172.3" width="585.6" height="24.65" />
+            </clipPath>
+<clipPath id="terminal-3680888298-line-8">
+    <rect x="0" y="196.7" width="585.6" height="24.65" />
+            </clipPath>
+<clipPath id="terminal-3680888298-line-9">
+    <rect x="0" y="221.1" width="585.6" height="24.65" />
+            </clipPath>
+<clipPath id="terminal-3680888298-line-10">
+    <rect x="0" y="245.5" width="585.6" height="24.65" />
+            </clipPath>
+<clipPath id="terminal-3680888298-line-11">
+    <rect x="0" y="269.9" width="585.6" height="24.65" />
+            </clipPath>
+<clipPath id="terminal-3680888298-line-12">
+    <rect x="0" y="294.3" width="585.6" height="24.65" />
+            </clipPath>
+<clipPath id="terminal-3680888298-line-13">
+    <rect x="0" y="318.7" width="585.6" height="24.65" />
+            </clipPath>
+<clipPath id="terminal-3680888298-line-14">
+    <rect x="0" y="343.1" width="585.6" height="24.65" />
+            </clipPath>
+<clipPath id="terminal-3680888298-line-15">
+    <rect x="0" y="367.5" width="585.6" height="24.65" />
+            </clipPath>
+<clipPath id="terminal-3680888298-line-16">
+    <rect x="0" y="391.9" width="585.6" height="24.65" />
+            </clipPath>
+<clipPath id="terminal-3680888298-line-17">
+    <rect x="0" y="416.3" width="585.6" height="24.65" />
+            </clipPath>
+<clipPath id="terminal-3680888298-line-18">
+    <rect x="0" y="440.7" width="585.6" height="24.65" />
+            </clipPath>
+<clipPath id="terminal-3680888298-line-19">
+    <rect x="0" y="465.1" width="585.6" height="24.65" />
+            </clipPath>
+<clipPath id="terminal-3680888298-line-20">
+    <rect x="0" y="489.5" width="585.6" height="24.65" />
+            </clipPath>
+<clipPath id="terminal-3680888298-line-21">
+    <rect x="0" y="513.9" width="585.6" height="24.65" />
+            </clipPath>
+<clipPath id="terminal-3680888298-line-22">
+    <rect x="0" y="538.3" width="585.6" height="24.65" />
+            </clipPath>
+<clipPath id="terminal-3680888298-line-23">
+    <rect x="0" y="562.7" width="585.6" height="24.65" />
+            </clipPath>
+<clipPath id="terminal-3680888298-line-24">
+    <rect x="0" y="587.1" width="585.6" height="24.65" />
+            </clipPath>
+<clipPath id="terminal-3680888298-line-25">
+    <rect x="0" y="611.5" width="585.6" height="24.65" />
+            </clipPath>
+<clipPath id="terminal-3680888298-line-26">
+    <rect x="0" y="635.9" width="585.6" height="24.65" />
+            </clipPath>
+<clipPath id="terminal-3680888298-line-27">
+    <rect x="0" y="660.3" width="585.6" height="24.65" />
+            </clipPath>
+<clipPath id="terminal-3680888298-line-28">
+    <rect x="0" y="684.7" width="585.6" height="24.65" />
+            </clipPath>
+<clipPath id="terminal-3680888298-line-29">
+    <rect x="0" y="709.1" width="585.6" height="24.65" />
+            </clipPath>
+<clipPath id="terminal-3680888298-line-30">
+    <rect x="0" y="733.5" width="585.6" height="24.65" />
+            </clipPath>
+<clipPath id="terminal-3680888298-line-31">
+    <rect x="0" y="757.9" width="585.6" height="24.65" />
+            </clipPath>
+<clipPath id="terminal-3680888298-line-32">
+    <rect x="0" y="782.3" width="585.6" height="24.65" />
+            </clipPath>
+    </defs>
+
+    <rect fill="#292929" stroke="rgba(255,255,255,0.35)" stroke-width="1" x="1" y="1" width="602" height="877.6" rx="8" /><text class="terminal-3680888298-title" fill="#c5c8c6" text-anchor="middle" x="301" y="27">批量归档 · 演示数据</text>
+            <g transform="translate(26,22)">
+            <circle cx="0" cy="0" r="7" fill="#ff5f57" />
+            <circle cx="22" cy="0" r="7" fill="#febc2e" />
+            <circle cx="44" cy="0" r="7" fill="#28c840" />
+            </g>
+
+    <g transform="translate(9, 41)" clip-path="url(#terminal-3680888298-clip-terminal)">
+
+    <g class="terminal-3680888298-matrix">
+    <text class="terminal-3680888298-r1" x="0" y="20" textLength="585.6" clip-path="url(#terminal-3680888298-line-0)">┌──────────────────────────────────────────────┐</text><text class="terminal-3680888298-r2" x="585.6" y="20" textLength="0" clip-path="url(#terminal-3680888298-line-0)">
+</text><text class="terminal-3680888298-r1" x="0" y="44.4" textLength="12.2" clip-path="url(#terminal-3680888298-line-1)">│</text><text class="terminal-3680888298-r3" x="24.4" y="44.4" textLength="207.4" clip-path="url(#terminal-3680888298-line-1)">批量归档 · 待确认</text><text class="terminal-3680888298-r1" x="573.4" y="44.4" textLength="12.2" clip-path="url(#terminal-3680888298-line-1)">│</text><text class="terminal-3680888298-r2" x="585.6" y="44.4" textLength="0" clip-path="url(#terminal-3680888298-line-1)">
+</text><text class="terminal-3680888298-r1" x="0" y="68.8" textLength="12.2" clip-path="url(#terminal-3680888298-line-2)">│</text><text class="terminal-3680888298-r2" x="24.4" y="68.8" textLength="451.4" clip-path="url(#terminal-3680888298-line-2)">批次 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb</text><text class="terminal-3680888298-r1" x="573.4" y="68.8" textLength="12.2" clip-path="url(#terminal-3680888298-line-2)">│</text><text class="terminal-3680888298-r2" x="585.6" y="68.8" textLength="0" clip-path="url(#terminal-3680888298-line-2)">
+</text><text class="terminal-3680888298-r1" x="0" y="93.2" textLength="12.2" clip-path="url(#terminal-3680888298-line-3)">│</text><text class="terminal-3680888298-r2" x="24.4" y="93.2" textLength="219.6" clip-path="url(#terminal-3680888298-line-3)">保存路径 D:/Comics</text><text class="terminal-3680888298-r1" x="573.4" y="93.2" textLength="12.2" clip-path="url(#terminal-3680888298-line-3)">│</text><text class="terminal-3680888298-r2" x="585.6" y="93.2" textLength="0" clip-path="url(#terminal-3680888298-line-3)">
+</text><text class="terminal-3680888298-r1" x="0" y="117.6" textLength="12.2" clip-path="url(#terminal-3680888298-line-4)">│</text><text class="terminal-3680888298-r2" x="24.4" y="117.6" textLength="231.8" clip-path="url(#terminal-3680888298-line-4)">条件 已完成 · 星海 </text><text class="terminal-3680888298-r1" x="573.4" y="117.6" textLength="12.2" clip-path="url(#terminal-3680888298-line-4)">│</text><text class="terminal-3680888298-r2" x="585.6" y="117.6" textLength="0" clip-path="url(#terminal-3680888298-line-4)">
+</text><text class="terminal-3680888298-r1" x="0" y="142" textLength="12.2" clip-path="url(#terminal-3680888298-line-5)">│</text><text class="terminal-3680888298-r2" x="24.4" y="142" textLength="317.2" clip-path="url(#terminal-3680888298-line-5)">demo（独立于当前浏览筛选）</text><text class="terminal-3680888298-r1" x="573.4" y="142" textLength="12.2" clip-path="url(#terminal-3680888298-line-5)">│</text><text class="terminal-3680888298-r2" x="585.6" y="142" textLength="0" clip-path="url(#terminal-3680888298-line-5)">
+</text><text class="terminal-3680888298-r1" x="0" y="166.4" textLength="12.2" clip-path="url(#terminal-3680888298-line-6)">│</text><text class="terminal-3680888298-r4" x="24.4" y="166.4" textLength="402.6" clip-path="url(#terminal-3680888298-line-6)">固定候选 3 项 · 第 1/1 页 · 创建 </text><text class="terminal-3680888298-r1" x="573.4" y="166.4" textLength="12.2" clip-path="url(#terminal-3680888298-line-6)">│</text><text class="terminal-3680888298-r2" x="585.6" y="166.4" textLength="0" clip-path="url(#terminal-3680888298-line-6)">
+</text><text class="terminal-3680888298-r1" x="0" y="190.8" textLength="12.2" clip-path="url(#terminal-3680888298-line-7)">│</text><text class="terminal-3680888298-r4" x="24.4" y="190.8" textLength="305" clip-path="url(#terminal-3680888298-line-7)">2026-11-04T14:00:00+00:00</text><text class="terminal-3680888298-r1" x="573.4" y="190.8" textLength="12.2" clip-path="url(#terminal-3680888298-line-7)">│</text><text class="terminal-3680888298-r2" x="585.6" y="190.8" textLength="0" clip-path="url(#terminal-3680888298-line-7)">
+</text><text class="terminal-3680888298-r1" x="0" y="215.2" textLength="12.2" clip-path="url(#terminal-3680888298-line-8)">│</text><text class="terminal-3680888298-r4" x="24.4" y="215.2" textLength="390.4" clip-path="url(#terminal-3680888298-line-8)">仅移动计划记录；漫画、图片、ZIP </text><text class="terminal-3680888298-r1" x="573.4" y="215.2" textLength="12.2" clip-path="url(#terminal-3680888298-line-8)">│</text><text class="terminal-3680888298-r2" x="585.6" y="215.2" textLength="0" clip-path="url(#terminal-3680888298-line-8)">
+</text><text class="terminal-3680888298-r1" x="0" y="239.6" textLength="12.2" clip-path="url(#terminal-3680888298-line-9)">│</text><text class="terminal-3680888298-r4" x="24.4" y="239.6" textLength="170.8" clip-path="url(#terminal-3680888298-line-9)">文件保持不变。</text><text class="terminal-3680888298-r1" x="573.4" y="239.6" textLength="12.2" clip-path="url(#terminal-3680888298-line-9)">│</text><text class="terminal-3680888298-r2" x="585.6" y="239.6" textLength="0" clip-path="url(#terminal-3680888298-line-9)">
+</text><text class="terminal-3680888298-r1" x="0" y="264" textLength="585.6" clip-path="url(#terminal-3680888298-line-10)">└──────────────────────────────────────────────┘</text><text class="terminal-3680888298-r2" x="585.6" y="264" textLength="0" clip-path="url(#terminal-3680888298-line-10)">
+</text><text class="terminal-3680888298-r5" x="0" y="288.4" textLength="585.6" clip-path="url(#terminal-3680888298-line-11)">                  归档候选预览                  </text><text class="terminal-3680888298-r2" x="585.6" y="288.4" textLength="0" clip-path="url(#terminal-3680888298-line-11)">
+</text><text class="terminal-3680888298-r2" x="585.6" y="312.8" textLength="0" clip-path="url(#terminal-3680888298-line-12)">
+</text><text class="terminal-3680888298-r3" x="24.4" y="337.2" textLength="158.6" clip-path="url(#terminal-3680888298-line-13)">任务 ID      </text><text class="terminal-3680888298-r3" x="219.6" y="337.2" textLength="146.4" clip-path="url(#terminal-3680888298-line-13)">漫画 / 来源 </text><text class="terminal-3680888298-r3" x="402.6" y="337.2" textLength="48.8" clip-path="url(#terminal-3680888298-line-13)">话数</text><text class="terminal-3680888298-r3" x="488" y="337.2" textLength="73.2" clip-path="url(#terminal-3680888298-line-13)">结果  </text><text class="terminal-3680888298-r2" x="585.6" y="337.2" textLength="0" clip-path="url(#terminal-3680888298-line-13)">
+</text><text class="terminal-3680888298-r4" x="0" y="361.6" textLength="585.6" clip-path="url(#terminal-3680888298-line-14)"> ────────────────────────────────────────────── </text><text class="terminal-3680888298-r2" x="585.6" y="361.6" textLength="0" clip-path="url(#terminal-3680888298-line-14)">
+</text><text class="terminal-3680888298-r2" x="24.4" y="386" textLength="158.6" clip-path="url(#terminal-3680888298-line-15)">0000000000000</text><text class="terminal-3680888298-r2" x="219.6" y="386" textLength="146.4" clip-path="url(#terminal-3680888298-line-15)">星海旅人 ·  </text><text class="terminal-3680888298-r2" x="402.6" y="386" textLength="48.8" clip-path="url(#terminal-3680888298-line-15)"> 120</text><text class="terminal-3680888298-r4" x="488" y="386" textLength="73.2" clip-path="url(#terminal-3680888298-line-15)">待处理</text><text class="terminal-3680888298-r2" x="585.6" y="386" textLength="0" clip-path="url(#terminal-3680888298-line-15)">
+</text><text class="terminal-3680888298-r2" x="24.4" y="410.4" textLength="158.6" clip-path="url(#terminal-3680888298-line-16)">0000000000000</text><text class="terminal-3680888298-r2" x="219.6" y="410.4" textLength="146.4" clip-path="url(#terminal-3680888298-line-16)">正篇        </text><text class="terminal-3680888298-r2" x="585.6" y="410.4" textLength="0" clip-path="url(#terminal-3680888298-line-16)">
+</text><text class="terminal-3680888298-r2" x="24.4" y="434.8" textLength="158.6" clip-path="url(#terminal-3680888298-line-17)">000001       </text><text class="terminal-3680888298-r2" x="219.6" y="434.8" textLength="146.4" clip-path="url(#terminal-3680888298-line-17)">demo        </text><text class="terminal-3680888298-r2" x="585.6" y="434.8" textLength="0" clip-path="url(#terminal-3680888298-line-17)">
+</text><text class="terminal-3680888298-r2" x="24.4" y="459.2" textLength="158.6" clip-path="url(#terminal-3680888298-line-18)">0000000000000</text><text class="terminal-3680888298-r2" x="219.6" y="459.2" textLength="146.4" clip-path="url(#terminal-3680888298-line-18)">星海旅人 ·  </text><text class="terminal-3680888298-r2" x="402.6" y="459.2" textLength="48.8" clip-path="url(#terminal-3680888298-line-18)">  12</text><text class="terminal-3680888298-r4" x="488" y="459.2" textLength="73.2" clip-path="url(#terminal-3680888298-line-18)">待处理</text><text class="terminal-3680888298-r2" x="585.6" y="459.2" textLength="0" clip-path="url(#terminal-3680888298-line-18)">
+</text><text class="terminal-3680888298-r2" x="24.4" y="483.6" textLength="158.6" clip-path="url(#terminal-3680888298-line-19)">0000000000000</text><text class="terminal-3680888298-r2" x="219.6" y="483.6" textLength="146.4" clip-path="url(#terminal-3680888298-line-19)">番外        </text><text class="terminal-3680888298-r2" x="585.6" y="483.6" textLength="0" clip-path="url(#terminal-3680888298-line-19)">
+</text><text class="terminal-3680888298-r2" x="24.4" y="508" textLength="158.6" clip-path="url(#terminal-3680888298-line-20)">000002       </text><text class="terminal-3680888298-r2" x="219.6" y="508" textLength="146.4" clip-path="url(#terminal-3680888298-line-20)">demo        </text><text class="terminal-3680888298-r2" x="585.6" y="508" textLength="0" clip-path="url(#terminal-3680888298-line-20)">
+</text><text class="terminal-3680888298-r2" x="24.4" y="532.4" textLength="158.6" clip-path="url(#terminal-3680888298-line-21)">0000000000000</text><text class="terminal-3680888298-r2" x="219.6" y="532.4" textLength="146.4" clip-path="url(#terminal-3680888298-line-21)">星海旅人 ·  </text><text class="terminal-3680888298-r2" x="402.6" y="532.4" textLength="48.8" clip-path="url(#terminal-3680888298-line-21)">   3</text><text class="terminal-3680888298-r4" x="488" y="532.4" textLength="73.2" clip-path="url(#terminal-3680888298-line-21)">待处理</text><text class="terminal-3680888298-r2" x="585.6" y="532.4" textLength="0" clip-path="url(#terminal-3680888298-line-21)">
+</text><text class="terminal-3680888298-r2" x="24.4" y="556.8" textLength="158.6" clip-path="url(#terminal-3680888298-line-22)">0000000000000</text><text class="terminal-3680888298-r2" x="219.6" y="556.8" textLength="146.4" clip-path="url(#terminal-3680888298-line-22)">特别篇      </text><text class="terminal-3680888298-r2" x="585.6" y="556.8" textLength="0" clip-path="url(#terminal-3680888298-line-22)">
+</text><text class="terminal-3680888298-r2" x="24.4" y="581.2" textLength="158.6" clip-path="url(#terminal-3680888298-line-23)">000003       </text><text class="terminal-3680888298-r2" x="219.6" y="581.2" textLength="146.4" clip-path="url(#terminal-3680888298-line-23)">demo        </text><text class="terminal-3680888298-r2" x="585.6" y="581.2" textLength="0" clip-path="url(#terminal-3680888298-line-23)">
+</text><text class="terminal-3680888298-r2" x="585.6" y="605.6" textLength="0" clip-path="url(#terminal-3680888298-line-24)">
+</text><text class="terminal-3680888298-r2" x="0" y="630" textLength="585.6" clip-path="url(#terminal-3680888298-line-25)">待处理 3 · 待核对 0 · 已归档 0 · 已跳过 0 · 失败</text><text class="terminal-3680888298-r2" x="585.6" y="630" textLength="0" clip-path="url(#terminal-3680888298-line-25)">
+</text><text class="terminal-3680888298-r2" x="0" y="654.4" textLength="12.2" clip-path="url(#terminal-3680888298-line-26)">0</text><text class="terminal-3680888298-r2" x="585.6" y="654.4" textLength="0" clip-path="url(#terminal-3680888298-line-26)">
+</text><text class="terminal-3680888298-r2" x="0" y="678.8" textLength="561.2" clip-path="url(#terminal-3680888298-line-27)">预览未移动任何任务；请核对所有页，确认后执行：</text><text class="terminal-3680888298-r2" x="585.6" y="678.8" textLength="0" clip-path="url(#terminal-3680888298-line-27)">
+</text><text class="terminal-3680888298-r2" x="0" y="703.2" textLength="244" clip-path="url(#terminal-3680888298-line-28)">archive batch apply </text><text class="terminal-3680888298-r2" x="585.6" y="703.2" textLength="0" clip-path="url(#terminal-3680888298-line-28)">
+</text><text class="terminal-3680888298-r2" x="0" y="727.6" textLength="390.4" clip-path="url(#terminal-3680888298-line-29)">bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb</text><text class="terminal-3680888298-r2" x="585.6" y="727.6" textLength="0" clip-path="url(#terminal-3680888298-line-29)">
+</text><text class="terminal-3680888298-r2" x="0" y="752" textLength="256.2" clip-path="url(#terminal-3680888298-line-30)">archive batch cancel </text><text class="terminal-3680888298-r2" x="585.6" y="752" textLength="0" clip-path="url(#terminal-3680888298-line-30)">
+</text><text class="terminal-3680888298-r2" x="0" y="776.4" textLength="524.6" clip-path="url(#terminal-3680888298-line-31)">bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 取消此批次</text><text class="terminal-3680888298-r2" x="585.6" y="776.4" textLength="0" clip-path="url(#terminal-3680888298-line-31)">
+</text><text class="terminal-3680888298-r2" x="0" y="800.8" textLength="402.6" clip-path="url(#terminal-3680888298-line-32)">archive batch list 查看批次历史。</text><text class="terminal-3680888298-r2" x="585.6" y="800.8" textLength="0" clip-path="url(#terminal-3680888298-line-32)">
+</text><text class="terminal-3680888298-r2" x="0" y="825.2" textLength="536.8" clip-path="url(#terminal-3680888298-line-33)">archive batch show &lt;批次ID&gt; 查看候选或结果。</text><text class="terminal-3680888298-r2" x="585.6" y="825.2" textLength="0" clip-path="url(#terminal-3680888298-line-33)">
+</text>
+    </g>
+    </g>
+</svg>

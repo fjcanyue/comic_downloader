@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -34,13 +35,15 @@ class JobStore:
             self._archive_store = JobStore(self.output_path, archived=True)
         return self._archive_store
 
-    def archive(self, job_id: str) -> DownloadJob:
-        return self._move_record(job_id, restoring=False)
+    def archive(self, job_id: str, *, expected_digest: str | None = None) -> DownloadJob:
+        return self._move_record(job_id, restoring=False, expected_digest=expected_digest)
 
     def restore(self, job_id: str) -> DownloadJob:
         return self._move_record(job_id, restoring=True)
 
-    def _move_record(self, job_id: str, *, restoring: bool) -> DownloadJob:
+    def _move_record(
+        self, job_id: str, *, restoring: bool, expected_digest: str | None = None
+    ) -> DownloadJob:
         active = JobStore(self.output_path)
         archived = self.archive_view()
         source, destination = (archived, active) if restoring else (active, archived)
@@ -48,6 +51,8 @@ class JobStore:
         with active.lock(job.id):
             # Reload after locking: another process may have moved or changed the plan.
             job = source.load(job.id)
+            if expected_digest is not None and job_fingerprint(job) != expected_digest:
+                raise ValueError('任务自预览后已变化，已跳过；请重新生成批次。')
             if not restoring and (job.state != 'completed' or job.remaining):
                 raise ValueError('只能归档已完成的计划；未完成任务请先使用 retry 恢复。')
             destination.directory.mkdir(parents=True, exist_ok=True)
@@ -189,6 +194,12 @@ class JobStore:
             return job
         except (TypeError, KeyError, AttributeError, ValueError) as exc:
             raise ValueError(f'任务记录损坏或版本不支持：{exc}') from exc
+
+
+def job_fingerprint(job: DownloadJob) -> str:
+    """Compare all persisted plan fields, not just summary timestamps or counts."""
+    payload = json.dumps(asdict(job), ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+    return hashlib.sha256(payload.encode('utf-8')).hexdigest()
 
 
 def _decode_job(data: dict) -> DownloadJob:

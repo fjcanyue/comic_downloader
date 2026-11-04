@@ -18,6 +18,7 @@ from urllib3.util.retry import Retry
 from downloader.browser.manager import DriverManager
 from downloader.comic import Comic, ComicSource
 from downloader.command_prompt import create_command_prompt
+from downloader.download.archive_batch import ArchiveBatchStore
 from downloader.download.job_archive import ArchiveQuery, parse_archive_query
 from downloader.download.job_browser import (
     TASK_PAGE_SIZE,
@@ -542,13 +543,15 @@ class Shell(cmd.Cmd):
         return query
 
     def do_archive(self, arg):
-        """archive [list [页码]] [find <关键词>] 按漫画名、源代码或 ID 查找归档；archive next/prev 保留条件翻页；archive show <任务ID> [页码] 查看详情；archive restore <任务ID> 恢复；archive <任务ID> 归档已完成计划。archive 返回全部归档首页；查找不改变归档或恢复的范围，操作始终指定单个 ID，不改变漫画文件。"""
+        """archive [list [页码]] [find <关键词>] 查找归档；archive next/prev 保留条件翻页；archive show <任务ID> [页码] 查看详情；archive restore <任务ID> 恢复；archive <任务ID> 归档已完成计划。archive batch [find <关键词>] 预览当前路径下已完成计划；archive batch list [页码] 查看批次历史；archive batch show <批次ID> [页码] 查看固定候选或结果；archive batch apply <批次ID> 确认执行，archive batch cancel <批次ID> 取消未执行批次。批量条件独立于 tasks/archive 浏览筛选，不改变漫画文件。"""
         self.last_command_ok = False
         try:
             query = parse_archive_query(
                 arg.split(), self.archive_query if self.paginate_output else None
             )
-            if query.action in {'archive', 'restore'}:
+            if query.action.startswith('batch-'):
+                self._archive_batch(query)
+            elif query.action in {'archive', 'restore'}:
                 operation = (
                     self.job_store.archive if query.action == 'archive' else self.job_store.restore
                 )
@@ -565,6 +568,30 @@ class Shell(cmd.Cmd):
                 self.archive_query = self._show_archive(query)
         except (ValueError, OSError) as exc:
             self.presenter.warn(str(exc))
+
+    def _archive_batch(self, query: ArchiveQuery) -> None:
+        store = ArchiveBatchStore(self.job_store)
+        if query.action == 'batch-list':
+            batches, errors = store.list_batches()
+            self._read_page(str(query.page), len(batches), TASK_PAGE_SIZE)
+            self.presenter.archive_batches(batches, page=query.page)
+            for error in errors:
+                self.presenter.warn(f'无法读取批次：{error}')
+            self.last_command_ok = not errors
+            return
+        if query.action == 'batch-create':
+            batch = store.create(query.keyword)
+        elif query.action == 'batch-apply':
+            batch = store.apply(query.batch_id or '')
+        elif query.action == 'batch-cancel':
+            batch = store.cancel(query.batch_id or '')
+        else:
+            batch = store.load(query.batch_id or '')
+        self._read_page(str(query.page), len(batch.entries), TASK_PAGE_SIZE)
+        self.presenter.archive_batch(batch, page=query.page)
+        self.last_command_ok = (
+            batch.successful if query.action == 'batch-apply' else not batch.errors
+        )
 
     def _show_archive(self, query: ArchiveQuery) -> ArchiveQuery:
         store = self.job_store.archive_view()
