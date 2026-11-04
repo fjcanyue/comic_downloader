@@ -703,3 +703,225 @@ def test_range_wrap_resize_preserves_endpoints_and_catalog_validation_checks_mid
         assert not action.target.matches(comic)
 
     asyncio.run(exercise(scenario, state=state, output=output))
+
+
+@pytest.mark.parametrize('width', [48, 80, 120])
+def test_catalog_find_cycles_matches_and_downloads_original_chapter(width):
+    comic = comic_detail()
+    comic.books[0].vols[39].name = '星海 Special ' + '很长的标题' * 30
+    comic.books[0].vols[89].name = '星海 SPECIAL 终章'
+    state = BrowserState(items(), '漫画', 1, focus='details')
+    detail = Detail.from_comic(state.items[0], comic)
+    state.remember(state.items[0], detail)
+    output = ScreenOutput(width, 24)
+
+    async def scenario(browser, pipe, run):
+        pipe.send_text('f正篇 星海 special\r')
+        await until(lambda: detail.find_text == '正篇 星海 special' and not browser.editing)
+        assert len(detail.find_rows) == 2
+        assert browser._selected_target().arguments == '1 40 40'
+        assert '1/2' in browser._message()
+        assert len(detail.targets) == 101  # The catalog is never filtered or renumbered.
+        pipe.send_text('n')
+        await until(lambda: browser._selected_target().chapter == 90)
+        assert '2/2' in browser._message()
+        pipe.send_text('n')
+        await until(lambda: browser._selected_target().chapter == 40)
+        pipe.send_text('N')
+        await until(lambda: browser._selected_target().chapter == 90)
+        await asyncio.sleep(0.1)
+        assert browser.detail.vertical_scroll > 0
+        assert browser._range_row_style(detail.find_rows[0]) == 'class:match'
+        output.size = Size(rows=30, columns=120 if width != 120 else 48)
+        browser.app.invalidate()
+        await asyncio.sleep(0.1)
+        assert browser._selected_target().chapter == 90
+        pipe.send_text('v')
+        await until(lambda: browser.confirmation is not None)
+        assert browser.app.layout.has_focus(browser.cancel_button)
+        pipe.send_text('fgnN')  # Modal bindings must not navigate or edit the catalog.
+        await asyncio.sleep(0.05)
+        assert not browser.editing and browser.confirmation.target.chapter == 90
+        pipe.send_text('\t\r')
+        action = await asyncio.wait_for(run, 3)
+        assert action.target.arguments == '1 90 90'
+        assert action.target.chapters == (
+            (comic.books[0].vols[89].name, 'https://example.test/v/89'),
+        )
+        assert browser.worker.thread is None
+
+    asyncio.run(exercise(scenario, state=state, output=output))
+
+
+def test_jump_keeps_range_anchor_and_confirms_original_range():
+    state = BrowserState(items(), '漫画', 1, focus='details')
+    detail = Detail.from_comic(state.items[0], comic_detail())
+    state.remember(state.items[0], detail)
+
+    async def scenario(browser, pipe, run):
+        pipe.send_text('g1 20\r ')
+        await until(lambda: detail.range_start == (1, 20))
+        pipe.send_text('g1 80\r')
+        await until(lambda: browser._range_bounds() == (1, 20, 80))
+        assert '共 61 话' in browser._message()
+        pipe.send_text('v\r')
+        await until(lambda: browser.confirmation is None and not browser.editing)
+        assert detail.range_start == (1, 20)
+        pipe.send_text('v\t\r')
+        action = await asyncio.wait_for(run, 3)
+        assert action.target.arguments == '1 20 80'
+        assert len(action.target.chapters) == 61
+
+    asyncio.run(exercise(scenario, state=state))
+
+
+@pytest.mark.parametrize('text', ['0 1', '1 101', '2 1', '-1 2', '1', '1 2 3', 'd q', '9' * 5000])
+def test_invalid_jump_preserves_selection_and_allows_cancel(text):
+    state = BrowserState(items(), '漫画', 1, focus='details')
+    detail = Detail.from_comic(state.items[0], comic_detail())
+    state.remember(state.items[0], detail)
+
+    async def scenario(browser, pipe, run):
+        select_chapter(browser, detail, 1, 12)
+        pipe.send_text('g')
+        await until(lambda: browser.editing)
+        browser.catalog_input.text = text
+        pipe.send_text('\r')
+        await until(lambda: '无效位置' in state.message)
+        assert browser.editing and browser._selected_target().chapter == 12
+        assert browser.confirmation is None and browser.worker.thread is None
+        pipe.send_text('\x1b')
+        await until(lambda: not browser.editing)
+        assert not state.message
+        pipe.send_text('q')
+        assert await asyncio.wait_for(run, 3) is None
+
+    asyncio.run(exercise(scenario, state=state))
+
+
+def test_find_cancel_clear_no_matches_and_per_comic_refresh():
+    state = BrowserState(items(), '漫画', 1, focus='details')
+    detail = Detail.from_comic(state.items[0], comic_detail())
+    state.remember(state.items[0], detail)
+    other = Detail.from_comic(state.items[1], comic_detail())
+    state.remember(state.items[1], other)
+
+    async def scenario(browser, pipe, run):
+        pipe.send_text('f第99话\r')
+        await until(lambda: detail.find_text == '第99话')
+        assert browser._selected_target().chapter == 100
+        pipe.send_text('f')
+        await until(lambda: browser.editing)
+        browser.catalog_input.text = 'd q r g n 空格'
+        pipe.send_text('\x1b')
+        await until(lambda: not browser.editing)
+        assert detail.find_text == '第99话' and len(detail.find_rows) == 1
+        pipe.send_text('f')
+        await until(lambda: browser.editing)
+        browser.catalog_input.text = '不存在'
+        pipe.send_text('\r')
+        await until(lambda: detail.find_text == '不存在' and not browser.editing)
+        assert '没有匹配' in state.message and detail.find_rows == ()
+        assert browser._selected_target().chapter == 100
+        pipe.send_text('f')
+        await until(lambda: browser.editing)
+        browser.catalog_input.text = ''
+        pipe.send_text('\r')
+        await until(lambda: not browser.editing)
+        assert not detail.find_text and not detail.find_rows
+        pipe.send_text('f第99话\r\t\x1b[B\t')
+        await until(
+            lambda: state.current is not None
+            and state.current.index == 1
+            and state.focus == 'details'
+        )
+        assert not other.find_text and not other.find_rows
+        pipe.send_text('\t\x1b[A\t')
+        await until(
+            lambda: state.current is not None
+            and state.current.index == 0
+            and state.focus == 'details'
+        )
+        assert detail.find_text == '第99话' and len(detail.find_rows) == 1
+        pipe.send_text('r')
+        await until(lambda: browser._current_detail() is not detail)
+        await until(lambda: browser._current_detail().comic is not None)
+        assert not browser._current_detail().find_text
+        pipe.send_text('q')
+        assert await asyncio.wait_for(run, 3) is None
+
+    asyncio.run(exercise(scenario, state=state))
+
+
+def test_find_uses_group_name_and_jump_disambiguates_same_chapter_numbers():
+    comic = comic_detail()
+    extra = ComicBook()
+    extra.name = '番外'
+    extra.vols = [ComicVolume('第0话', 'https://example.test/extra/0')]
+    comic.books.append(extra)
+    state = BrowserState(items(), '漫画', 1, focus='details')
+    detail = Detail.from_comic(state.items[0], comic)
+    state.remember(state.items[0], detail)
+
+    async def scenario(browser, pipe, run):
+        pipe.send_text('f番外 第0话\r')
+        await until(lambda: detail.find_text == '番外 第0话')
+        assert len(detail.find_rows) == 1
+        assert browser._selected_target().arguments == '2 1 1'
+        pipe.send_text('g1 1\r')
+        await until(lambda: browser._selected_target().group == 1)
+        pipe.send_text('N')
+        await until(lambda: browser._selected_target().group == 2)
+        pipe.send_text('v\t\r')
+        action = await asyncio.wait_for(run, 3)
+        assert action.target.chapters == (('第0话', 'https://example.test/extra/0'),)
+
+    asyncio.run(exercise(scenario, state=state))
+
+
+def test_catalog_navigation_requires_loaded_details_and_excludes_report():
+    async def scenario(browser, pipe, run):
+        for key in ['f', 'g']:
+            browser.state.message = ''
+            pipe.send_text(key)
+            await until(lambda: '先按 Enter' in browser.state.message)
+            assert not browser.editing
+        pipe.send_text('\r\t')
+        await until(
+            lambda: browser._current_detail() is not None and browser._current_detail().comic
+        )
+        pipe.send_text('lg')
+        await until(lambda: browser.state.show_report and '先按 Enter' in browser.state.message)
+        assert not browser.editing
+        pipe.send_text('/漫画1\r')
+        await until(lambda: browser.state.filter_text == '漫画1')
+        assert browser.state.current.index == 1
+        pipe.send_text('q')
+        assert await asyncio.wait_for(run, 3) is None
+
+    asyncio.run(exercise(scenario))
+
+
+def test_jump_can_correct_invalid_input_and_find_typing_does_not_run_commands():
+    state = BrowserState(items(), '漫画', 1, focus='details')
+    detail = Detail.from_comic(state.items[0], comic_detail())
+    state.remember(state.items[0], detail)
+
+    async def scenario(browser, pipe, run):
+        pipe.send_text('g1 101\r')
+        await until(lambda: '无效位置' in state.message)
+        assert browser.catalog_input.text == '1 101'
+        pipe.send_text('\x7f\x7f0\r')  # Correct 101 to 10 without reopening the input.
+        await until(lambda: not browser.editing)
+        assert browser._selected_target().arguments == '1 10 10'
+        pipe.send_text('fd q r g n N / ')
+        await until(lambda: browser.catalog_input.text == 'd q r g n N / ')
+        assert browser.confirmation is None and browser.worker.thread is None
+        assert detail.range_start is None and not state.filter_text and not run.done()
+        pipe.send_text('\x1b')
+        await until(lambda: not browser.editing)
+        assert not detail.find_text
+        pipe.send_text('q')
+        assert await asyncio.wait_for(run, 3) is None
+
+    asyncio.run(exercise(scenario, state=state))

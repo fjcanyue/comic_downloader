@@ -30,8 +30,23 @@ class ScreenOutput(DummyOutput):
         return Size(rows=30, columns=self.width)
 
 
+def screen_suffix(width, confirmation, chapter, chapter_range, catalog_find):
+    if catalog_find:
+        return f'find-{width}' + ('-jump' if catalog_find == 'jump' else '')
+    if chapter_range:
+        return f'range-{width}' + ('-confirm' if confirmation else '')
+    if chapter:
+        return 'chapter-confirm' if confirmation else 'chapter'
+    return 'confirm' if confirmation else ('wide' if width >= WIDE_COLUMNS else 'narrow')
+
+
 async def render(  # noqa: PLR0915 - render and export one complete demo screen
-    width: int, *, confirmation: bool = False, chapter: bool = False, chapter_range: bool = False
+    width: int,
+    *,
+    confirmation: bool = False,
+    chapter: bool = False,
+    chapter_range: bool = False,
+    catalog_find: str = '',
 ) -> None:
     items = tuple(
         SearchItem(i, 'demo', f'https://example.test/comic/{i}', name, '演示作者')
@@ -50,6 +65,9 @@ async def render(  # noqa: PLR0915 - render and export one complete demo screen
         ComicVolume(f'第 {i + 1} 话 · 新的旅程', f'https://example.test/v/{i}') for i in range(50)
     ]
     comic.books = [book]
+    if catalog_find:
+        book.vols[39].name = '第 40 话 · 故乡的线索'
+        book.vols[44].name = '第 45 话 · 重返故乡'
     detail = Detail.from_comic(items[0], comic)
     state.remember(items[0], detail)
     worker = PreviewWorker(lambda item, stop: comic)
@@ -60,6 +78,13 @@ async def render(  # noqa: PLR0915 - render and export one complete demo screen
         task = asyncio.create_task(browser.app.run_async(pre_run=browser.start))
         try:
             await asyncio.sleep(0.15)
+            if catalog_find:
+                browser._focus('details')
+                pipe.send_text('f故乡\r')
+                await asyncio.sleep(0.15)
+                if catalog_find == 'jump':
+                    pipe.send_text('g1 45')
+                    await asyncio.sleep(0.15)
             if chapter:
                 browser._focus('details')
                 browser.detail_control.wrapped()
@@ -102,11 +127,7 @@ async def render(  # noqa: PLR0915 - render and export one complete demo screen
                 _environ={},
             )
             console.print(text, end='', soft_wrap=True)
-            suffix = 'confirm' if confirmation else ('wide' if width >= WIDE_COLUMNS else 'narrow')
-            if chapter:
-                suffix = 'chapter-confirm' if confirmation else 'chapter'
-            if chapter_range:
-                suffix = f'range-{width}' + ('-confirm' if confirmation else '')
+            suffix = screen_suffix(width, confirmation, chapter, chapter_range, catalog_find)
             svg = console.export_svg(title='漫画下载器 · 键盘浏览 · 演示数据')
             Path(__file__).with_name(f'search-browser-{suffix}.svg').write_text(
                 '\n'.join(line.rstrip() for line in svg.splitlines()) + '\n', encoding='utf-8'
@@ -118,6 +139,11 @@ async def render(  # noqa: PLR0915 - render and export one complete demo screen
 
 
 async def main() -> None:
+    if '--find' in sys.argv:
+        for width in (48, 80, 120):
+            await render(width, catalog_find='find')
+        await render(48, catalog_find='jump')
+        return
     await render(120)
     await render(80)
     await render(80, confirmation=True)

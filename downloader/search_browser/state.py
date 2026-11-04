@@ -115,6 +115,29 @@ class Detail:
     row: int = 0
     targets: dict[int, tuple[int, int | None]] = field(default_factory=dict)
     range_start: tuple[int, int] | None = None
+    find_text: str = ''
+    find_rows: tuple[int, ...] = ()
+
+    def find_chapters(self, text: str) -> None:
+        """Find chapter rows without filtering or renumbering the catalog."""
+        self.find_text = text.strip()
+        terms = self.find_text.casefold().split()
+        if not terms or self.comic is None:
+            self.find_rows = ()
+            return
+        self.find_rows = tuple(
+            row
+            for row, (group, chapter) in self.targets.items()
+            if chapter is not None
+            and all(
+                term
+                in plain(
+                    f'{self.comic.books[group - 1].name} '
+                    f'{self.comic.books[group - 1].vols[chapter - 1].name}'
+                ).casefold()
+                for term in terms
+            )
+        )
 
     @classmethod
     def from_comic(cls, item: SearchItem, comic: Comic) -> Detail:

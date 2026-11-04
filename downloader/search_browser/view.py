@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import sys
+from bisect import bisect_left, bisect_right
 from queue import Empty
 
 from prompt_toolkit.application import Application
@@ -37,6 +39,7 @@ from downloader.search_browser.state import (
 )
 
 WIDE_COLUMNS = 110
+COMPACT_COLUMNS = 80
 MIN_COLUMNS = 48
 MIN_ROWS = 18
 WIDE_ROWS = 20
@@ -64,6 +67,7 @@ class SearchBrowser:
         self.overwrite = overwrite
         self.tokens: dict[tuple[str, str], int] = {}
         self.editing = False
+        self.edit_mode = 'filter'
         self.confirmation: DownloadAction | None = None
         self.confirm_lines: list[str] = []
         self.confirm_row = 0
@@ -109,6 +113,12 @@ class SearchBrowser:
         self.filter_input = TextArea(
             height=1, prompt='筛选：', multiline=False, accept_handler=self._apply_filter
         )
+        self.catalog_input = TextArea(
+            height=1,
+            prompt=lambda: '章节查找：' if self.edit_mode == 'find' else '跳转 卷 话：',
+            multiline=False,
+            accept_handler=self._apply_catalog_input,
+        )
         self.cancel_button = Button('取消', handler=self._cancel_download)
         self.download_button = Button('确认下载', handler=self._accept_download)
         self.confirm_control = LinesControl(
@@ -150,7 +160,14 @@ class SearchBrowser:
                 [
                     Window(FormattedTextControl(self._header), height=1, style='class:header'),
                     DynamicContainer(self._panels),
-                    ConditionalContainer(self.filter_input, Condition(lambda: self.editing)),
+                    ConditionalContainer(
+                        self.filter_input,
+                        Condition(lambda: self.editing and self.edit_mode == 'filter'),
+                    ),
+                    ConditionalContainer(
+                        self.catalog_input,
+                        Condition(lambda: self.editing and self.edit_mode != 'filter'),
+                    ),
                     Window(FormattedTextControl(self._message), height=1),
                     Window(
                         FormattedTextControl(self._footer),
@@ -179,6 +196,7 @@ class SearchBrowser:
                 {
                     'selected': 'bg:#008787 #ffffff bold',
                     'range': 'bg:#005f5f #ffffff',
+                    'match': 'bg:#5f5f00 #ffffff',
                     'header': 'bg:#005f5f #ffffff',
                     'footer': 'bg:#303030 #ffffff',
                     'frame.label': '#00afaf bold',
@@ -224,12 +242,20 @@ class SearchBrowser:
         if self.confirmation is not None:
             return '↑↓ / PgUp PgDn 滚动说明 · Tab/←→ 选择按钮\nEnter 执行当前按钮 · Esc 取消下载'
         if self.editing:
-            return 'Enter 应用筛选 · Esc 取消编辑（d/q 在此处仅输入文字）'
+            return {
+                'find': '卷名/话名，多词全部匹配；留空清除\nEnter 定位 · Esc 取消',
+                'jump': '卷序号 话序号，如 1 80（原序号）\nEnter 跳转 · Esc 取消；保留范围起点',
+                'filter': 'Enter 应用筛选 · Esc 取消编辑（d/q 在此处仅输入文字）',
+            }[self.edit_mode]
         size = self.app.output.get_size()
         if size.columns < MIN_COLUMNS or size.rows < MIN_ROWS:
             return '窗口较小：Tab 切换单面板 · Enter 详情 · Esc 返回；放大可分栏/下载'
         if self.state.focus == 'details' and not self.state.show_report:
-            return '↑↓/翻页 选择 · 空格 标记/清除起点 · v 下载所选\nTab 切区 · d 整本 · r 刷新 · l 摘要 · Esc/q 返回'
+            return (
+                'f 查话 · n/N 切换 · g 跳转 · v 下载\n空格 起点 · Tab 切区 · Esc/q 返回'
+                if size.columns < COMPACT_COLUMNS
+                else 'f 查话 · n/N 下/上项 · g 跳转 · 空格 起点 · v 下载\n↑↓/翻页 移动 · Tab 切区 · r 刷新 · Esc/q 返回'
+            )
         return '↑↓ 选择 / PgUp PgDn 翻屏 · Enter 详情 · d 整本 · v 卷/话\nTab 切区 · / 筛选 · r 刷新 · l 下载摘要 · Esc/q 返回'
 
     def _current_detail(self) -> Detail | None:
@@ -254,6 +280,8 @@ class SearchBrowser:
             group, start, end = bounds
             if position[0] == group and position[1] is not None and start <= position[1] <= end:
                 return 'class:range'
+        if detail and row in detail.find_rows and not self.state.show_report:
+            return 'class:match'
         return ''
 
     def _message(self) -> str:
@@ -272,7 +300,82 @@ class SearchBrowser:
                 return f'卷 {group} · {start}–{end} 话 · 共 {end - start + 1} 话；v 确认 / 空格清除'
             group, start = detail.range_start
             return f'起点：卷 {group} 第 {start} 话；请选同卷终点，或空格清除'
+        if (
+            self.state.focus == 'details'
+            and not self.state.show_report
+            and detail
+            and detail.find_text
+        ):
+            row = self.detail_control.source_row()
+            position = detail.find_rows.index(row) + 1 if row in detail.find_rows else 0
+            return (
+                f'查话 {position}/{len(detail.find_rows)} · {plain(detail.find_text)}'
+                ' · n/N 切换；f 修改/清空'
+            )
         return plain(self.state.message)
+
+    def _edit_catalog(self, mode: str) -> None:
+        detail = self._current_detail()
+        if (
+            self.state.focus != 'details'
+            or self.state.show_report
+            or detail is None
+            or detail.comic is None
+        ):
+            self.state.message = '请先按 Enter 加载详情，再按 Tab 切入详情区查找或跳转。'
+            return
+        self.edit_mode = mode
+        self.editing = True
+        self.catalog_input.text = detail.find_text if mode == 'find' else ''
+        self.catalog_input.buffer.cursor_position = len(self.catalog_input.text)
+        self.state.message = ''
+        self.app.layout.focus(self.catalog_input)
+
+    def _locate_row(self, row: int) -> None:
+        self.detail_control.wrapped()
+        self._set_detail_row(self.detail_control.source_rows.index(row))
+        self.state.message = ''
+
+    def _find_next(self, *, backwards: bool = False, include_current: bool = False) -> None:
+        detail = self._current_detail()
+        if self.state.focus != 'details' or self.state.show_report or detail is None:
+            return
+        if not detail.find_rows:
+            self.state.message = '没有匹配章节；按 f 修改或清空查找。'
+            return
+        row = self.detail_control.source_row()
+        if backwards:
+            index = bisect_left(detail.find_rows, row) - 1
+        else:
+            index = (bisect_left if include_current else bisect_right)(detail.find_rows, row)
+        self._locate_row(detail.find_rows[index % len(detail.find_rows)])
+
+    def _apply_catalog_input(self, buffer) -> bool:
+        detail = self._current_detail()
+        if detail is None or detail.comic is None:
+            self.editing = False
+            self._focus(self.state.focus)
+            return True
+        if self.edit_mode == 'find':
+            detail.find_chapters(buffer.text)
+            if detail.find_text:
+                self._find_next(include_current=True)
+            else:
+                self.state.message = '已清除章节查找；目录和范围起点保持不变。'
+        else:
+            row = None
+            # Bound input length before int conversion, including pasted text.
+            match = re.fullmatch(r'([0-9]{1,9})\s+([0-9]{1,9})', buffer.text.strip())
+            if match:
+                target = (int(match[1]), int(match[2]))
+                row = next((r for r, value in detail.targets.items() if value == target), None)
+            if row is None:
+                self.state.message = '无效位置：请输入存在的卷和话序号，如 1 80；Esc 取消。'
+                return True
+            self._locate_row(row)
+        self.editing = False
+        self._focus('details')
+        return True
 
     def _mark_range(self) -> None:
         detail = self._current_detail()
@@ -344,6 +447,7 @@ class SearchBrowser:
             if self.state.current != old:
                 self.placeholder_row = 0
                 self.detail.vertical_scroll = 0
+                self.state.message = ''
         else:
             self._scroll_detail(amount)
             detail = self._current_detail()
@@ -534,10 +638,21 @@ class SearchBrowser:
 
         @keys.add('/', filter=normal)
         def find(event: KeyPressEvent) -> None:
+            self.edit_mode = 'filter'
             self.editing = True
             self.filter_input.text = self.state.filter_text
             self.filter_input.buffer.cursor_position = len(self.filter_input.text)
             self.app.layout.focus(self.filter_input)
+
+        @keys.add('f', filter=normal)
+        @keys.add('g', filter=normal)
+        def catalog_input(event: KeyPressEvent) -> None:
+            self._edit_catalog('find' if event.key_sequence[0].key == 'f' else 'jump')
+
+        @keys.add('n', filter=normal)
+        @keys.add('N', filter=normal)
+        def next_match(event: KeyPressEvent) -> None:
+            self._find_next(backwards=event.key_sequence[0].key == 'N')
 
         @keys.add('l', filter=normal)
         def report(event: KeyPressEvent) -> None:
@@ -556,6 +671,8 @@ class SearchBrowser:
                 self._cancel_download()
             elif self.editing:
                 self.editing = False
+                if self.edit_mode != 'filter':
+                    self.state.message = ''
                 self._focus(self.state.focus)
             else:
                 self._finish()
