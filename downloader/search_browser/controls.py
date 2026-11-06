@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from bisect import bisect_right
 from collections.abc import Callable
 
 from prompt_toolkit.data_structures import Point
@@ -51,6 +52,9 @@ class LinesControl(UIControl):
         highlight: Callable[[], bool] | None = None,
         on_reflow: Callable[[int], None] | None = None,
         row_style: Callable[[int], str] | None = None,
+        visible_rows: Callable[[], tuple[int, ...] | None] | None = None,
+        line_text: Callable[[int, str], str] | None = None,
+        anchor: Callable[[], int | None] | None = None,
     ):
         self.lines = lines
         self.row = row
@@ -62,27 +66,45 @@ class LinesControl(UIControl):
         self.highlight = highlight
         self.on_reflow = on_reflow
         self.row_style = row_style
+        self.visible_rows = visible_rows
+        self.visible_source_rows: tuple[int, ...] | None = None
+        self.line_text = line_text
+        self.anchor = anchor
 
     def is_focusable(self) -> bool:
         return self.focusable
 
     def wrapped(self, width: int | None = None) -> list[str]:
         source = self.lines()
+        visible = self.visible_rows() if self.visible_rows else None
         width = max(2, width if width is not None else self.width)
-        if source is not self.source_lines or width != self.width:
-            anchor = None
+        if (
+            source is not self.source_lines
+            or visible is not self.visible_source_rows
+            or width != self.width
+        ):
+            anchor = self.anchor() if self.anchor else None
             if source is self.source_lines and self.source_rows:
                 anchor = self.source_rows[min(max(0, self.row()), len(self.source_rows) - 1)]
             self.source_lines = source
+            self.visible_source_rows = visible
             self.width = width
             self.wrapped_lines = []
             self.source_rows = []
-            for index, line in enumerate(source or ['']):
+            rows = visible if visible is not None else range(len(source or ['']))
+            for index in rows:
+                line = source[index] if source else ''
+                if self.line_text:
+                    line = self.line_text(index, line)
                 parts = chop_cells(plain(line), width) or ['']
                 self.wrapped_lines.extend(parts)
                 self.source_rows.extend([index] * len(parts))
             if anchor is not None and self.on_reflow is not None:
-                self.on_reflow(self.source_rows.index(anchor))
+                # A hidden chapter anchors to its visible group header, including after reflow.
+                visible_anchor = self.source_rows[
+                    max(0, bisect_right(self.source_rows, anchor) - 1)
+                ]
+                self.on_reflow(self.source_rows.index(visible_anchor))
         return self.wrapped_lines
 
     def source_row(self) -> int:

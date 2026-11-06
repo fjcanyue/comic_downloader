@@ -117,6 +117,29 @@ class Detail:
     range_start: tuple[int, int] | None = None
     find_text: str = ''
     find_rows: tuple[int, ...] = ()
+    collapsed_groups: frozenset[int] = frozenset()
+    visible_rows: tuple[int, ...] | None = None
+    logical_row: int | None = None
+
+    def fold_groups(self, groups: set[int], *, collapsed: bool) -> None:
+        """Hide chapter rows only; canonical catalog rows and download indices never change."""
+        available = {group for group, chapter in self.targets.values() if chapter is not None}
+        groups = groups & available
+        updated = self.collapsed_groups | groups if collapsed else self.collapsed_groups - groups
+        if updated == self.collapsed_groups:
+            return
+        self.collapsed_groups = frozenset(updated)
+        self.visible_rows = (
+            tuple(
+                row
+                for row in range(len(self.lines))
+                if row not in self.targets
+                or self.targets[row][1] is None
+                or self.targets[row][0] not in self.collapsed_groups
+            )
+            if self.collapsed_groups
+            else None
+        )
 
     def find_chapters(self, text: str) -> None:
         """Find chapter rows without filtering or renumbering the catalog."""

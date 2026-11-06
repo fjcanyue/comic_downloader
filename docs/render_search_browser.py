@@ -40,13 +40,14 @@ def screen_suffix(width, confirmation, chapter, chapter_range, catalog_find):
     return 'confirm' if confirmation else ('wide' if width >= WIDE_COLUMNS else 'narrow')
 
 
-async def render(  # noqa: PLR0915 - render and export one complete demo screen
+async def render(  # noqa: PLR0912, PLR0913, PLR0915 - render and export one complete demo screen
     width: int,
     *,
     confirmation: bool = False,
     chapter: bool = False,
     chapter_range: bool = False,
     catalog_find: str = '',
+    folded: bool = False,
 ) -> None:
     items = tuple(
         SearchItem(i, 'demo', f'https://example.test/comic/{i}', name, '演示作者')
@@ -65,6 +66,17 @@ async def render(  # noqa: PLR0915 - render and export one complete demo screen
         ComicVolume(f'第 {i + 1} 话 · 新的旅程', f'https://example.test/v/{i}') for i in range(50)
     ]
     comic.books = [book]
+    if folded:
+        for group, (title, count) in enumerate(
+            [('番外 · 故乡来信', 8), ('特别篇', 3), ('待更新卷', 0)], 2
+        ):
+            extra = ComicBook()
+            extra.name = title
+            extra.vols = [
+                ComicVolume(f'第 {i} 话 · 故乡的线索', f'https://example.test/{group}/{i}')
+                for i in range(1, count + 1)
+            ]
+            comic.books.append(extra)
     if catalog_find:
         book.vols[39].name = '第 40 话 · 故乡的线索'
         book.vols[44].name = '第 45 话 · 重返故乡'
@@ -78,6 +90,18 @@ async def render(  # noqa: PLR0915 - render and export one complete demo screen
         task = asyncio.create_task(browser.app.run_async(pre_run=browser.start))
         try:
             await asyncio.sleep(0.15)
+            if folded:
+                browser._focus('details')
+                pipe.send_text('z')
+                await asyncio.sleep(0.15)
+                if confirmation:
+                    row = next(row for row, target in detail.targets.items() if target == (1, None))
+                    detail.row = browser.detail_control.source_rows.index(row)
+                else:
+                    pipe.send_text('g2 5\r')
+                    await asyncio.sleep(0.15)
+                browser.app.invalidate()
+                await asyncio.sleep(0.15)
             if catalog_find:
                 browser._focus('details')
                 pipe.send_text('f故乡\r')
@@ -95,7 +119,7 @@ async def render(  # noqa: PLR0915 - render and export one complete demo screen
                 browser.app.invalidate()
                 await asyncio.sleep(0.15)
             if confirmation:
-                pipe.send_text('v' if chapter else 'd')
+                pipe.send_text('v' if chapter or folded else 'd')
                 await asyncio.sleep(0.15)
             screen = browser.app.renderer.last_rendered_screen
             if screen is None:
@@ -128,6 +152,8 @@ async def render(  # noqa: PLR0915 - render and export one complete demo screen
             )
             console.print(text, end='', soft_wrap=True)
             suffix = screen_suffix(width, confirmation, chapter, chapter_range, catalog_find)
+            if folded:
+                suffix = f'fold-{width}' + ('-confirm' if confirmation else '')
             svg = console.export_svg(title='漫画下载器 · 键盘浏览 · 演示数据')
             Path(__file__).with_name(f'search-browser-{suffix}.svg').write_text(
                 '\n'.join(line.rstrip() for line in svg.splitlines()) + '\n', encoding='utf-8'
@@ -139,6 +165,11 @@ async def render(  # noqa: PLR0915 - render and export one complete demo screen
 
 
 async def main() -> None:
+    if '--fold' in sys.argv:
+        for width in (48, 80, 120):
+            await render(width, folded=True)
+        await render(80, folded=True, confirmation=True)
+        return
     if '--find' in sys.argv:
         for width in (48, 80, 120):
             await render(width, catalog_find='find')

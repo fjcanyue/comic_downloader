@@ -925,3 +925,260 @@ def test_jump_can_correct_invalid_input_and_find_typing_does_not_run_commands():
         assert await asyncio.wait_for(run, 3) is None
 
     asyncio.run(exercise(scenario, state=state))
+
+
+def folded_catalog():
+    comic = comic_detail()
+    extra, empty = ComicBook(), ComicBook()
+    extra.name, empty.name = '番外', '空卷'
+    extra.vols = [ComicVolume('相同标题', f'https://example.test/extra/{i}') for i in range(20)]
+    comic.books[0].vols[39].name = '相同标题'
+    comic.books += [extra, empty]
+    state = BrowserState(items(), '漫画', 1, focus='details')
+    detail = Detail.from_comic(state.items[0], comic)
+    state.remember(state.items[0], detail)
+    return state, detail
+
+
+@pytest.mark.parametrize('width', [48, 80, 120])
+def test_fold_selected_chapter_anchors_header_and_downloads_complete_original_volume(width):
+    state, detail = folded_catalog()
+    original_lines, original_targets = detail.lines.copy(), detail.targets.copy()
+    output = ScreenOutput(width, 30)
+
+    async def scenario(browser, pipe, run):
+        assert detail.comic is not None
+        select_chapter(browser, detail, 1, 40)
+        pipe.send_text('\x1b[D')
+        await until(lambda: detail.collapsed_groups == {1})
+        assert browser._selected_target().arguments == '1'
+        assert len(browser._selected_target().chapters) == 100
+        assert '已收起' in browser._detail_title()
+        assert any('已收起 · → 展开' in line for line in browser.detail_control.wrapped())
+        assert all(
+            detail.targets.get(row, (0, None))[1] is None or detail.targets[row][0] != 1
+            for row in browser.detail_control.source_rows
+        )
+        output.size = Size(rows=30, columns=120 if width != 120 else 48)
+        browser.app.invalidate()
+        await asyncio.sleep(0.1)
+        assert browser._selected_target().arguments == '1'
+        pipe.send_text('v')
+        await until(lambda: browser.confirmation is not None)
+        frozen = browser.confirmation
+        assert frozen.target == CatalogTarget.from_comic(detail.comic, 1, None)
+        pipe.send_text('zZ')  # Folding commands do not apply inside confirmation.
+        await asyncio.sleep(0.05)
+        assert detail.collapsed_groups == {1}
+        pipe.send_text('\r')
+        await until(lambda: browser.confirmation is None)
+        assert detail.collapsed_groups == {1} and not run.done()
+        pipe.send_text('v\x1b[C\r')  # Right selects confirm, without expanding the volume.
+        action = await asyncio.wait_for(run, 3)
+        assert action == frozen and detail.collapsed_groups == {1}
+        assert detail.lines == original_lines and detail.targets == original_targets
+        assert browser.worker.thread is None
+        detail.comic.books[0].vols[49].url += '/changed'
+        assert not action.target.matches(detail.comic)
+
+    asyncio.run(exercise(scenario, state=state, output=output))
+
+
+@pytest.mark.parametrize('width', [48, 80, 120])
+def test_fold_all_then_find_cycles_hidden_chapters_and_opens_only_hit_group(width):
+    state, detail = folded_catalog()
+
+    async def scenario(browser, pipe, run):
+        pipe.send_text('z')
+        await until(lambda: detail.collapsed_groups == {1, 2})
+        assert len(browser.detail_control.wrapped()) < 30
+        assert len(detail.targets) == 123  # Includes all chapters and the empty group.
+        pipe.send_text('f相同标题\r')
+        await until(lambda: not browser.editing and detail.find_text == '相同标题')
+        assert len(detail.find_rows) == 21
+        assert browser._selected_target().arguments == '1 40 40'
+        assert detail.collapsed_groups == {2}
+        pipe.send_text('n')
+        await until(lambda: browser._selected_target().group == 2)
+        assert not detail.collapsed_groups
+        assert browser._selected_target().arguments == '2 1 1'
+        pipe.send_text('zN')
+        await until(lambda: detail.collapsed_groups == {2})
+        assert browser._selected_target().arguments == '1 40 40'
+        pipe.send_text('z\x1b[HN')
+        await until(lambda: detail.collapsed_groups == {1})
+        assert browser._selected_target().arguments == '2 20 20'  # Backwards wraps full catalog.
+        assert '21/21' in browser._message()
+        pipe.send_text('v\t\r')
+        action = await asyncio.wait_for(run, 3)
+        assert action.target.arguments == '2 20 20'
+        assert action.target.chapters == (('相同标题', 'https://example.test/extra/19'),)
+        assert browser.worker.thread is None
+
+    asyncio.run(exercise(scenario, state=state, output=ScreenOutput(width, 30)))
+
+
+def test_fold_and_jump_preserve_range_start_without_allowing_header_as_endpoint():
+    state, detail = folded_catalog()
+
+    async def scenario(browser, pipe, run):
+        pipe.send_text('g1 20\r z')
+        await until(lambda: detail.collapsed_groups == {1, 2})
+        assert detail.range_start == (1, 20)
+        pipe.send_text('v')
+        await until(lambda: '同一卷' in state.message)
+        assert browser.confirmation is None
+        pipe.send_text('g2 5\rv')
+        await until(lambda: not browser.editing and detail.collapsed_groups == {1})
+        assert detail.range_start == (1, 20) and browser.confirmation is None
+        pipe.send_text('g1 80\r')
+        await until(lambda: browser._range_bounds() == (1, 20, 80))
+        assert not detail.collapsed_groups
+        pipe.send_text('v\t\r')
+        action = await asyncio.wait_for(run, 3)
+        assert action.target.arguments == '1 20 80' and len(action.target.chapters) == 61
+        assert browser.worker.thread is None
+
+    asyncio.run(exercise(scenario, state=state))
+
+
+def test_expand_all_preserves_later_group_chapter_and_wrapped_header_identity():
+    state, detail = folded_catalog()
+    assert detail.comic is not None
+    detail.comic.books[1].name = '很长的卷名' * 30
+    detail = Detail.from_comic(state.items[0], detail.comic)
+    state.remember(state.items[0], detail)
+
+    async def scenario(browser, pipe, run):
+        pipe.send_text('z')
+        await until(lambda: detail.collapsed_groups == {1, 2})
+        select_chapter(browser, detail, 2, None)
+        browser._scroll_detail(1)  # Continuation of a wrapped header is still the same volume.
+        assert browser._selected_target().arguments == '2'
+        pipe.send_text('\x1b[C')
+        await until(lambda: detail.collapsed_groups == {1})
+        assert browser._selected_target().arguments == '2'
+        select_chapter(browser, detail, 2, 15)
+        pipe.send_text('Z')
+        await until(lambda: not detail.collapsed_groups)
+        assert browser._selected_target().arguments == '2 15 15'
+        pipe.send_text('v\t\r')
+        action = await asyncio.wait_for(run, 3)
+        assert action.target.arguments == '2 15 15'
+
+    asyncio.run(exercise(scenario, state=state, output=ScreenOutput(48, 30)))
+
+
+def test_folding_is_cached_per_comic_survives_filter_and_clears_on_refresh():
+    state, detail = folded_catalog()
+    other = Detail.from_comic(state.items[1], comic_detail())
+    state.remember(state.items[1], other)
+
+    async def scenario(browser, pipe, run):
+        pipe.send_text('z')
+        await until(lambda: detail.collapsed_groups == {1, 2})
+        select_chapter(browser, detail, 2, None)
+        pipe.send_text('/漫画1\r\t')
+        await until(lambda: state.current and state.current.index == 1 and state.focus == 'details')
+        assert not other.collapsed_groups
+        assert len(browser.detail_control.wrapped()) > 100
+        pipe.send_text('/\x15漫画0\r\t')
+        await until(lambda: state.current and state.current.index == 0 and state.focus == 'details')
+        assert detail.collapsed_groups == {1, 2}
+        assert browser._selected_target().arguments == '2'
+        pipe.send_text('r')
+        await until(
+            lambda: browser._current_detail() is not detail and browser._current_detail().comic
+        )
+        assert not browser._current_detail().collapsed_groups
+        assert browser._current_detail().visible_rows is None
+        pipe.send_text('q')
+        assert await asyncio.wait_for(run, 3) is None
+
+    asyncio.run(exercise(scenario, state=state))
+
+
+def test_fold_controls_ignore_inputs_reports_and_non_catalog_rows():
+    state, detail = folded_catalog()
+
+    async def scenario(browser, pipe, run):
+        pipe.send_text('\x1b[D')
+        await until(lambda: '请选中卷名' in state.message)
+        assert not detail.collapsed_groups
+        pipe.send_text('fzZ\x1b[D\x1b[C')
+        await until(lambda: browser.catalog_input.text == 'zZ')
+        assert not detail.collapsed_groups and browser.editing
+        pipe.send_text('\x1b')
+        await until(lambda: not browser.editing)
+        pipe.send_text('z')
+        await until(lambda: detail.collapsed_groups == {1, 2})
+        select_chapter(browser, detail, 3, None)
+        pipe.send_text('\x1b[Dv')
+        await until(lambda: '没有可下载' in state.message)
+        assert detail.collapsed_groups == {1, 2} and browser.confirmation is None
+        state.report = [f'摘要 {i}' for i in range(150)]
+        pipe.send_text('lZ')
+        await until(lambda: state.show_report and '先按 Enter' in state.message)
+        assert len(browser.detail_control.wrapped()) == 150
+        assert detail.collapsed_groups == {1, 2}
+        pipe.send_text('q')
+        assert await asyncio.wait_for(run, 3) is None
+        assert browser.worker.thread is None
+
+    asyncio.run(exercise(scenario, state=state))
+
+
+def test_folded_selection_survives_resize_while_another_comic_is_visible():
+    state, first = folded_catalog()
+    assert first.comic is not None
+    first.comic.books[0].name = '很长的正篇卷名' * 60
+    first = Detail.from_comic(state.items[0], first.comic)
+    state.remember(state.items[0], first)
+    state.remember(state.items[1], Detail.from_comic(state.items[1], comic_detail()))
+    output = ScreenOutput(48, 30)
+
+    async def scenario(browser, pipe, run):
+        pipe.send_text('z')
+        await until(lambda: first.collapsed_groups == {1, 2})
+        select_chapter(browser, first, 2, None)
+        pipe.send_text('\t\x1b[B\t')
+        await until(lambda: state.current and state.current.index == 1 and state.focus == 'details')
+        output.size = Size(rows=30, columns=120)
+        browser.app.invalidate()
+        await until(lambda: browser.detail_control.width > 48)
+        pipe.send_text('\t\x1b[A\t')
+        await until(lambda: state.current and state.current.index == 0 and state.focus == 'details')
+        assert first.collapsed_groups == {1, 2}
+        assert browser._selected_target().arguments == '2'
+        pipe.send_text('v\t\r')
+        action = await asyncio.wait_for(run, 3)
+        assert first.comic is not None
+        assert action.target == CatalogTarget.from_comic(first.comic, 2, None)
+
+    asyncio.run(exercise(scenario, state=state, output=output))
+
+
+def test_reopening_folded_browser_at_new_width_retains_catalog_selection():
+    state, detail = folded_catalog()
+    assert detail.comic is not None
+    detail.comic.books[0].name = '长标题' * 60
+    detail = Detail.from_comic(state.items[0], detail.comic)
+    state.remember(state.items[0], detail)
+
+    async def close(browser, pipe, run):
+        pipe.send_text('z')
+        await until(lambda: detail.collapsed_groups == {1, 2})
+        select_chapter(browser, detail, 2, None)
+        pipe.send_text('q')
+        assert await asyncio.wait_for(run, 3) is None
+
+    async def reopen(browser, pipe, run):
+        assert detail.collapsed_groups == {1, 2}
+        assert browser._selected_target().arguments == '2'
+        pipe.send_text('v\t\r')
+        action = await asyncio.wait_for(run, 3)
+        assert action.target.arguments == '2' and len(action.target.chapters) == 20
+        assert browser.worker.thread is None
+
+    asyncio.run(exercise(close, state=state, output=ScreenOutput(48, 30)))
+    asyncio.run(exercise(reopen, state=state, output=ScreenOutput(120, 30)))

@@ -89,6 +89,9 @@ class SearchBrowser:
             highlight=lambda: self.state.focus == 'details' and not self.state.show_report,
             on_reflow=self._set_detail_row,
             row_style=self._range_row_style,
+            visible_rows=self._detail_visible_rows,
+            line_text=self._detail_line_text,
+            anchor=self._detail_anchor,
         )
         self.detail = Window(
             self.detail_control,
@@ -171,7 +174,7 @@ class SearchBrowser:
                     Window(FormattedTextControl(self._message), height=1),
                     Window(
                         FormattedTextControl(self._footer),
-                        height=2,
+                        height=lambda: 3 if self._catalog_footer() else 2,
                         wrap_lines=True,
                         style='class:footer',
                     ),
@@ -232,8 +235,19 @@ class SearchBrowser:
         return ('> ' if self.state.focus == 'results' else '') + '搜索结果'
 
     def _detail_title(self) -> str:
-        return ('> ' if self.state.focus == 'details' else '') + (
-            '下载摘要' if self.state.show_report else '漫画详情'
+        title = '下载摘要' if self.state.show_report else '漫画详情'
+        detail = self._current_detail()
+        if detail and detail.collapsed_groups and not self.state.show_report:
+            title += f' · {len(detail.collapsed_groups)} 卷已收起'
+        return ('> ' if self.state.focus == 'details' else '') + title
+
+    def _catalog_footer(self) -> bool:
+        return (
+            self.state.focus == 'details'
+            and not self.state.show_report
+            and not self.editing
+            and self.confirmation is None
+            and not self.closing
         )
 
     def _footer(self) -> str:
@@ -252,15 +266,65 @@ class SearchBrowser:
             return '窗口较小：Tab 切换单面板 · Enter 详情 · Esc 返回；放大可分栏/下载'
         if self.state.focus == 'details' and not self.state.show_report:
             return (
-                'f 查话 · n/N 切换 · g 跳转 · v 下载\n空格 起点 · Tab 切区 · Esc/q 返回'
+                'f 查话 · n/N 切换 · g 跳转 · v 下载\n←/→ 收展卷 · z/Z 全部收展\n空格 起点 · Tab 切区 · Esc/q 返回'
                 if size.columns < COMPACT_COLUMNS
-                else 'f 查话 · n/N 下/上项 · g 跳转 · 空格 起点 · v 下载\n↑↓/翻页 移动 · Tab 切区 · r 刷新 · Esc/q 返回'
+                else '↑↓/翻页 移动 · ←/→ 收展卷 · z/Z 全部收展\nf 查话 · n/N 下/上项 · g 跳转 · 空格 起点 · v 下载\nTab 切区 · r 刷新 · Esc/q 返回'
             )
         return '↑↓ 选择 / PgUp PgDn 翻屏 · Enter 详情 · d 整本 · v 卷/话\nTab 切区 · / 筛选 · r 刷新 · l 下载摘要 · Esc/q 返回'
 
     def _current_detail(self) -> Detail | None:
         item = self.state.current
         return self.state.details.get(item.key) if item else None
+
+    def _detail_visible_rows(self) -> tuple[int, ...] | None:
+        detail = self._current_detail()
+        return detail.visible_rows if detail and not self.state.show_report else None
+
+    def _detail_anchor(self) -> int | None:
+        detail = self._current_detail()
+        return detail.logical_row if detail and not self.state.show_report else None
+
+    def _remember_detail_row(self) -> None:
+        detail = self._current_detail()
+        if (
+            detail
+            and not self.state.show_report
+            and self.detail_control.source_lines is detail.lines
+        ):
+            detail.logical_row = self.detail_control.source_row()
+
+    def _detail_line_text(self, row: int, line: str) -> str:
+        detail = self._current_detail()
+        position = detail.targets.get(row) if detail and not self.state.show_report else None
+        if detail and detail.comic and position and position[1] is None:
+            if not detail.comic.books[position[0] - 1].vols:
+                return line
+            marker = '已收起 · → 展开' if position[0] in detail.collapsed_groups else '← 收起'
+            return f'{line} · {marker}'
+        return line
+
+    def _fold_groups(self, *, collapsed: bool, all_groups: bool = False) -> None:
+        detail = self._current_detail()
+        if (
+            self.state.focus != 'details'
+            or self.state.show_report
+            or detail is None
+            or detail.comic is None
+        ):
+            self.state.message = '请先按 Enter 加载详情，再按 Tab 切入详情区收展卷。'
+            return
+        row = self.detail_control.source_row()
+        position = detail.targets.get(row)
+        if all_groups:
+            groups = set(range(1, len(detail.comic.books) + 1))
+        elif position is not None:
+            groups = {position[0]}
+        else:
+            self.state.message = '请选中卷名或某一话，再按 ←/→ 收起或展开。'
+            return
+        detail.fold_groups(groups, collapsed=collapsed)
+        self.detail_control.wrapped()
+        self.state.message = ''
 
     def _range_bounds(self) -> tuple[int, int, int] | None:
         detail = self._current_detail()
@@ -332,6 +396,9 @@ class SearchBrowser:
         self.app.layout.focus(self.catalog_input)
 
     def _locate_row(self, row: int) -> None:
+        detail = self._current_detail()
+        if detail and row in detail.targets and detail.targets[row][0] in detail.collapsed_groups:
+            detail.fold_groups({detail.targets[row][0]}, collapsed=False)
         self.detail_control.wrapped()
         self._set_detail_row(self.detail_control.source_rows.index(row))
         self.state.message = ''
@@ -433,6 +500,8 @@ class SearchBrowser:
             detail = self.state.details.get(item.key) if item else None
             if detail:
                 detail.row = row
+                if self.detail_control.source_lines is detail.lines:
+                    detail.logical_row = self.detail_control.source_rows[row]
             else:
                 self.placeholder_row = row
 
@@ -442,6 +511,7 @@ class SearchBrowser:
 
     def _navigate(self, amount: int) -> None:
         if self.state.focus == 'results':
+            self._remember_detail_row()
             old = self.state.current
             self.state.move(amount)
             if self.state.current != old:
@@ -559,6 +629,7 @@ class SearchBrowser:
             self._finish(self.confirmation)
 
     def _apply_filter(self, buffer) -> bool:
+        self._remember_detail_row()
         self.state.apply_filter(buffer.text)
         self.editing = False
         self.results.vertical_scroll = 0
@@ -569,6 +640,7 @@ class SearchBrowser:
     def _finish(self, action: DownloadAction | None = None, *, interrupted: bool = False) -> None:
         self.interrupted = self.interrupted or interrupted
         if not self.closing:
+            self._remember_detail_row()
             self.result = action
             self.closing = True
             self.confirmation = None
@@ -654,8 +726,17 @@ class SearchBrowser:
         def next_match(event: KeyPressEvent) -> None:
             self._find_next(backwards=event.key_sequence[0].key == 'N')
 
+        @keys.add('left', filter=normal)
+        @keys.add('right', filter=normal)
+        @keys.add('z', filter=normal)
+        @keys.add('Z', filter=normal)
+        def fold_groups(event: KeyPressEvent) -> None:
+            key = event.key_sequence[0].key
+            self._fold_groups(collapsed=key in {'left', 'z'}, all_groups=key in {'z', 'Z'})
+
         @keys.add('l', filter=normal)
         def report(event: KeyPressEvent) -> None:
+            self._remember_detail_row()
             self.state.show_report = True
             self._focus('details')
 
