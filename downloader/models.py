@@ -38,6 +38,7 @@ class Comic:
 class SourceSearchResult:
     comics: list[Comic]
     error_message: str | None = None
+    next_page_url: str | None = None
 
 
 @dataclass
@@ -48,6 +49,7 @@ class SearchOutcome:
     duration: float
     skipped: bool = False
     total_count: int = 0
+    next_page_url: str | None = None
 
     @property
     def ok(self) -> bool:

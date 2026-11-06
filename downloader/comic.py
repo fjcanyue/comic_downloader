@@ -65,6 +65,8 @@ __all__ = [
 class ComicSource(ImageDownloadMixin, ArchiveMixin, DownloadTaskMixin, HtmlParsingMixin, ABC):
     search_unavailable_reason: str | None = None
     search_error: str | None = None
+    supports_search_pagination: bool = False
+    search_next_url: str | None = None
     base_url: str = ''
     base_img_url: str = ''
     browser_mode: BrowserModeName = REQUESTS_MODE
@@ -267,19 +269,25 @@ class ComicSource(ImageDownloadMixin, ArchiveMixin, DownloadTaskMixin, HtmlParsi
             url: 动漫URL地址
         """
 
-    def search_with_diagnostics(self, keyword: str) -> SourceSearchResult:
+    def search_next_page(self, keyword: str, page_url: str) -> list[Comic]:
+        raise ValueError('此来源尚未支持加载后续搜索页。')
+
+    def search_with_diagnostics(
+        self, keyword: str, *, page_url: str | None = None
+    ) -> SourceSearchResult:
         """Keep the legacy list API while exposing swallowed page/parser errors to the shell."""
         self.search_error = None
         self.last_parse_error = None
         self.last_page_load_result = None
-        comics = self.search(keyword)
+        self.search_next_url = None
+        comics = self.search_next_page(keyword, page_url) if page_url else self.search(keyword)
         error = self.search_error or self.last_parse_error
         page = self.last_page_load_result
         if page is not None and not page.ok:
             error = page.error_message or page.failure_reason or '未能解析搜索页面'
             if page.status_code is not None:
                 error = f'HTTP {page.status_code}: {error}'
-        return SourceSearchResult(comics, error)
+        return SourceSearchResult(comics, error, self.search_next_url)
 
     def download_full_by_url(self, url: str) -> DownloadSummary:
         """全量下载指定动漫

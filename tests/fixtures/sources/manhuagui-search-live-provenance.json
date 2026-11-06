@@ -1,0 +1,31 @@
+{
+  "description": "公开搜索结果的精简结构样本；保留前两项书目事实与下一页链接，不是完整页面快照。",
+  "processing": "保留 book-result 区域（仅前两项）及下一页链接；删除图片、脚本、iframe 和事件属性；未保存 Cookie、请求头或漫画正文。分页外层 captured-pagination 为采集脚本容器。 作品简介文本替换为占位符，不影响搜索条目解析。",
+  "scope": "仅用于搜索条目和分页解析回归；不证明详情、章节或图片下载可用。",
+  "pages": [
+    {
+      "file": "manhuagui-search-live-page1.html",
+      "requested_url": "https://www.manhuagui.com/s/海.html",
+      "final_url": "https://www.manhuagui.com/s/%E6%B5%B7.html",
+      "captured_at": "2026-11-06T15:49:06.709485+00:00",
+      "http_status": 200,
+      "original_result_count": 10,
+      "retained_result_count": 2,
+      "next_links": [
+        "/s/海_p2.html"
+      ]
+    },
+    {
+      "file": "manhuagui-search-live-page2.html",
+      "requested_url": "https://www.manhuagui.com/s/海_p2.html",
+      "final_url": "https://www.manhuagui.com/s/%E6%B5%B7_p2.html",
+      "captured_at": "2026-11-06T15:49:10.787988+00:00",
+      "http_status": 200,
+      "original_result_count": 10,
+      "retained_result_count": 2,
+      "next_links": [
+        "/s/海_p3.html"
+      ]
+    }
+  ]
+}

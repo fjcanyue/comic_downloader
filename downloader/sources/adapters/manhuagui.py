@@ -1,4 +1,5 @@
-from urllib.parse import quote
+import re
+from urllib.parse import quote, unquote, urljoin
 
 from selenium.webdriver.support.ui import WebDriverWait
 
@@ -18,13 +19,29 @@ class ManhuaguiComic(ComicSource):
     download_requires_driver = True
     config_file = 'manhuagui.json'
     enable = True
+    supports_search_pagination = True
 
     def __init__(self, output_dir, http, driver, overwrite=True, *, profile=None):
         super().__init__(output_dir, http, driver, overwrite, profile=profile)
 
     def search(self, keyword):
+        return self._search_page(keyword, 1)
+
+    def search_next_page(self, keyword, page_url):
+        prefix = f'{self.base_url.rstrip("/")}/s/{quote(keyword, safe="")}_p'
+        match = re.fullmatch(re.escape(prefix) + r'([2-9]|[1-9][0-9]{1,5})\.html', page_url)
+        if match is None:
+            raise ValueError('搜索分页地址不属于当前来源或关键词。')
+        return self._search_page(keyword, int(match[1]))
+
+    def _search_url(self, keyword, page):
+        suffix = f'_p{page}' if page > 1 else ''
+        return f'{self.base_url.rstrip("/")}/s/{quote(keyword, safe="")}{suffix}.html'
+
+    def _search_page(self, keyword, page):
+        self.search_next_url = None
         logger.info('开始在 看漫画 搜索: {}', keyword)
-        search_url = f'{self.base_url}/s/{quote(keyword, safe="")}.html'
+        search_url = self._search_url(keyword, page)
         root = self.__parse_html__(search_url)
         arr = []
         if root is None:
@@ -62,8 +79,19 @@ class ManhuaguiComic(ComicSource):
             except Exception as exc:  # noqa: PERF203 - preserve other valid search entries
                 self.search_error = f'部分搜索条目解析失败: {exc}'
                 logger.exception('解析搜索条目失败，保留其他结果')
+        self._read_next_page(root, keyword, page, search_url)
         logger.info("看漫画 搜索 '{}' 完成, 共找到 {} 条结果.", keyword, len(arr))
         return arr
+
+    def _read_next_page(self, root, keyword, page, current_url):
+        links = root.xpath('//a[contains(normalize-space(.),"下一页") or @rel="next"]/@href')
+        if not links:
+            return
+        expected = self._search_url(keyword, page + 1)
+        if any(unquote(urljoin(current_url, link)) == unquote(expected) for link in links):
+            self.search_next_url = expected
+        else:
+            self.search_error = '下一页地址与当前来源、关键词或页码不符，请重新搜索。'
 
     def _parse_search_book(self, book):
         link = book.xpath('div/a')[0]

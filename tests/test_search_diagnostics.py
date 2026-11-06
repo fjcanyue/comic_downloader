@@ -357,7 +357,7 @@ def test_cli_real_http_search_reports_failed_source_and_keeps_all_other_results(
     try:
         assert main_module.main() == 0
         output = capsys.readouterr().out
-        assert '本次搜索源状态' in output
+        assert '各源最近搜索请求' in output
         assert '500' in output
         assert '漫画025' in output
         assert '结果可能不完整' in output

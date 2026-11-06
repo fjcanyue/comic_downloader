@@ -42,6 +42,7 @@ from downloader.runtime_config import RuntimeConfig
 from downloader.search_browser.loader import DetailLoader, PreviewWorker
 from downloader.search_browser.state import BrowserState, DownloadAction, SearchItem, plain
 from downloader.search_browser.view import TERMINAL_ERRORS, SearchBrowser
+from downloader.search_paging import SEARCH_PAGE_INTERVAL, SearchPageState, append_unique_results
 from downloader.sources import load_source_bindings
 from downloader.sources.metadata import SourceVerification
 from downloader.sources.profiles import SourceBinding, SourceProfile
@@ -54,6 +55,7 @@ from downloader.tui import (
     CHAPTER_PAGE_SIZE,
     SEARCH_PAGE_SIZE,
     RetryTaskView,
+    SearchPageView,
     SourceCheckView,
     SourceStat,
     SourceView,
@@ -184,6 +186,7 @@ def _execute_search_task(
             response.error_message,
             duration,
             total_count=len(response.comics),
+            next_page_url=response.next_page_url,
         )
     except SearchUnavailableError as e:
         return SearchOutcome(
@@ -294,6 +297,7 @@ class Shell(cmd.Cmd):
         self.search_keyword = ''
         self.search_duration = 0.0
         self.search_outcomes: list[SearchOutcome] = []
+        self.search_pages: dict[str, SearchPageState] = {}
         self.search_filter = ''
         self.search_result_indices: list[int] | None = None
         self.search_page = 1
@@ -398,6 +402,8 @@ class Shell(cmd.Cmd):
         )
         if self.search_outcomes:
             self.presenter.search_report(self.search_outcomes)
+        if self.search_pages:
+            self._show_search_pages()
         if self.search_keyword:
             self.presenter.search_position(
                 self.search_filter,
@@ -1088,7 +1094,7 @@ class Shell(cmd.Cmd):
         self.presenter.source_selected(display_name, source_name)
 
     def _build_search_func(
-        self, binding: SourceBinding, uses_driver: bool
+        self, binding: SourceBinding, uses_driver: bool, *, page_url: str | None = None
     ) -> Callable[[str], SourceSearchResult]:
         def _search(keyword: str) -> SourceSearchResult:
             # Browser APIs may require creation, use and cleanup on the same thread.
@@ -1108,6 +1114,8 @@ class Shell(cmd.Cmd):
                         overwrite=self.overwrite,
                         profile=binding.profile,
                     )
+                    if page_url is not None:
+                        return source.search_with_diagnostics(keyword, page_url=page_url)
                     return source.search_with_diagnostics(keyword)
             finally:
                 if manager is not None:
@@ -1204,6 +1212,7 @@ class Shell(cmd.Cmd):
         self.search_keyword = arg
         self.search_duration = 0
         self.search_outcomes = []
+        self.search_pages = {}
         self.search_filter = ''
         self.search_result_indices = None
         self.search_page = 1
@@ -1237,6 +1246,14 @@ class Shell(cmd.Cmd):
         self.search_outcomes = [
             outcome_map[name] for name in self.source_options if name in outcome_map
         ]
+        self.search_pages = {
+            outcome.source_name: SearchPageState(
+                outcome.next_page_url, last_attempt=time.perf_counter()
+            )
+            for outcome in self.search_outcomes
+            if self.source_bindings[outcome.source_name].source_class.supports_search_pagination
+            and (outcome.ok or outcome.results)
+        }
         self._merge_search_outcomes(outcomes)
         self.presenter.search_report(self.search_outcomes)
         self.last_command_ok = any(outcome.ok for outcome in outcomes)
@@ -1262,8 +1279,115 @@ class Shell(cmd.Cmd):
             duration=search_duration,
         )
         self._print_search_table(arg, search_duration, source_stats)
+        if self.paginate_output and self.search_pages:
+            self._show_search_pages()
         if self.context.searched_results and self._browser_available():
             self.do_browse('')
+
+    def _show_search_pages(self) -> None:
+        self.presenter.search_pages(
+            [
+                SearchPageView(
+                    name,
+                    cursor.pages,
+                    sum(comic.source == name for comic in self.context.searched_results),
+                    cursor.next_url is not None,
+                )
+                for name, cursor in self.search_pages.items()
+            ]
+        )
+
+    def do_more(self, arg):
+        """more [源序号/代码名/名称]：查看网站搜索分页状态；指定来源后加载下一页，失败可用同一命令重试。仅追加新 URL，保留原序号、筛选与当前漫画。p next 只翻本地缓存；目前支持漫画柜。"""
+        self.last_command_ok = False
+        if not self.search_keyword:
+            self.presenter.warn('请先使用 s <关键词> 搜索。')
+            return
+        selection = arg.strip()
+        if not selection:
+            self._show_search_pages()
+            self.last_command_ok = True
+            return
+        name = self._resolve_source_selection(selection)
+        cursor = self.search_pages.get(name or '')
+        if name is None or cursor is None:
+            self.presenter.warn('该来源没有可用的搜索分页状态；输入 more 查看，或重新搜索。')
+            return
+        url = cursor.next_url
+        if url is None:
+            self.presenter.info('该来源未提供下一页，无需再次请求。')
+            self.last_command_ok = True
+            return
+        remaining = SEARCH_PAGE_INTERVAL - (time.perf_counter() - cursor.last_attempt)
+        if remaining > 0:
+            self.presenter.warn(f'请等待 {remaining:.1f} 秒后再加载该来源，避免连续请求。')
+            return
+        binding = self.source_bindings[name]
+        uses_driver = binding.profile.uses_driver_for_search()
+        task = SearchTask(
+            name,
+            binding.source_class,
+            binding.profile,
+            self._build_search_func(binding, uses_driver, page_url=url),
+            uses_driver,
+            self._source_display_name(name),
+            unavailable_reason=binding.source_class.search_unavailable_reason,
+        )
+        with self.presenter.status(
+            f'正在加载 {name} 网站第 {cursor.pages + 1} 页…', spinner='dots'
+        ):
+            try:
+                outcome = _execute_search_task(
+                    task, self.search_keyword, None, self.search_driver_lock
+                )
+            finally:
+                cursor.last_attempt = time.perf_counter()
+        added = append_unique_results(self.context.searched_results, outcome.results)
+        cursor.accept(url, outcome)
+        self.search_duration += outcome.duration
+        self.search_outcomes = [
+            outcome if old.source_name == name else old for old in self.search_outcomes
+        ]
+        self._refresh_search_view()
+        self.presenter.search_report([outcome])
+        self.presenter.info(
+            f'本页返回 {len(outcome.results)} 条，新增 {added} 条；原序号保持不变。'
+        )
+        if added:
+            end = len(self.context.searched_results)
+            self.presenter.info(
+                f'新增原序号 {end - added + 1}–{end}；browse 浏览，或 i <原序号> 查看。'
+            )
+        if not outcome.ok and cursor.next_url:
+            self.presenter.warn(f'本页未完整加载，已保留可用结果；more {name} 重试同一页。')
+        self._show_search_pages()
+        self._print_search_table(self.search_keyword, self.search_duration, page=self.search_page)
+        self.last_command_ok = outcome.ok
+
+    def _refresh_search_view(self) -> None:
+        # Appending does not invalidate existing download identities or their cached details.
+        state = self.browser_state
+        if state is None:
+            state = BrowserState(
+                tuple(
+                    SearchItem.from_comic(i, comic)
+                    for i, comic in enumerate(self.context.searched_results)
+                ),
+                self.search_keyword,
+                self.search_generation,
+                {name: self._source_display_name(name) for name in self.source_options},
+                filter_text=self.search_filter,
+            )
+        else:
+            scroll, report = state.list_scroll, state.show_report
+            state.items = tuple(
+                SearchItem.from_comic(i, comic)
+                for i, comic in enumerate(self.context.searched_results)
+            )
+            state.apply_filter(self.search_filter)
+            state.list_scroll, state.show_report = scroll, report
+        self.browser_state = state
+        self.search_result_indices = list(state.indices) if self.search_filter else None
 
     def _browser_available(self) -> bool:
         return bool(
@@ -1319,7 +1443,9 @@ class Shell(cmd.Cmd):
         self.search_filter = state.filter_text
         self.search_result_indices = list(state.indices) if state.filter_text else None
         self.search_page = 1
-        self.presenter.info('已返回命令行；browse 继续浏览，i/d <原序号> 查看或下载。')
+        self.presenter.info(
+            '已返回命令行；browse 继续浏览，i/d <原序号> 查看或下载，more 查看网站分页。'
+        )
 
     def _browser_download(self, action: DownloadAction, state: BrowserState) -> None:
         if not action.matches(self.search_generation, self.context.searched_results):

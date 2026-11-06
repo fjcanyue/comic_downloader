@@ -55,6 +55,7 @@ USAGE = """用法:
 详情区 f 查找卷名/话名，n/N 循环匹配，g 输入卷序号和话序号跳转（如 1 80）；/ 筛选漫画。
 详情区 ←/→ 收起/展开当前卷，z/Z 全部收起/展开；查找或跳转自动展开命中卷，保留原序号。
 browse 重新打开，Esc 返回命令行。
+交互式 more 查看网站分页状态，more manhuagui 加载漫画柜下一页并保留原序号；p next 只翻缓存。
 download_vols 的一个范围参数表示截止序号，两个表示起始和截止，均从 1 开始。
 tasks 状态：all / unfinished / failed / completed / pending；任务列表另支持 running / interrupted。
 tasks 默认第一页；next / prev 仅用于交互会话，直接子命令使用明确页码。

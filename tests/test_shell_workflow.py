@@ -1200,6 +1200,154 @@ def make_search_results(source, count):
     return results
 
 
+def prepare_search_paging(shell, monkeypatch):
+    calls = []
+
+    def search(source, keyword):
+        calls.append((source.profile.source_name, keyword, 'first'))
+        source.search_next_url = f'{source.base_url}/page2'
+        return make_search_results(source, 25)
+
+    def next_page(source, keyword, url):
+        calls.append((source.profile.source_name, keyword, url))
+        source.search_next_url = None
+        results = make_search_results(source, 26)
+        return [results[0], results[-1], results[-1]]
+
+    monkeypatch.setattr(WorkflowSource, 'supports_search_pagination', True)
+    monkeypatch.setattr(WorkflowSource, 'search', search)
+    monkeypatch.setattr(WorkflowSource, 'search_next_page', next_page)
+    shell.onecmd('s 分页 漫画')
+    for cursor in shell.search_pages.values():
+        cursor.last_attempt = float('-inf')
+    return calls
+
+
+@pytest.mark.parametrize('width', [48, 80, 120])
+def test_more_appends_unique_rows_keeps_original_selection_filter_and_comic(
+    shell, monkeypatch, width
+):
+    shell.console.width = width
+    calls = prepare_search_paging(shell, monkeypatch)
+    original = list(shell.context.searched_results)
+    shell.onecmd('i 2')
+    current_comic, current_source = shell.context.comic, shell.current_source_name
+    shell.onecmd('f first')
+    shell.onecmd('p 2')
+    entries = tuple(SearchItem.from_comic(i, c) for i, c in enumerate(original))
+    state = BrowserState(
+        entries, shell.search_keyword, shell.search_generation, filter_text='first'
+    )
+    state.selected = 24
+    state.list_scroll = 20
+    state.focus = 'details'
+    cached = Detail(['缓存详情'], current_comic)
+    state.remember(entries[24], cached)
+    shell.browser_state = state
+    action = DownloadAction(shell.search_generation, entries[24])
+    shell.onecmd('more first')
+    assert shell.last_command_ok
+    assert calls[-1] == ('first', '分页 漫画', 'https://first.test/page2')
+    assert len(calls) == 3
+    assert shell.context.searched_results[:50] == original
+    assert len(shell.context.searched_results) == 51
+    assert shell.context.searched_results[-1].url == 'https://first.test/26'
+    assert shell.search_filter == 'first' and shell.search_page == 2
+    assert shell.search_result_indices == [*range(25), 50]
+    assert shell.browser_state is state and state.current == entries[24]
+    assert state.details[entries[24].key] is cached and state.focus == 'details'
+    assert state.list_scroll == 20
+    assert action.matches(shell.search_generation, shell.context.searched_results)
+    assert shell.context.comic is current_comic and shell.current_source_name == current_source
+    assert shell.search_pages['first'].pages == 2 and shell.search_pages['first'].next_url is None
+    assert shell.search_pages['second'].pages == 1
+    text = ''.join(shell.console.file.getvalue().split())
+    assert '新增1条' in text and '网站搜索分页' in text
+    assert '新增原序号51–51' in text
+    shell.onecmd('more first')
+    assert shell.last_command_ok and len(calls) == 3  # Terminal page does not refetch.
+    shell.onecmd('i 51')
+    assert shell.context.comic.url == 'https://first.test/26'
+
+
+def test_more_partial_retry_deduplicates_and_only_advances_after_complete_page(shell, monkeypatch):
+    prepare_search_paging(shell, monkeypatch)
+    attempts = []
+
+    def page(source, keyword, url):
+        attempts.append(url)
+        results = make_search_results(source, 27)
+        source.search_next_url = f'{source.base_url}/page3'
+        if len(attempts) == 1:
+            source.search_error = '部分条目损坏'
+            return [results[25]]
+        return results[25:]
+
+    monkeypatch.setattr(WorkflowSource, 'search_next_page', page)
+    shell.onecmd('more first')
+    cursor = shell.search_pages['first']
+    assert not shell.last_command_ok
+    assert cursor.pages == 1 and cursor.next_url == 'https://first.test/page2'
+    assert len(shell.context.searched_results) == 51
+    shell.onecmd('more first')
+    assert not shell.last_command_ok and len(attempts) == 1
+    assert '请等待' in shell.console.file.getvalue()
+    cursor.last_attempt = float('-inf')
+    shell.onecmd('more first')
+    assert shell.last_command_ok
+    assert attempts == ['https://first.test/page2'] * 2
+    assert len(shell.context.searched_results) == 52
+    assert cursor.pages == 2 and cursor.next_url == 'https://first.test/page3'
+
+
+def test_more_failure_and_interrupt_preserve_cursor_results_and_browser(shell, monkeypatch):
+    prepare_search_paging(shell, monkeypatch)
+    original = list(shell.context.searched_results)
+    cursor = shell.search_pages['first']
+
+    def fail(*args):
+        raise RuntimeError('网络故障')
+
+    monkeypatch.setattr(WorkflowSource, 'search_next_page', fail)
+    shell.onecmd('more first')
+    assert not shell.last_command_ok and cursor.pages == 1
+    assert cursor.next_url == 'https://first.test/page2'
+    assert shell.context.searched_results == original
+
+    def interrupt(*args):
+        raise KeyboardInterrupt
+
+    cursor.last_attempt = float('-inf')
+    monkeypatch.setattr(WorkflowSource, 'search_next_page', interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        shell.onecmd('more first')
+    assert cursor.pages == 1 and cursor.next_url == 'https://first.test/page2'
+    assert shell.context.searched_results == original
+
+
+def test_more_requires_search_or_supported_source_and_new_search_resets_cursors(shell, monkeypatch):
+    shell.onecmd('more')
+    assert not shell.last_command_ok
+    shell.onecmd('s 漫画')
+    shell.onecmd('more first')
+    assert not shell.last_command_ok and not shell.search_pages
+    calls = prepare_search_paging(shell, monkeypatch)
+    for command in ('more', 'more unknown', 'more first extra', 'more 0', 'more 3'):
+        shell.onecmd(command)
+    assert len(calls) == 2
+    shell.onecmd('more 1')
+    assert shell.last_command_ok and len(calls) == 3
+    shell.onecmd('s 新关键词')
+    assert shell.search_keyword == '新关键词'
+    assert len(shell.context.searched_results) == 50
+    assert all(c.pages == 1 and not c.visited for c in shell.search_pages.values())
+    assert shell.browser_state is None
+    shell.onecmd('more first')
+    assert (
+        not shell.last_command_ok and len(calls) == 5
+    )  # Initial-page request also starts cooldown.
+
+
 def test_search_pagination_keeps_all_results_and_original_selection_indices(shell, monkeypatch):
     searches = []
 

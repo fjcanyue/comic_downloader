@@ -71,6 +71,14 @@ MAX_SOURCE_PANEL_WIDTH = 112
 
 
 @dataclass(frozen=True)
+class SearchPageView:
+    source: str
+    pages: int
+    count: int
+    has_next: bool
+
+
+@dataclass(frozen=True)
 class SourceStat:
     """单个搜索源在一次搜索中的执行结果摘要，用于在搜索结果下方汇总展示。"""
 
@@ -179,6 +187,7 @@ class TerminalPresenter:
             ('i', '<序号/URL>', '查看动漫详情'),
             ('f', '[关键词]', '筛选缓存结果；不填则清除'),
             ('p', '[页码/next/prev]', '翻看筛选结果；不填重显当前页'),
+            ('more', '[源序号/代码名]', '查看网站分页；指定源加载下一页，原序号不变'),
             ('ch', '<分组> [页码]', '翻看章节，也支持 next / prev'),
             ('status', '', '查看当前漫画、路径和覆盖模式'),
             ('tasks', '[状态/任务ID]', '筛选下载任务；next / prev 翻页'),
@@ -876,6 +885,22 @@ class TerminalPresenter:
     # ------------------------------------------------------------------
     # 搜索结果
     # ------------------------------------------------------------------
+    def search_pages(self, sources: list[SearchPageView]) -> None:
+        if not sources:
+            self.info('当前搜索没有可用的分页状态；目前支持漫画柜，其他来源仍只读取首次返回结果。')
+            return
+        table = Table(title='网站搜索分页', header_style=f'bold {ACCENT}', border_style=MUTED)
+        for title in ('源', '网站页 / 缓存', '下一步'):
+            table.add_column(title, overflow='fold')
+        for source in sources:
+            table.add_row(
+                Text(source.source),
+                f'{source.pages} 页 / {source.count} 条',
+                Text(f'more {source.source}' if source.has_next else '未提供下一页'),
+            )
+        self.print(table)
+        self.info('more <源> 请求网站下一页；p next 只翻本地缓存。新结果追加，原序号不变。')
+
     def search_position(self, filter_text: str, count: int, total: int, page: int) -> None:
         pages = max(1, (count + SEARCH_PAGE_SIZE - 1) // SEARCH_PAGE_SIZE)
         state = Text('本地筛选  ' if filter_text else '搜索缓存  ', style=f'bold {ACCENT}')
@@ -891,7 +916,7 @@ class TerminalPresenter:
         )
 
     def search_report(self, outcomes: list[SearchOutcome]) -> None:
-        table = Table(title='本次搜索源状态', header_style=f'bold {ACCENT}', border_style=MUTED)
+        table = Table(title='各源最近搜索请求', header_style=f'bold {ACCENT}', border_style=MUTED)
         compact = self.console.width < COMPACT_SEARCH_WIDTH
         titles = (
             ('源', '状态', '结果', '耗时') if compact else ('源', '状态', '结果', '耗时', '说明')
