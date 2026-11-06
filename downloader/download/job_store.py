@@ -38,8 +38,8 @@ class JobStore:
     def archive(self, job_id: str, *, expected_digest: str | None = None) -> DownloadJob:
         return self._move_record(job_id, restoring=False, expected_digest=expected_digest)
 
-    def restore(self, job_id: str) -> DownloadJob:
-        return self._move_record(job_id, restoring=True)
+    def restore(self, job_id: str, *, expected_digest: str | None = None) -> DownloadJob:
+        return self._move_record(job_id, restoring=True, expected_digest=expected_digest)
 
     def _move_record(
         self, job_id: str, *, restoring: bool, expected_digest: str | None = None

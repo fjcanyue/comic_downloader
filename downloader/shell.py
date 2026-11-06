@@ -543,7 +543,7 @@ class Shell(cmd.Cmd):
         return query
 
     def do_archive(self, arg):
-        """archive [list [页码]] [find <关键词>] 查找归档；archive next/prev 保留条件翻页；archive show <任务ID> [页码] 查看详情；archive restore <任务ID> 恢复；archive <任务ID> 归档已完成计划。archive batch [find <关键词>] 预览当前路径下已完成计划；archive batch list [页码] 查看批次历史；archive batch show <批次ID> [页码] 查看固定候选或结果；archive batch apply <批次ID> 确认执行，archive batch cancel <批次ID> 取消未执行批次。批量条件独立于 tasks/archive 浏览筛选，不改变漫画文件。"""
+        """archive [list [页码]] [find <关键词>] 查找归档；archive next/prev 保留条件翻页；archive show <任务ID> [页码] 查看详情；archive restore <任务ID> 恢复；archive <任务ID> 归档已完成计划。archive batch [find <关键词>] 预览当前路径下已完成计划；archive batch restore [find <关键词>] 预览批量恢复归档；archive batch list [页码] 查看批次历史；archive batch show <批次ID> [页码] 查看固定候选或结果；archive batch apply <批次ID> 确认执行，archive batch cancel <批次ID> 取消未执行批次。批量条件独立于 tasks/archive 浏览筛选，不改变漫画文件。"""
         self.last_command_ok = False
         try:
             query = parse_archive_query(
@@ -581,6 +581,8 @@ class Shell(cmd.Cmd):
             return
         if query.action == 'batch-create':
             batch = store.create(query.keyword)
+        elif query.action == 'batch-restore':
+            batch = store.create(query.keyword, operation='restore')
         elif query.action == 'batch-apply':
             batch = store.apply(query.batch_id or '')
         elif query.action == 'batch-cancel':

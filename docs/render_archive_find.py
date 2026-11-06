@@ -61,7 +61,7 @@ def render() -> None:
     print(console.export_text(clear=False))
 
 
-def render_batch(width: int, *, finished: bool = False) -> None:
+def render_batch(width: int, *, finished: bool = False, restoring: bool = False) -> None:
     console = Console(
         file=StringIO(),
         width=width,
@@ -82,7 +82,7 @@ def render_batch(width: int, *, finished: bool = False) -> None:
         )
     ]
     if finished:
-        entries[0].status = 'archived'
+        entries[0].status = 'restored' if restoring else 'archived'
         entries[1].status = 'skipped'
         entries[1].message = '任务自预览后已变化，已跳过；请重新生成批次。'
         entries[2].status = 'failed'
@@ -94,9 +94,10 @@ def render_batch(width: int, *, finished: bool = False) -> None:
         '2026-11-04T14:00:00+00:00',
         entries,
         state='finished' if finished else 'ready',
+        operation='restore' if restoring else 'archive',
     )
     TerminalPresenter(console).archive_batch(batch)
-    svg = console.export_svg(title='批量归档 · 演示数据', clear=False)
+    svg = console.export_svg(title=f'批量{batch.label} · 演示数据', clear=False)
     # Rich's SVG textLength uses character counts; CJK needs terminal-cell widths.
     ET.register_namespace('', 'http://www.w3.org/2000/svg')
     root = ET.fromstring(svg)  # noqa: S314 - generated locally by Rich, not external XML
@@ -106,14 +107,19 @@ def render_batch(width: int, *, finished: bool = False) -> None:
             node.attrib['textLength'] = f'{length:g}'
     svg = ET.tostring(root, encoding='unicode')
     suffix = 'result' if finished else 'preview'
-    Path(__file__).with_name(f'archive-batch-{suffix}-{width}.svg').write_text(
+    prefix = 'restore' if restoring else 'archive'
+    Path(__file__).with_name(f'{prefix}-batch-{suffix}-{width}.svg').write_text(
         '\n'.join(line.rstrip() for line in svg.splitlines()) + '\n', encoding='utf-8'
     )
     print(console.export_text(clear=False))
 
 
 if __name__ == '__main__':
-    if '--batch' in sys.argv:
+    if '--restore' in sys.argv:
+        render_batch(48, restoring=True)
+        render_batch(100, restoring=True)
+        render_batch(100, finished=True, restoring=True)
+    elif '--batch' in sys.argv:
         render_batch(48)
         render_batch(100)
         render_batch(100, finished=True)

@@ -185,7 +185,11 @@ class TerminalPresenter:
             ('tasks find', '<关键词>', '按漫画名、源代码或 ID 查找计划'),
             ('archive', '[list/任务ID/show/restore]', '归档已完成计划、查看或恢复归档'),
             ('archive find', '<关键词>', '查找归档；archive next / prev 翻页'),
-            ('archive batch', '[find <关键词>]', '预览批量归档；按批次 ID 确认执行'),
+            (
+                'archive batch',
+                '[restore] [find <关键词>]',
+                '预览批量归档；加 restore 预览恢复，按批次 ID 确认',
+            ),
             ('d', '[序号/URL]', '下载当前或指定动漫'),
             ('v', '<章节> [范围]', '按范围下载章节'),
             ('source', '[序号/代码名]', '查看并切换动漫源'),
@@ -695,13 +699,17 @@ class TerminalPresenter:
         labels = {
             'pending': '未执行' if batch.state == 'cancelled' else '待处理',
             'applying': '待核对',
-            'archived': '已归档',
+            batch.success_status: f'已{batch.label}',
             'skipped': '已跳过',
             'failed': '失败',
         }
         overview = Text()
-        overview.append('批量归档 · ' + BATCH_STATE_LABELS[batch.state], style=f'bold {ACCENT}')
+        overview.append(
+            f'批量{batch.label} · ' + BATCH_STATE_LABELS[batch.state], style=f'bold {ACCENT}'
+        )
         overview.append(f'\n批次 {batch.id}\n保存路径 {batch.output_path}')
+        direction = '归档 → 任务列表' if batch.operation == 'restore' else '任务列表 → 归档'
+        overview.append(f'\n方向 {direction}', style=f'bold {ACCENT}')
         overview.append(f'\n条件 已完成 · {batch.keyword or "全部"}（独立于当前浏览筛选）')
         overview.append(
             f'\n固定候选 {len(batch.entries)} 项 · 第 {page}/{pages} 页 · 创建 {batch.created_at}',
@@ -715,7 +723,9 @@ class TerminalPresenter:
         self.print(Panel(overview, border_style=ACCENT, padding=(0, 1)))
         if batch.entries:
             table = Table(
-                title='归档候选预览' if batch.state == 'ready' else '批量归档记录',
+                title=f'{batch.label}候选预览'
+                if batch.state == 'ready'
+                else f'批量{batch.label}记录',
                 header_style=f'bold {ACCENT}',
                 border_style=MUTED,
                 box=box.SIMPLE_HEAD,
@@ -731,7 +741,7 @@ class TerminalPresenter:
                     style={
                         'pending': MUTED,
                         'applying': WARN,
-                        'archived': SUCCESS,
+                        batch.success_status: SUCCESS,
                         'skipped': WARN,
                         'failed': ERROR,
                     }[entry.status],
@@ -747,7 +757,9 @@ class TerminalPresenter:
             self.print(table)
         else:
             self.info(
-                '没有符合条件的已完成计划；可用 tasks completed 查看，或调整 batch find 条件。'
+                '没有符合条件的已完成归档；可用 archive 查看，或调整 batch restore find 条件。'
+                if batch.operation == 'restore'
+                else '没有符合条件的已完成计划；可用 tasks completed 查看，或调整 batch find 条件。'
             )
         counts = {status: sum(e.status == status for e in batch.entries) for status in labels}
         self.info(' · '.join(f'{label} {counts[status]}' for status, label in labels.items()))
@@ -768,10 +780,17 @@ class TerminalPresenter:
         elif batch.state == 'running':
             self.info(f'archive batch apply {batch.id} 核对中断项并继续剩余候选')
         elif batch.state == 'finished':
-            self.info('批次已结束；重复 apply 仅查看结果，不重新归档。跳过/失败项需重新预览。')
-            self.info('archive restore <任务ID> 可逐项恢复已归档计划。')
+            self.info(
+                f'批次已结束；重复 apply 仅查看结果，不重新{batch.label}。跳过/失败项需重新预览。'
+            )
+            self.info(
+                'tasks completed 查看已恢复计划；恢复不会自动下载。'
+                if batch.operation == 'restore'
+                else 'archive batch restore [find <关键词>] 预览批量恢复；archive restore <任务ID> 逐项恢复。'
+            )
         else:
-            self.info('该批次已取消，未移动任务；archive batch 可重新预览。')
+            command = 'archive batch restore' if batch.operation == 'restore' else 'archive batch'
+            self.info(f'该批次已取消，未移动任务；{command} 可重新预览。')
         self.info('archive batch list 查看批次历史。')
         self.info('archive batch show <批次ID> 查看候选或结果。')
 
@@ -785,7 +804,7 @@ class TerminalPresenter:
         for batch in batches[(page - 1) * size : page * size]:
             table.add_row(
                 Text(batch.id),
-                Text(f'{batch.keyword or "全部已完成"}\n{batch.created_at[:19]}'),
+                Text(f'{batch.label} · {batch.keyword or "全部已完成"}\n{batch.created_at[:19]}'),
                 Text(f'{len(batch.entries)} 项\n{BATCH_STATE_LABELS[batch.state]}'),
             )
         if batches:

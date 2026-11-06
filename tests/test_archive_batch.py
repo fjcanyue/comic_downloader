@@ -349,6 +349,8 @@ def test_direct_cli_preview_show_apply_persists_results_and_returns_partial_fail
     [
         [],
         ['find', '漫画', 'TEST'],
+        ['restore'],
+        ['restore', 'find', '漫画', 'TEST'],
         ['show', 'a' * 32, '2'],
         ['apply', 'a' * 32],
         ['cancel', 'a' * 32],
@@ -368,6 +370,9 @@ def test_batch_commands_share_cli_validation(args):
     [
         ['find'],
         ['all'],
+        ['restore', 'find'],
+        ['restore', 'abcd'],
+        ['restore', 'list', '2'],
         ['apply'],
         ['show', '../path'],
         ['show', 'abcd'],
@@ -404,3 +409,248 @@ def test_inconsistent_interruption_journal_is_rejected_without_replaying_move(
     with pytest.raises(ValueError, match='执行记录与批次候选不一致'):
         batch_store.apply(batch.id)
     assert batch_store.jobs.load(job.id).state == 'completed'
+
+
+def archived_job(store, name='星海'):
+    job = save_job(store, name)
+    store.archive(job.id)
+    return job
+
+
+def test_restore_preview_freezes_archives_and_preserves_bytes(batch_store, tmp_path):
+    jobs = batch_store.jobs
+    selected = archived_job(jobs, '[red]星海')
+    other = archived_job(jobs, '其他漫画')
+    active = save_job(jobs, '星海')
+    comic_file = tmp_path / '漫画.zip'
+    comic_file.write_bytes(b'comic bytes')
+    archive = jobs.archive_view()
+    before = {path.name: path.read_bytes() for path in archive.directory.glob('*.json')}
+    batch = batch_store.create('星海 TEST', operation='restore')
+    assert [entry.summary.id for entry in batch.entries] == [selected.id]
+    assert batch.operation == 'restore' and batch.state == 'ready'
+    assert before == {path.name: path.read_bytes() for path in archive.directory.glob('*.json')}
+    new = archived_job(jobs, '星海新归档')
+    restarted = ArchiveBatchStore(JobStore(str(tmp_path)))
+    assert restarted.load(batch.id) == batch
+    result = restarted.apply(batch.id)
+    assert result.successful and result.entries[0].status == 'restored'
+    assert (jobs.directory / f'{selected.id}.json').read_bytes() == before[f'{selected.id}.json']
+    assert jobs.load(active.id).state == 'completed'
+    assert archive.load(other.id) and archive.load(new.id)
+    assert comic_file.read_bytes() == b'comic bytes'
+
+
+def test_restore_skips_changed_missing_conflicting_locked_and_continues(batch_store):
+    jobs = batch_store.jobs
+    archive = jobs.archive_view()
+    changed, missing, conflict, locked, good = [archived_job(jobs, str(i)) for i in range(5)]
+    batch = batch_store.create(operation='restore')
+    changed.comic_url += '/changed'
+    (archive.directory / f'{changed.id}.json').write_text(
+        json.dumps(asdict(changed)), encoding='utf-8'
+    )
+    jobs.restore(missing.id)
+    target = jobs.directory / f'{conflict.id}.json'
+    target.write_bytes(b'conflicting contents')
+    with jobs.lock(locked.id):
+        result = batch_store.apply(batch.id)
+    assert {e.summary.id: e.status for e in result.entries} == {
+        changed.id: 'skipped',
+        missing.id: 'skipped',
+        conflict.id: 'skipped',
+        locked.id: 'skipped',
+        good.id: 'restored',
+    }
+    assert not result.successful
+    assert archive.load(changed.id).comic_url.endswith('/changed')
+    assert archive.load(locked.id) and archive.load(conflict.id)
+    assert target.read_bytes() == b'conflicting contents'
+    assert jobs.load(good.id)
+
+
+def test_restore_fingerprint_is_rechecked_inside_task_lock(batch_store, monkeypatch):
+    jobs = batch_store.jobs
+    job = archived_job(jobs)
+    batch = batch_store.create(operation='restore')
+    original_lock = JobStore.lock
+
+    @contextmanager
+    def mutate_on_lock(store, job_id):
+        with original_lock(store, job_id):
+            if job_id == job.id:
+                job.comic_name = '锁内变动'
+                jobs.archive_view().save(job)
+            yield
+
+    monkeypatch.setattr(JobStore, 'lock', mutate_on_lock)
+    result = batch_store.apply(batch.id)
+    assert result.entries[0].status == 'skipped'
+    assert '自预览后已变化' in result.entries[0].message
+    assert jobs.archive_view().load(job.id).comic_name == '锁内变动'
+
+
+@pytest.mark.parametrize('move_before_interrupt', [False, True])
+def test_restore_interruption_reconciles_then_continues(
+    batch_store, monkeypatch, move_before_interrupt
+):
+    jobs = batch_store.jobs
+    archived_job(jobs, '第一本')
+    archived_job(jobs, '第二本')
+    batch = batch_store.create(operation='restore')
+    first, second = [e.summary.id for e in batch.entries]
+    original = jobs.restore
+
+    def interrupt(job_id, **kwargs):
+        if move_before_interrupt:
+            original(job_id, **kwargs)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(jobs, 'restore', interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        batch_store.apply(batch.id)
+    assert batch_store.load(batch.id).entries[0].status == 'applying'
+    calls = []
+
+    def record(job_id, **kwargs):
+        calls.append(job_id)
+        return original(job_id, **kwargs)
+
+    monkeypatch.setattr(jobs, 'restore', record)
+    recovered = batch_store.apply(batch.id)
+    assert calls == [second]
+    assert [e.status for e in recovered.entries] == [
+        'restored' if move_before_interrupt else 'skipped',
+        'restored',
+    ]
+    assert recovered.state == 'finished'
+    assert (jobs if move_before_interrupt else jobs.archive_view()).load(first)
+
+
+def test_finished_restore_batch_never_replays_rearchived_record(batch_store):
+    job = archived_job(batch_store.jobs)
+    batch = batch_store.create(operation='restore')
+    first = batch_store.apply(batch.id)
+    batch_store.jobs.archive(job.id)
+    assert batch_store.apply(batch.id) == first
+    assert batch_store.jobs.archive_view().load(job.id)
+
+
+def test_restore_interrupted_then_rearchived_is_not_restored_again(batch_store, monkeypatch):
+    jobs = batch_store.jobs
+    job = archived_job(jobs)
+    batch = batch_store.create(operation='restore')
+    original = jobs.restore
+
+    def interrupt(job_id, **kwargs):
+        original(job_id, **kwargs)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(jobs, 'restore', interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        batch_store.apply(batch.id)
+    jobs.archive(job.id)
+    recovered = batch_store.apply(batch.id)
+    assert recovered.entries[0].status == 'skipped'
+    assert jobs.archive_view().load(job.id)
+
+
+def test_restore_excludes_corrupt_archives_and_continues_after_move_failure(
+    batch_store, monkeypatch
+):
+    jobs = batch_store.jobs
+    good, failed = archived_job(jobs, '成功'), archived_job(jobs, '失败')
+    broken = jobs.archive_view().directory / ('f' * 32 + '.json')
+    broken.write_bytes(b'not json')
+    batch = batch_store.create(operation='restore')
+    assert len(batch.errors) == 1 and len(batch.entries) == 2
+    original = jobs.restore
+
+    def fail_one(job_id, **kwargs):
+        if job_id == failed.id:
+            raise OSError('disk unavailable')
+        return original(job_id, **kwargs)
+
+    monkeypatch.setattr(jobs, 'restore', fail_one)
+    result = batch_store.apply(batch.id)
+    assert {e.summary.id: e.status for e in result.entries} == {
+        good.id: 'restored',
+        failed.id: 'failed',
+    }
+    assert not result.successful
+    assert jobs.load(good.id) and jobs.archive_view().load(failed.id)
+    assert broken.read_bytes() == b'not json'
+
+
+def test_restore_cancel_and_journal_failure_leave_archives_untouched(batch_store, monkeypatch):
+    job = archived_job(batch_store.jobs)
+    batch = batch_store.create(operation='restore')
+    batch_store.cancel(batch.id)
+    with pytest.raises(ValueError, match='已取消'):
+        batch_store.apply(batch.id)
+    batch = batch_store.create(operation='restore')
+
+    def fail_entry(*args):
+        raise OSError('journal unavailable')
+
+    monkeypatch.setattr(batch_store, '_save_entry', fail_entry)
+    with pytest.raises(OSError, match='journal unavailable'):
+        batch_store.apply(batch.id)
+    assert batch_store.jobs.archive_view().load(job.id)
+    assert batch_store.load(batch.id).entries[0].status == 'pending'
+
+
+def test_restore_cli_preview_apply_show_and_history(batch_store):
+    job = archived_job(batch_store.jobs)
+    preview = run_cli(batch_store, 'restore', 'find', '星海', 'TEST')
+    assert preview.returncode == 0, preview.stderr
+    assert '恢复候选预览' in preview.stdout and '归档 → 任务列表' in preview.stdout
+    batch_id = next(batch_store.directory.glob('*.json')).stem
+    with batch_store.jobs.lock(job.id):
+        applied = run_cli(batch_store, 'apply', batch_id)
+    assert applied.returncode == 1 and '已跳过' in applied.stdout
+    assert batch_store.jobs.archive_view().load(job.id)
+    batch = batch_store.create(operation='restore')
+    applied = run_cli(batch_store, 'apply', batch.id)
+    assert applied.returncode == 0 and '已恢复 1' in applied.stdout
+    assert '不会自动下载' in applied.stdout
+    shown = run_cli(batch_store, 'show', batch.id)
+    assert shown.returncode == 0 and '批量恢复记录' in shown.stdout
+    history = run_cli(batch_store, 'list')
+    assert history.returncode == 0 and '恢复' in history.stdout
+    assert batch_store.jobs.load(job.id)
+
+
+def test_legacy_version_one_archive_batch_remains_executable(batch_store):
+    job = save_job(batch_store.jobs)
+    batch = batch_store.create()
+    path = batch_store.directory / f'{batch.id}.json'
+    data = json.loads(path.read_text(encoding='utf-8'))
+    data['version'] = 1
+    del data['operation']
+    path.write_text(json.dumps(data), encoding='utf-8')
+    assert batch_store.apply(batch.id).successful
+    assert batch_store.jobs.archive_view().load(job.id)
+
+
+@pytest.mark.parametrize(
+    'change', ['operation', 'missing_operation', 'legacy_restore', 'wrong_success']
+)
+def test_invalid_restore_direction_is_rejected_before_moving(batch_store, change):
+    job = archived_job(batch_store.jobs)
+    batch = batch_store.create(operation='restore')
+    path = batch_store.directory / f'{batch.id}.json'
+    data = json.loads(path.read_text(encoding='utf-8'))
+    if change == 'operation':
+        data['operation'] = 'delete'
+    elif change == 'missing_operation':
+        del data['operation']
+    elif change == 'legacy_restore':
+        data['version'] = 1
+    else:
+        data['state'] = 'finished'
+        data['entries'][0]['status'] = 'archived'
+    path.write_text(json.dumps(data), encoding='utf-8')
+    with pytest.raises(ValueError, match='批次损坏'):
+        batch_store.apply(batch.id)
+    assert batch_store.jobs.archive_view().load(job.id)

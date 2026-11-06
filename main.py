@@ -34,6 +34,7 @@ USAGE = """用法:
   comic_downloader [下载路径] archive show <任务ID> [页码]
   comic_downloader [下载路径] archive restore <任务ID>
   comic_downloader [下载路径] archive batch [find <关键词>]
+  comic_downloader [下载路径] archive batch restore [find <关键词>]
   comic_downloader [下载路径] archive batch list [页码]
   comic_downloader [下载路径] archive batch show <批次ID> [页码]
   comic_downloader [下载路径] archive batch apply/cancel <批次ID>
@@ -60,6 +61,7 @@ tasks find 按漫画名、源代码或 ID 查找；find 后所有词均为关键
 archive 仅归档已完成计划，可恢复，不改变漫画文件；find 按漫画名、源代码或 ID 查找归档。
 archive next / prev 仅用于交互会话并保留查找条件；直接子命令使用明确页码。
 archive batch 仅预览已完成任务；按固定批次 ID 执行 apply 或 cancel，show 可跨进程查看候选及结果。
+archive batch restore 仅预览已完成归档的批量恢复；确认后移回任务列表，不自动下载。
 退出码: 0 成功；1 执行/配置失败；2 参数错误；130 用户中断。
 """
 

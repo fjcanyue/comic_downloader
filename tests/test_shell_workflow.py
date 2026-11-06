@@ -535,6 +535,36 @@ def test_archive_batch_preview_pagination_apply_and_cancel_are_independent_of_br
     assert shell.last_command_ok and shell.job_store.load(jobs[0].id).state == 'completed'
 
 
+@pytest.mark.parametrize('width', [48, 80, 120])
+def test_batch_restore_shell_paginates_and_preserves_browsing(shell, width):
+    shell.console.width = width
+    jobs = make_archived_jobs(shell)
+    shell.onecmd('tasks find 不匹配')
+    shell.onecmd('archive find 另一条件')
+    task_query, archive_query = shell.task_query, shell.archive_query
+    shell.onecmd('archive batch restore find 归档 FIRST')
+    assert shell.last_command_ok
+    store = ArchiveBatchStore(shell.job_store)
+    batch_id = next(store.directory.glob('*.json')).stem
+    text = shell.console.file.getvalue()
+    assert '恢复候选预览' in text and '固定候选 23 项' in text
+    assert '归档 → 任务列表' in text
+    assert not shell.job_store.list_jobs()[0]
+    shell.onecmd(f'archive batch show {batch_id} 2')
+    assert shell.last_command_ok and '第 2/2 页' in shell.console.file.getvalue()
+    shell.onecmd(f'archive batch show {batch_id} 3')
+    assert not shell.last_command_ok
+    assert store.load(batch_id).state == 'ready'
+    shell.onecmd(f'archive batch apply {batch_id}')
+    assert shell.last_command_ok
+    assert {j.id for j in shell.job_store.list_jobs()[0]} == {j.id for j in jobs}
+    assert not shell.job_store.archive_view().list_jobs()[0]
+    assert shell.task_query == task_query and shell.archive_query == archive_query
+    shell.onecmd('archive batch restore')
+    assert shell.last_command_ok
+    assert '没有符合条件的已完成归档' in shell.console.file.getvalue()
+
+
 def test_archive_find_navigation_is_read_only_and_independent_of_tasks(shell):
     shell.onecmd('i https://first.test/comic')
     comic = shell.context.comic

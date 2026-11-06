@@ -170,6 +170,7 @@ uv run pyinstaller downloader.spec
 | `archive show <任务ID> [页码]` | 查看归档详情，每页 30 话 | `archive show a1b2c3d4 2` |
 | `archive restore <任务ID>` | 将归档计划恢复到任务列表 | `archive restore a1b2c3d4` |
 | `archive batch [find <关键词>]` | 预览已完成计划的批量归档候选，不移动任务 | `archive batch find 猎人 morui` |
+| `archive batch restore [find <关键词>]` | 预览已完成归档的批量恢复候选，不移动任务 | `archive batch restore find 猎人 morui` |
 | `archive batch list [页码]` | 查看已保存的批次历史 | `archive batch list` |
 | `archive batch show <批次ID> [页码]` | 查看固定候选及逐项结果 | `archive batch show <完整批次ID> 2` |
 | `archive batch apply/cancel <批次ID>` | 确认执行或取消尚未执行的批次 | `archive batch apply <完整批次ID>` |
@@ -487,6 +488,38 @@ archive batch cancel <批次ID>          取消尚未执行的批次
 
 ![批量归档逐项结果，演示数据](docs/archive-batch-result-100.svg)
 
+### 批量恢复归档
+
+归档数量较多时，可以先按漫画名、源代码或任务 ID 的多个关键词预览，再一次恢复到任务列表：
+
+```text
+archive batch restore find 猎人 morui
+archive batch show <完整批次ID> 2
+archive batch apply <完整批次ID>
+tasks completed
+```
+
+`archive batch restore` 不带查找条件时，预览当前保存路径下全部可读取的已完成归档。
+界面显示 **归档 → 任务列表**、保存路径、独立查找条件和固定候选数量；每页 20 项。
+`restore` 只创建预览，不立即移动任务；核对所有页后，使用预览给出的完整批次 ID 执行 `apply`。
+尚未执行的批次可用 `archive batch cancel <完整批次ID>` 取消。
+
+执行时逐项锁定并核对预览快照；内容变化、已被恢复、任务占用或目标同 ID 冲突会跳过并显示原因，
+写盘失败会记录失败，其他候选继续执行。预览后新归档的任务不会加入已有批次。
+恢复保留任务内容和完成状态，**不自动下载，也不修改漫画、图片或 ZIP 文件**。
+查找条件独立于 `tasks` 和 `archive` 当前浏览筛选，执行后保留这些浏览状态。
+
+退出后仍可用 `archive batch show <完整批次ID>` 查看候选和结果；`archive batch list` 区分归档与恢复批次。
+若执行中断，再次 `apply` 会核对已记录的中断项并继续剩余候选；无法明确核对的任务会跳过，需检查后重新预览。
+已结束批次再次 `apply` 只返回结果，不重复移动任务，即使之后又将该任务归档，也不会再次恢复它。
+
+新批次使用 v2 格式保存操作方向，当前版本仍可读取和执行旧版 v1 归档批次；旧版程序不能执行新批次。
+任务记录格式保持不变。以下界面使用演示数据，可运行 `uv run python docs/render_archive_find.py --restore` 重建：
+
+![批量恢复候选预览，48 列，演示数据](docs/restore-batch-preview-48.svg)
+
+![批量恢复逐项结果，演示数据](docs/restore-batch-result-100.svg)
+
 ### 动漫源概览
 
 在交互式 Shell 中输入 `sources`，或直接运行 `comic_downloader sources`，可以查看当前运行配置实际启用的动漫源。概览会展示：
@@ -610,12 +643,29 @@ UTC 时间戳，便于脚本或故障排查读取。该检查只验证首页的 
 修改组件 Ruff 和格式检查通过，项目 Pyright 为 0 errors / 0 warnings；48 列预览与 100 列结果图已检查。
 `uv run python docs/render_archive_find.py --batch` 可重建示例；保留现有任务格式和单项归档/恢复语义，不新增依赖。
 
-后续优先方向：
+2026-11-06 基于 `bdc8228` 完成**批量恢复归档及双向批次反馈**：
 
-- **长目录定位（本轮完成）**：章节多词查找、匹配循环和卷/话序号跳转已接通；后续可按实际使用反馈评估分组折叠与不连续多选。
-- **历史任务管理扩展**：已完成批量归档候选预览、逐项复核和结果保存；后续评估批次历史的保留期限、显式清理及批量恢复，继续区分计划元数据与漫画文件。
-- **源解析回归扩展**：已有合成目录样本不代表线上站点当前可用；后续积累有采集日期和来源记录的真实脱敏搜索/详情/章节快照，并扩展图片解析回归。
-- **搜索范围扩展**：依据各源分页协议按需加载网站后续搜索页，并设计去重、限速与稳定序号策略。
+| 维度 | 代码依据与问题 | 本轮结果 |
+| --- | --- | --- |
+| 功能完整性 | `JobStore.restore` 仅支持单任务，批量归档之后需要逐项恢复 | 新增 `archive batch restore [find <关键词>]`；复用持久化预览、确认、取消、逐项结果和历史入口 |
+| UI/UE | `TerminalPresenter.archive_batch` 原有标题和成功状态固定为归档，不能区分移动方向 | 显示归档/恢复方向、对应候选标题与结果；历史显示操作类型，空列表与取消后提示对应入口 |
+| 操作性 | `Shell._archive_batch` 已有独立查询，适合沿用一致的操作流程 | 交互与直接 CLI 共用语法，支持 20 项分页；保持当前任务/归档浏览条件，40 列帮助与 48/80/120 列反馈可读 |
+| 数据与恢复 | `_move_record` 已有任务锁和内容快照检查，批次日志已有中断核对 | 为恢复接通锁内快照检查；目标冲突不覆盖，中断项保守核对，已结束批次不重放；漫画文件保持原样 |
+| 兼容性 | 旧批次未记录操作方向，错误默认可能导致反向移动 | 新建 v2 批次显式保存并校验方向；缺失方向或结果与方向不一致时拒绝执行，继续支持 v1 归档批次 |
+
+全量离线回归 **696 passed**（基线 664，新增 32 项）；修改组件 Ruff 检查和格式检查通过，
+项目 Pyright 为 **0 errors / 0 warnings**。验证包含真实文件移动和字节保持、跨进程 CLI、锁内变化、同 ID 冲突、锁占用、写盘失败、取消、
+中断前后恢复、再次归档后不重放、损坏记录隔离、旧批次兼容，以及窄屏与分页交互。
+48 列预览和 100 列结果图已实际渲染检查，数据为演示样例；本轮未验证线上漫画源可用性。
+
+后续按以下优先级继续迭代；这些是后续工作，不属于本轮已完成功能：
+
+| 优先级 | 方向与当前依据 | 开发内容及验收重点 |
+| --- | --- | --- |
+| P1 | 源解析回归：`tests/fixtures/sources/README.md` 明确现有目录样本为合成数据 | 补真实脱敏搜索/详情/章节快照，记录采集日期和来源；覆盖图片解析、空结果与结构变更，区分离线回归和在线检查 |
+| P2 | 搜索范围：`ConfigurableSearchMixin._build_search_url` 与各源 `search` 仍基于单次关键词请求，Shell 分页仅浏览缓存 | 按源协议实现按需加载下一页，补充去重、请求限速、失败重试和稳定原序号；翻页后原有下载选择不能漂移 |
+| P3 | 长目录 UI/操作性：章节查找和跳转已接通，`Detail.targets` 保存完整目录行映射 | 评估分组折叠和不连续多选；保留查找定位、范围起点、刷新后的目录复核及 48 列键盘可用性 |
+| P4 | 历史规模：`ArchiveBatchStore.list_batches` 当前读取完整批次和逐项结果后再分页 | 引入轻量历史摘要；测量大量批次读取开销，再设计保留期限与显式清理预览，不能误删任务记录或漫画文件 |
 
 开发验证：`uv run pytest -o addopts= -q`；类型检查在 Windows 可使用
 `uv run pyright --pythonpath .venv\Scripts\python.exe`，确保检查器解析到项目虚拟环境。

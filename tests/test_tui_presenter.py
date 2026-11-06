@@ -6,6 +6,7 @@ import pytest
 from rich.cells import cell_len
 from rich.console import Console
 
+from downloader.download.archive_batch import ArchiveBatch, ArchiveEntry
 from downloader.download.job_archive import ArchiveQuery
 from downloader.download.job_browser import JobSummary, TaskQuery
 from downloader.download.jobs import DownloadJob, JobVolume
@@ -19,6 +20,36 @@ from downloader.models import (
     VolumeDownloadResult,
 )
 from downloader.tui import RetryTaskView, SourceStat, SourceView, TerminalPresenter
+
+
+@pytest.mark.parametrize('width', [48, 80, 120])
+@pytest.mark.parametrize('state', ['ready', 'finished', 'cancelled'])
+def test_restore_batch_feedback_is_literal_bounded_and_directional(width, state):
+    output = StringIO()
+    presenter = TerminalPresenter(Console(file=output, width=width, color_system=None))
+    entry = ArchiveEntry(
+        JobSummary('a' * 32, '[red]漫画[/]', 'test', 'completed', '', 1, 0),
+        'b' * 64,
+        status='restored' if state == 'finished' else 'pending',
+    )
+    batch = ArchiveBatch(
+        'c' * 32, 'D:/Comics', '[blue]漫画', '', [entry], state=state, operation='restore'
+    )
+    presenter.archive_batch(batch)
+    presenter.archive_batches([batch])
+    text = output.getvalue()
+    plain = ''.join(text.replace('│', '').split())
+    assert '[red]漫画[/]' in plain and '[blue]漫画' in plain
+    assert '归档→任务列表' in plain and '批量恢复' in plain
+    assert max(cell_len(line) for line in text.splitlines()) <= width
+    if state == 'ready':
+        assert '预览未移动任何任务' in plain
+        assert f'archivebatchapply{batch.id}' in plain
+        assert f'archivebatchcancel{batch.id}' in plain
+    elif state == 'finished':
+        assert '已恢复1' in plain and '恢复不会自动下载' in plain
+    else:
+        assert 'archivebatchrestore可重新预览' in plain
 
 
 @pytest.mark.parametrize('width', [40, 80, 120])

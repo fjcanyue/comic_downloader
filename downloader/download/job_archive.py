@@ -10,6 +10,7 @@ ARCHIVE_USAGE = (
     'archive <任务ID> 归档已完成计划；archive show <任务ID> [页码] 查看归档；'
     'archive restore <任务ID> 恢复；archive next / prev 保留条件翻页；'
     'archive batch [find <关键词>] 预览批量归档；'
+    'archive batch restore [find <关键词>] 预览批量恢复；'
     'archive batch list [页码] 查看批次历史；'
     'archive batch show/apply/cancel <批次ID> 查看/执行/取消批次。'
 )
@@ -64,6 +65,12 @@ def _parse_batch_query(args: list[str]) -> ArchiveQuery:
     if not args:
         return ArchiveQuery('batch-create')
     action = args[0].casefold()
+    if action == 'restore':
+        if len(args) == 1:
+            return ArchiveQuery('batch-restore')
+        if args[1].casefold() == 'find' and ' '.join(args[2:]).strip():
+            return ArchiveQuery('batch-restore', keyword=' '.join(args[2:]).strip())
+        raise ValueError('格式：archive batch restore [find <关键词>]，仅预览，不移动任务。')
     if action == 'list':
         pages = args[1:]
         if len(pages) > 1 or (pages and not re.fullmatch(r'[1-9][0-9]{0,8}', pages[0])):
