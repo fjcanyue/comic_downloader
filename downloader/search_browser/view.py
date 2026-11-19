@@ -35,6 +35,7 @@ from downloader.search_browser.state import (
     CatalogTarget,
     Detail,
     DownloadAction,
+    NextPageAction,
     plain,
 )
 
@@ -74,7 +75,7 @@ class SearchBrowser:
         self.confirm_return_focus = 'results'
         self.closing = False
         self.interrupted = False
-        self.result: DownloadAction | None = None
+        self.result: DownloadAction | NextPageAction | None = None
         self.placeholder_row = 0
         self.results = Window(
             ResultsControl(state),
@@ -171,7 +172,12 @@ class SearchBrowser:
                         self.catalog_input,
                         Condition(lambda: self.editing and self.edit_mode != 'filter'),
                     ),
-                    Window(FormattedTextControl(self._message), height=1),
+                    Window(
+                        FormattedTextControl(self._message),
+                        height=Dimension(min=1, max=2),
+                        dont_extend_height=True,
+                        wrap_lines=True,
+                    ),
                     Window(
                         FormattedTextControl(self._footer),
                         height=lambda: 3 if self._catalog_footer() else 2,
@@ -188,7 +194,7 @@ class SearchBrowser:
                 )
             ],
         )
-        self.app: Application[DownloadAction | None] = Application(
+        self.app: Application[DownloadAction | NextPageAction | None] = Application(
             layout=Layout(self.body, focused_element=self._focus_window()),
             key_bindings=self._bindings(),
             full_screen=True,
@@ -232,7 +238,17 @@ class SearchBrowser:
         return f' 搜索：{plain(self.state.keyword)} · {position}/{count} 项 · 原序号保持不变'
 
     def _results_title(self) -> str:
-        return ('> ' if self.state.focus == 'results' else '') + '搜索结果'
+        if self.state.focus != 'results':
+            return '搜索结果'
+        title = '> 搜索结果'
+        if any(self.state.page_urls.values()) and not (
+            self.editing or self.closing or self.confirmation
+        ):
+            action = self.state.next_page_action()
+            if action:
+                return f'{title} · m 加载 {plain(action.source)} 下一页'
+            return f'{title} · 选中分页来源后按 m'
+        return title
 
     def _detail_title(self) -> str:
         title = '下载摘要' if self.state.show_report else '漫画详情'
@@ -262,15 +278,25 @@ class SearchBrowser:
                 'filter': 'Enter 应用筛选 · Esc 取消编辑（d/q 在此处仅输入文字）',
             }[self.edit_mode]
         size = self.app.output.get_size()
+        jump_hint = (
+            'j 跳到新增 · '
+            if self.state.focus == 'results' and self.state.first_new_position() is not None
+            else ''
+        )
         if size.columns < MIN_COLUMNS or size.rows < MIN_ROWS:
-            return '窗口较小：Tab 切换单面板 · Enter 详情 · Esc 返回；放大可分栏/下载'
+            return f'{jump_hint}窗口较小：Tab 切换单面板 · Enter 详情 · Esc 返回；放大可分栏/下载'
         if self.state.focus == 'details' and not self.state.show_report:
             return (
                 'f 查话 · n/N 切换 · g 跳转 · v 下载\n←/→ 收展卷 · z/Z 全部收展\n空格 起点 · Tab 切区 · Esc/q 返回'
                 if size.columns < COMPACT_COLUMNS
                 else '↑↓/翻页 移动 · ←/→ 收展卷 · z/Z 全部收展\nf 查话 · n/N 下/上项 · g 跳转 · 空格 起点 · v 下载\nTab 切区 · r 刷新 · Esc/q 返回'
             )
-        return '↑↓ 选择 / PgUp PgDn 翻屏 · Enter 详情 · d 整本 · v 卷/话\nTab 切区 · / 筛选 · r 刷新 · l 下载摘要 · Esc/q 返回'
+        navigation = (
+            '↑↓ 选择 · Enter 详情 · d 整本\n/ 筛选 · Tab 切区 · l 摘要 · Esc/q 返回'
+            if size.columns < COMPACT_COLUMNS
+            else '↑↓ 选择 / PgUp PgDn 翻屏 · Enter 详情 · d 整本 · v 卷/话\nTab 切区 · / 筛选 · r 刷新 · l 下载摘要 · Esc/q 返回'
+        )
+        return jump_hint + navigation
 
     def _current_detail(self) -> Detail | None:
         item = self.state.current
@@ -637,7 +663,9 @@ class SearchBrowser:
         self._focus('results')
         return True
 
-    def _finish(self, action: DownloadAction | None = None, *, interrupted: bool = False) -> None:
+    def _finish(
+        self, action: DownloadAction | NextPageAction | None = None, *, interrupted: bool = False
+    ) -> None:
         self.interrupted = self.interrupted or interrupted
         if not self.closing:
             self._remember_detail_row()
@@ -686,6 +714,27 @@ class SearchBrowser:
         @keys.add('enter', filter=normal)
         def detail(event: KeyPressEvent) -> None:
             self._load_detail()
+
+        results_focus = normal & Condition(lambda: self.state.focus == 'results')
+
+        @keys.add('m', filter=results_focus)
+        def more(event: KeyPressEvent) -> None:
+            action = self.state.next_page_action()
+            if action:
+                self._finish(action)
+            elif any(self.state.page_urls.values()):
+                self.state.message = '请选中要加载的分页来源，或回到命令行使用 more。'
+            else:
+                self.state.message = '当前搜索没有可加载的网站下一页。'
+
+        @keys.add('j', filter=results_focus)
+        def jump_to_new(event: KeyPressEvent) -> None:
+            position = self.state.first_new_position()
+            if position is None:
+                self.state.message = '当前列表没有匹配的本页新增结果。'
+                return
+            self._navigate(position - self.state.selected)
+            self.state.message = '已定位本页首条匹配的新增结果。'
 
         @keys.add('r', filter=normal)
         def refresh(event: KeyPressEvent) -> None:
@@ -839,7 +888,7 @@ class SearchBrowser:
             self.state.details.pop(key, None)
         self.tokens.clear()
 
-    def run(self) -> DownloadAction | None:
+    def run(self) -> DownloadAction | NextPageAction | None:
         try:
             with patch_stdout(raw=True):
                 return self.app.run(pre_run=self.start)

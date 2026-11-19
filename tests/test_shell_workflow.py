@@ -6,6 +6,9 @@ from io import StringIO
 
 import main as main_module
 import pytest
+from prompt_toolkit.application import create_app_session
+from prompt_toolkit.input import create_pipe_input
+from prompt_toolkit.output import DummyOutput
 from rich.console import Console
 
 from downloader.browser.manager import DriverManager
@@ -21,6 +24,7 @@ from downloader.search_browser.state import (
     DownloadAction,
     SearchItem,
 )
+from downloader.search_browser.view import SearchBrowser
 from downloader.shell import Shell, url_belongs_to_source
 from downloader.sources.metadata import SourceVerification
 from downloader.sources.profiles import SourceBinding, SourceProfile
@@ -1300,6 +1304,59 @@ def test_more_partial_retry_deduplicates_and_only_advances_after_complete_page(s
     assert cursor.pages == 2 and cursor.next_url == 'https://first.test/page3'
 
 
+def test_browse_key_retries_partial_page_and_preserves_live_filter_and_selection(
+    shell, monkeypatch
+):
+    prepare_search_paging(shell, monkeypatch)
+    shell.onecmd('i 1')
+    monkeypatch.setattr('downloader.shell.SEARCH_PAGE_INTERVAL', 600)
+    original_comic = shell.context.comic
+    attempts = []
+    messages = []
+    cached = Detail(['已加载的目录'], original_comic, range_start=(1, 2))
+
+    def page(source, keyword, url):
+        attempts.append(url)
+        results = make_search_results(source, 27)
+        if len(attempts) == 1:
+            source.search_error = '条目缺失'
+            return results[25:26]
+        return results[25:]
+
+    monkeypatch.setattr(WorkflowSource, 'search_next_page', page)
+    monkeypatch.setattr(shell, '_browser_available', lambda: True)
+
+    def terminal(state, worker, path, overwrite):
+        messages.append(state.message)
+        turn = len(messages)
+        if turn == 1:
+            state.remember(state.items[24], cached)
+            keys = '/first-02\r\x1b[Fmq'  # Highlight first-025, then fetch.
+        else:
+            assert state.current == state.items[24] and state.details[state.current.key] is cached
+            assert state.filter_text == 'first-02'
+            if turn == 3:
+                shell.search_pages['first'].last_attempt = float('-inf')
+            keys = 'mq' if turn < 4 else 'mjq'
+        browser = SearchBrowser(state, worker, path, overwrite, input=pipe, output=DummyOutput())
+        pipe.send_text(keys)
+        return browser
+
+    with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
+        monkeypatch.setattr('downloader.shell.SearchBrowser', terminal)
+        shell.onecmd('browse')
+
+    assert attempts == ['https://first.test/page2'] * 2
+    assert '本页不完整' in messages[1] and '条目缺失' in messages[1]
+    assert '请等待' in messages[2]
+    assert '已到末页' in messages[3] and '新增 1 条（#52）' in messages[3]
+    assert '筛选命中 1 条' in messages[3]
+    assert shell.browser_state.current.index == 51
+    assert shell.search_result_indices == [*range(19, 25), 50, 51]
+    assert shell.context.comic is original_comic and cached.range_start == (1, 2)
+    assert not shell.job_store.directory.exists()
+
+
 def test_more_failure_and_interrupt_preserve_cursor_results_and_browser(shell, monkeypatch):
     prepare_search_paging(shell, monkeypatch)
     original = list(shell.context.searched_results)
@@ -1323,6 +1380,39 @@ def test_more_failure_and_interrupt_preserve_cursor_results_and_browser(shell, m
         shell.onecmd('more first')
     assert cursor.pages == 1 and cursor.next_url == 'https://first.test/page2'
     assert shell.context.searched_results == original
+
+
+def test_browser_discards_stale_page_action_and_returns_to_list_on_interrupt(shell, monkeypatch):
+    prepare_search_paging(shell, monkeypatch)
+    original = list(shell.context.searched_results)
+    calls = []
+    messages = []
+
+    def interrupt(source, keyword, url):
+        calls.append(url)
+        raise KeyboardInterrupt
+
+    class Browser:
+        def __init__(self, state, *args):
+            self.state = state
+
+        def run(self):
+            messages.append(self.state.message)
+            action = self.state.next_page_action()
+            if len(messages) == 1:
+                return replace(action, url='old-page')
+            return action if len(messages) == 2 else None
+
+    monkeypatch.setattr(WorkflowSource, 'search_next_page', interrupt)
+    monkeypatch.setattr(shell, '_browser_available', lambda: True)
+    monkeypatch.setattr('downloader.shell.SearchBrowser', Browser)
+    shell.onecmd('browse')
+
+    assert calls == ['https://first.test/page2']
+    assert '分页已变更' in messages[1] and '已中断' in messages[2]
+    assert shell.search_pages['first'].next_url == calls[0]
+    assert shell.context.searched_results == original
+    assert not shell.last_command_ok
 
 
 def test_more_requires_search_or_supported_source_and_new_search_resets_cursors(shell, monkeypatch):

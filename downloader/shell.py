@@ -40,7 +40,13 @@ from downloader.models import (
 )
 from downloader.runtime_config import RuntimeConfig
 from downloader.search_browser.loader import DetailLoader, PreviewWorker
-from downloader.search_browser.state import BrowserState, DownloadAction, SearchItem, plain
+from downloader.search_browser.state import (
+    BrowserState,
+    DownloadAction,
+    NextPageAction,
+    SearchItem,
+    plain,
+)
 from downloader.search_browser.view import TERMINAL_ERRORS, SearchBrowser
 from downloader.search_paging import SEARCH_PAGE_INTERVAL, SearchPageState, append_unique_results
 from downloader.sources import load_source_bindings
@@ -1309,10 +1315,14 @@ class Shell(cmd.Cmd):
             self.last_command_ok = True
             return
         name = self._resolve_source_selection(selection)
-        cursor = self.search_pages.get(name or '')
-        if name is None or cursor is None:
+        if name is None or name not in self.search_pages:
             self.presenter.warn('该来源没有可用的搜索分页状态；输入 more 查看，或重新搜索。')
             return
+        self._load_search_page(name, browsing=False)
+
+    def _load_search_page(self, name: str, *, browsing: bool) -> None:
+        cursor = self.search_pages[name]
+        self.last_command_ok = False
         url = cursor.next_url
         if url is None:
             self.presenter.info('该来源未提供下一页，无需再次请求。')
@@ -1320,7 +1330,11 @@ class Shell(cmd.Cmd):
             return
         remaining = SEARCH_PAGE_INTERVAL - (time.perf_counter() - cursor.last_attempt)
         if remaining > 0:
-            self.presenter.warn(f'请等待 {remaining:.1f} 秒后再加载该来源，避免连续请求。')
+            message = f'请等待 {remaining:.1f} 秒后再加载该来源。'
+            if browsing and self.browser_state:
+                self.browser_state.message = message
+            else:
+                self.presenter.warn(message)
             return
         binding = self.source_bindings[name]
         uses_driver = binding.profile.uses_driver_for_search()
@@ -1340,6 +1354,11 @@ class Shell(cmd.Cmd):
                 outcome = _execute_search_task(
                     task, self.search_keyword, None, self.search_driver_lock
                 )
+            except KeyboardInterrupt:
+                if not browsing or self.browser_state is None:
+                    raise
+                self.browser_state.message = '分页请求已中断，可按 m 重试。'
+                return
             finally:
                 cursor.last_attempt = time.perf_counter()
         added = append_unique_results(self.context.searched_results, outcome.results)
@@ -1348,7 +1367,13 @@ class Shell(cmd.Cmd):
         self.search_outcomes = [
             outcome if old.source_name == name else old for old in self.search_outcomes
         ]
-        self._refresh_search_view()
+        state = self._refresh_search_view(added)
+        self.last_command_ok = outcome.ok
+        state.message = state.page_feedback(
+            outcome, added, cursor.pages, has_next=cursor.next_url is not None
+        )
+        if browsing:
+            return
         self.presenter.search_report([outcome])
         self.presenter.info(
             f'本页返回 {len(outcome.results)} 条，新增 {added} 条；原序号保持不变。'
@@ -1362,9 +1387,8 @@ class Shell(cmd.Cmd):
             self.presenter.warn(f'本页未完整加载，已保留可用结果；more {name} 重试同一页。')
         self._show_search_pages()
         self._print_search_table(self.search_keyword, self.search_duration, page=self.search_page)
-        self.last_command_ok = outcome.ok
 
-    def _refresh_search_view(self) -> None:
+    def _refresh_search_view(self, added: int) -> BrowserState:
         # Appending does not invalidate existing download identities or their cached details.
         state = self.browser_state
         if state is None:
@@ -1386,8 +1410,10 @@ class Shell(cmd.Cmd):
             )
             state.apply_filter(self.search_filter)
             state.list_scroll, state.show_report = scroll, report
+        state.appended_from = len(state.items) - added if added else None
         self.browser_state = state
         self.search_result_indices = list(state.indices) if self.search_filter else None
+        return state
 
     def _browser_available(self) -> bool:
         return bool(
@@ -1399,7 +1425,7 @@ class Shell(cmd.Cmd):
         )
 
     def do_browse(self, arg):
-        """browse：重新打开最近搜索的键盘浏览界面。↑↓ 选择，Enter 同屏详情，d 确认整本下载，Tab 切区后 v 确认所选卷/话下载；空格标记范围起点，移动到同卷终点后 v 下载连续多话，再按空格清除。详情区 f 按卷名/话名查找，n/N 循环匹配，g 输入卷序号和话序号跳转（如 1 80）；定位保留范围起点。/ 筛选漫画，l 下载摘要，Esc/q 返回。非终端或 --plain 下使用 i/d/v 文本命令。"""
+        """browse：重新打开最近搜索的键盘浏览界面。↑↓ 选择，Enter 同屏详情。结果区 m 加载标题所示来源的下一页，j 跳到首条匹配的新增结果。d 确认整本下载，Tab 切区后 v 确认所选卷/话下载；空格标记范围起点，移动到同卷终点后 v 下载连续多话，再按空格清除。详情区 f 按卷名/话名查找，n/N 循环匹配，g 输入卷序号和话序号跳转（如 1 80）；定位保留范围起点。/ 筛选漫画，l 下载摘要，Esc/q 返回。非终端或 --plain 下使用 i/d/v 文本命令。"""
         if arg.strip():
             self.presenter.warn('browse 不接受参数；请先使用 s <关键词> 搜索。')
             self.last_command_ok = False
@@ -1423,6 +1449,7 @@ class Shell(cmd.Cmd):
             )
         state = self.browser_state
         while True:
+            state.page_urls = {name: cursor.next_url for name, cursor in self.search_pages.items()}
             loader = DetailLoader(
                 self.all_source_bindings, self.context.output_path, self.context.create_http_session
             )
@@ -1439,7 +1466,20 @@ class Shell(cmd.Cmd):
                 break
             if action is None:
                 break
-            self._browser_download(action, state)
+            if isinstance(action, NextPageAction):
+                cursor = self.search_pages.get(action.source)
+                if (
+                    action.generation != self.search_generation
+                    or not cursor
+                    or cursor.next_url != action.url
+                ):
+                    state.message = '搜索分页已变更，请重新选择。'
+                    self.last_command_ok = False
+                    continue
+                self.search_filter = state.filter_text
+                self._load_search_page(action.source, browsing=True)
+            else:
+                self._browser_download(action, state)
         self.search_filter = state.filter_text
         self.search_result_indices = list(state.indices) if state.filter_text else None
         self.search_page = 1

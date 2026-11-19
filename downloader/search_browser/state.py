@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from bisect import bisect_left
 from collections import OrderedDict
 from dataclasses import dataclass, field
 
-from downloader.models import Comic
+from downloader.models import Comic, SearchOutcome
 
 DETAIL_CACHE_SIZE = 20
 
@@ -105,6 +106,13 @@ class DownloadAction:
             return False
         comic = comics[self.item.index]
         return (comic.source or '', comic.url or '') == self.item.key
+
+
+@dataclass(frozen=True)
+class NextPageAction:
+    generation: int
+    source: str
+    url: str
 
 
 @dataclass
@@ -212,6 +220,8 @@ class BrowserState:
     report_row: int = 0
     show_report: bool = False
     details: OrderedDict[tuple[str, str], Detail] = field(default_factory=OrderedDict)
+    page_urls: dict[str, str | None] = field(default_factory=dict)
+    appended_from: int | None = None
 
     def __post_init__(self) -> None:
         self.apply_filter(self.filter_text)
@@ -222,6 +232,8 @@ class BrowserState:
 
     def apply_filter(self, text: str) -> None:
         old = self.current
+        if text != self.filter_text:
+            self.message = ''
         terms = text.casefold().split()
         self.filter_text = text
         self.indices = [
@@ -251,3 +263,38 @@ class BrowserState:
     def action(self) -> DownloadAction | None:
         item = self.current
         return DownloadAction(self.generation, item) if item and item.source and item.url else None
+
+    def next_page_action(self) -> NextPageAction | None:
+        item = self.current
+        if item and item.source in self.page_urls:
+            source = item.source
+        elif len(self.page_urls) == 1:
+            source = next(iter(self.page_urls))
+        else:
+            return None
+        url = self.page_urls[source]
+        return NextPageAction(self.generation, source, url) if url else None
+
+    def page_feedback(
+        self, outcome: SearchOutcome, added: int, pages: int, *, has_next: bool
+    ) -> str:
+        end = len(self.items)
+        summary = f'新增 {added} 条'
+        if added == 1:
+            summary += f'（#{end}）'
+        elif added:
+            summary += f'（#{end - added + 1}–{end}）'
+        if self.filter_text:
+            visible = len(self.indices) - bisect_left(self.indices, end - added)
+            summary += f' · 筛选命中 {visible} 条'
+        if not outcome.ok:
+            status = '本页不完整，m 重试' if has_next else '已停止翻页'
+            return f'{status} · {summary} · {plain(outcome.error_message)}'
+        status = f'已加载第 {pages} 页' if has_next else '已到末页'
+        return f'{status} · {summary}'
+
+    def first_new_position(self) -> int | None:
+        if self.appended_from is None:
+            return None
+        position = bisect_left(self.indices, self.appended_from)
+        return position if position < len(self.indices) else None

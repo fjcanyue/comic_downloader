@@ -16,6 +16,7 @@ from downloader.search_browser.state import (
     CatalogTarget,
     Detail,
     DownloadAction,
+    NextPageAction,
     SearchItem,
     detail_lines,
 )
@@ -97,6 +98,64 @@ def test_filter_preserves_original_number_and_download_identity():
     assert state.current is None and state.action() is None
     state.apply_filter('')
     assert len(state.indices) == 30
+
+
+@pytest.mark.parametrize('width', [48, 80, 120])
+def test_website_page_key_shows_named_source_and_works_with_zero_matches(width):
+    state = BrowserState(items(), '漫画', 3, page_urls={'manhuagui': 'page2'})
+
+    async def scenario(browser, pipe, run):
+        def title_drawn():
+            screen = browser.app.renderer.last_rendered_screen
+            return screen and any(
+                'm 加载 manhuagui 下一页' in ''.join(row[x].char for x in sorted(row))
+                for row in screen.data_buffer.values()
+            )
+
+        await until(title_drawn)
+        pipe.send_text('/missing\r')
+        await until(lambda: state.current is None)
+        assert not run.done() and state.filter_text == 'missing'
+        pipe.send_text('mm')
+        assert await asyncio.wait_for(run, 3) == NextPageAction(3, 'manhuagui', 'page2')
+
+    asyncio.run(exercise(scenario, state=state, output=ScreenOutput(width, 24)))
+
+
+def test_page_key_does_not_load_from_detail_confirmation_or_exhausted_source():
+    state = BrowserState(items(), '漫画', 1, page_urls={'fixture': None, 'other': 'page2'})
+
+    async def scenario(browser, pipe, run):
+        pipe.send_text('m')
+        await until(lambda: '选中' in state.message)
+        pipe.send_text('\tm')
+        await until(lambda: state.focus == 'details')
+        state.page_urls['fixture'] = 'page3'
+        pipe.send_text('mdm')
+        await until(lambda: browser.confirmation is not None)
+        pipe.send_text('\r\tm')
+        assert await asyncio.wait_for(run, 3) == NextPageAction(1, 'fixture', 'page3')
+
+    asyncio.run(exercise(scenario, state=state))
+
+
+def test_jump_to_new_recomputes_matches_after_filter_changes_without_fetching():
+    state = BrowserState(items(30), '漫画', 1, appended_from=20)
+
+    async def scenario(browser, pipe, run):
+        pipe.send_text('j')
+        await until(lambda: state.current == state.items[20])
+        pipe.send_text('/漫画1\rj')
+        await until(lambda: '没有匹配' in state.message)
+        assert state.current == state.items[1]
+        assert '跳到新增' not in browser._footer()
+        pipe.send_text('/\x15漫画23\rj')  # Ctrl-U replaces the existing filter.
+        await until(lambda: state.current == state.items[23])
+        assert '跳到新增' in browser._footer() and browser.worker.thread is None
+        pipe.send_text('q')
+        assert await asyncio.wait_for(run, 3) is None
+
+    asyncio.run(exercise(scenario, state=state, output=ScreenOutput(48, 24)))
 
 
 def test_detail_cache_is_bounded_and_keeps_full_catalog_warnings_literal():
