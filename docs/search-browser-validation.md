@@ -36,13 +36,8 @@ Windows 11、本地 Python 3.14.2 虚拟环境：
 Enter 详情、d 弹框、默认取消及 Tab 后确认；返回正确原序号，退出后工作线程停止，终端恢复。
 最终布局调整后已再次执行此流程。
 
-使用生产界面渲染生成下列 SVG，并通过本机 Chrome 截图检查：
-
-- [左右分栏](search-browser-wide.svg)
-- [上下分栏](search-browser-narrow.svg)
-- [整本下载确认](search-browser-confirm.svg)
-
-可执行 `python docs/render_search_browser.py` 重新生成，数据为演示数据，不请求漫画网站。
+界面布局曾通过生产界面渲染的 SVG 在本机 Chrome 中检查；可执行 `python docs/render_search_browser.py`
+重新生成（数据为演示数据，不请求漫画网站）。
 
 CloakBrowser 适配层使用本机 Chrome 加载本地 HTTP 测试页成功；预览驱动创建与销毁记录在同一
 工作线程，退出后工作线程停止。这里验证的是实际浏览器适配和生命周期，不代表默认下载的
@@ -82,10 +77,7 @@ Windows 真实控制台（80×24）复测：进入详情区，选中卷名后 v 
 向下选中第 5 话后 v 显示 `v 1 5 5`，Tab 后确认返回相同目标，工作线程停止且终端恢复。
 使用现有 spec 重新打包成功，打包程序的 `--help`、`sources` 和 `--plain` 后输入 `q` 均退出码 0。
 
-界面预览由生产 UI 使用演示数据渲染：
-
-- [详情区高亮](search-browser-chapter.svg)
-- [单话下载确认](search-browser-chapter-confirm.svg)
+界面预览由生产 UI 使用演示数据渲染并人工检查。
 
 本次改动不涉及浏览器驱动和网络加载实现；前述 SeleniumBase 真机验证限制仍适用。
 
@@ -116,6 +108,3 @@ Shift+Tab 切换，连续三轮输入最终得到 `browse`、`sources`、`q`，�
 最终帮助文案更新后相关测试 **93 passed**；使用现有 spec 打包成功，产物 `--help`、`sources`、
 `--plain` 输入 `q` 均退出码 0，标准错误为空。
 详见[代码分析和验证范围](ideation/2026-10-29-chapter-range.md)。
-
-生产 UI 演示图：[120 列](search-browser-range-120.svg)、[80 列](search-browser-range-80.svg)、
-[48 列](search-browser-range-48.svg)、[范围确认](search-browser-range-80-confirm.svg)。

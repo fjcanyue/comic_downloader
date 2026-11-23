@@ -55,8 +55,6 @@ archive
 查找文字使用 Rich `Text`，`[red]` 等输入不会被当作样式解释。导航随运行模式变化：交互模式
 提供 `archive next/prev`，直接 CLI 提供 `archive list 2 find <关键词>`。
 
-![归档查找演示](../archive-find.svg)
-
 预览使用合成数据，仅展示 3 条样例行，查询总数用于演示分页，不代表真实下载记录。
 可运行 `python docs/render_archive_find.py` 重新生成 SVG 并查看相应终端文本。
 
